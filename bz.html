@@ -116,6 +116,27 @@ tr[data-verdict="behind"] .bz-verdict .bz-glyph { color:#ec835a; }
 .bz-about a { color:#3987e5; }
 .bz-table-wrap { overflow-x:auto; }
 
+/* ── the stage: Bz at the planet ──────────────────────────────────────── */
+.bz-stage { margin-bottom:18px; }
+.bz-stage-wrap { position:relative; border-radius:8px; overflow:hidden; background:#060912; border:1px solid #151b2a; }
+#bz-planet { display:block; width:100%; height:300px; touch-action:pan-y; }
+.bz-read { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px 18px; margin-top:12px; }
+.bz-read div { border-left:2px solid #232a3a; padding-left:10px; min-width:0; }
+.bz-read dt { font-size:.74rem; color:#898781; }
+.bz-read dd { font-size:.98rem; color:#f0efec; font-variant-numeric:tabular-nums; margin-top:2px; }
+.bz-read dd small { display:block; font-size:.76rem; color:#c3c2b7; margin-top:1px; }
+.bz-read div[data-kind="none"] dd, .bz-read div[data-kind="down"] dd { font-size:.84rem; color:#c3c2b7; }
+.bz-read div[data-kind="down"] { border-left-color:#fab219; }
+.bz-arrowkey { display:flex; flex-wrap:wrap; gap:5px 16px; font-size:.76rem; color:#c3c2b7; margin-top:10px; }
+.bz-arrowkey b { font-weight:600; }
+.bz-fine { font-size:.76rem; color:#898781; margin-top:8px; max-width:110ch; }
+.bz-outlook { margin-top:14px; padding-top:12px; border-top:1px solid #151b2a; position:relative; }
+.bz-outlook[hidden] { display:none; }
+.bz-outlook h3 { font-size:.86rem; font-weight:600; color:#f0efec; }
+.bz-outlook h3 span { color:#898781; font-weight:400; }
+@media (max-width: 980px) { .bz-read { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .bz-read { grid-template-columns:minmax(0, 1fr); } }
+
 @media (max-width: 980px) { .bz-grid { grid-template-columns:minmax(0, 1fr); } .bz-status { margin-left:0; width:100%; } }
 @media (max-width: 560px) {
     .bz-rung { grid-template-columns:minmax(0, 1fr) auto; }
@@ -135,6 +156,30 @@ tr[data-verdict="behind"] .bz-verdict .bz-glyph { color:#ec835a; }
         <p>The Sun's north–south field and the magnetic flux it drives, at every altitude from the L1 spacecraft to the ground.</p>
         <div id="bz-status" class="bz-status" data-level="wait" role="status" aria-live="polite"><span class="bz-status-text">Loading the column…</span><span id="bz-updated"></span></div>
     </header>
+
+    <section class="bz-card bz-stage" aria-labelledby="bz-h-stage">
+        <h2 id="bz-h-stage">Bz at the planet, right now</h2>
+        <p class="bz-lede">A cut through Earth from noon to midnight, Sun on the left. Each arrow is one minute of wind an L1 spacecraft has already measured, drawn where that wind is at this moment on its way in. Up is north, down is south — south is what opens the magnetosphere.</p>
+        <div class="bz-stage-wrap">
+            <canvas id="bz-planet" role="img" aria-label="Diagram of the solar wind's north–south field between the L1 spacecraft and Earth: measured wind in transit, the bow shock, the magnetopause, and the GOES satellites. The same values are in the list below and in the ladder."></canvas>
+            <div id="bz-planet-tip" class="bz-tip" hidden></div>
+        </div>
+        <dl id="bz-read" class="bz-read" aria-live="polite"></dl>
+        <div class="bz-arrowkey" aria-label="How to read the arrows">
+            <span><b style="color:#3987e5">▲</b> north</span>
+            <span><b style="color:#d95926">▼</b> south</span>
+            <span>filled — measured at L1, in transit</span>
+            <span id="bz-key-hollow" hidden>hollow, dashed — CME forecast, not measured</span>
+            <span id="bz-key-scale"></span>
+        </div>
+        <div id="bz-outlook" class="bz-outlook" hidden>
+            <h3>Bz reaching Earth, the next 24 hours <span>— GSM, nT, by arrival time</span></h3>
+            <div id="bz-legend-outlook" class="bz-legend"></div>
+            <svg id="bz-chart-outlook" class="bz-svg" role="img" aria-label="Bz by arrival time: arrived, in transit from L1, then the CME forecast with its uncertainty band"></svg>
+            <p id="bz-outlook-note" class="bz-fine"></p>
+        </div>
+        <p id="bz-stage-note" class="bz-fine"></p>
+    </section>
 
     <div class="bz-grid">
         <section class="bz-card" aria-labelledby="bz-h-ladder">
@@ -187,6 +232,7 @@ tr[data-verdict="behind"] .bz-verdict .bz-glyph { color:#ec835a; }
         <h2 id="bz-h-about">What this is</h2>
         <p>Most space-weather displays show one number: Bz from one spacecraft, a million and a half kilometres upstream. This page follows that field down. Three spacecraft at L1 are fused into one value with an error bar. Physics carries it to the bow shock and across it. Two GOES satellites measure what the magnetosphere did with it. Fourteen USGS observatories measure what reached the ground, once a second.</p>
         <p>Nothing here is a simulation of the magnetosphere. Where there is an instrument, you see the instrument. Where there is none, you see an estimate with its uncertainty and a note saying what it leaves out. One rung, low Earth orbit, is not built: no public instrument reports there in real time.</p>
+        <p>Past the hour of wind that L1 has already measured, nothing has been seen by any instrument. If a CME is on its way, the forecast there is the one from <a href="flux-rope-live.html">Compounding Watch</a>, joined on after the last L1 measurement and drawn hollow. If none is, the page says so and draws nothing.</p>
         <p>Related: <a href="flux-rope-live.html">Compounding Watch</a> forecasts Bz inside incoming CMEs · <a href="ring-current.html">Ring Current</a> · <a href="tiga.html">TIGA</a> · <a href="earth-interior.html">Inner Earth</a> for the field induced below ground.</p>
     </section>
 </main>

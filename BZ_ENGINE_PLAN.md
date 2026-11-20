@@ -870,8 +870,8 @@ it is NOT in the nav menu (the menu is at its cap).
 **Verified how:** driven in Chromium at 1440 px and 390 px against planted
 data — ten rungs, three charts, hover readout, no horizontal overflow.
 **Not verified:** no Playwright spec is committed (the repo's test runner is
-not installed in the build sandbox), and the page has not been looked at on
-real feeds in a browser.
+not installed in the build sandbox). Since B7 the page HAS been looked at on
+real feeds — see §19.
 
 **Not built, against the plan's B6:** the space-weather.html panel, the
 status-band row, and the propagated Bz as a `SolarWindDriver` (deliberately
@@ -898,3 +898,65 @@ data and certainly contains disturbed days. Running the GEO filter, the Dst
 model and the propagation against that record is what turns "level on a
 quiet day" into an answer — and it needs D4, because scores over months
 cannot be recomputed per request.
+
+## 19. B7 — the forecast past the L1 horizon, and the stage (BUILT 2026-11-20)
+
+**The join** (`js/bz/forecast-join.js`, PURE, no imports;
+`tests/bz-forecast-join.mjs`, 9 checks on the real flux-rope WASM). Past the
+last minute L1 has measured, the only thing this site can say is what the
+flux-rope provider says about a CME in flight. The module joins that on and
+adds nothing:
+
+- Measurement wins: the rope is never drawn or blended inside the L1 horizon.
+- The rope's Bz(t) is at L1; it is moved to the bow shock by the engine's
+  CURRENT delay (a caveat on every joined result: inside a fast CME the real
+  delay is shorter).
+- No rope, no forecast. `no_rope` / `train_passed` / `rope_down` / `pending` /
+  `rope_beyond` are five different statuses and none draws a line.
+- **The rope is silent about ordinary wind.** Before any ensemble member has
+  the CME at L1 the fan is a zero-width line at 0 nT. The first build drew
+  that as a flat "forecast" of calm and scored it (0 % coverage, skill
+  exactly level) — both wrong. Those steps are now a gap (`silentSteps`) and
+  are not scored.
+- The seam between the L1-based forecast and the rope is reported (step, and
+  whether L1 is inside the rope's 5–95 % band), never smoothed.
+- **The score uses the UNCONDITIONED prior** (`scoreRope`), against the fused
+  L1 field, beside "no CME, Bz = 0". The provider's `fan` is conditioned on
+  that same L1 record, so its error is returned labelled in-sample and never
+  produces a verdict (gated with a swap control).
+
+It runs in the browser: `bz-page.js` starts the ONE provider
+(`js/sun-flux-rope.js startFluxRopeProvider`) and listens for
+`flux-rope-forecast`. Nothing server-side changed and no route was added.
+"Scored in the same ledger" means a row on the page's scorecard; there is
+still no stored ledger (D4).
+
+**The stage** (`js/bz/planet-view.js` PURE scene model →
+`js/bz-planet-canvas.js` renderer; `tests/bz-planet.mjs`, 7 checks). A
+noon–midnight cut, Sun on the left. Each arrow is one minute of wind L1 has
+measured, placed where that wind is now (the engine's arrival time read back
+as distance); the bow shock and magnetopause are `geospace.js` on the wind
+the column says is at the shock; the tilt is `dipole.js`. What is not to
+scale is owned by ONE function (`layout`) and printed under the canvas: true
+scale within 30 R_E, a DERIVED compression from there to L1, and — only when
+a CME forecast exists — a time axis left of L1 holding hollow arrows and the
+5–95 % band. No wind at the shock ⇒ no boundary is drawn; no L1 ⇒ nothing
+upstream. The renderer may not contain a boundary formula or a trig call
+(source-text gated).
+
+**Seen on real data (2026-11-20 18:33 UT, replayed into a local copy of the
+page because the sandbox cannot reach the preview):** 30 parcels in transit,
+all south at −1 to −2.5 nT; standoff 13.09 / shock nose 17.85 R_E matching
+the column; no CME in flight, so today the fourth readout says so and the
+outlook chart is hidden. The joined state has only been seen with a PLANTED
+CME (a test fixture, not an event).
+
+**Found while looking, not fixed:** FRN read −245 nT and 2.645 nT/s while
+its neighbours read a few nT. That is under the 1500 nT suspect threshold,
+so it became the network's headline dB/dt and the strongest E-region
+current. The rule needs a neighbour-consistency test, not only an absolute
+one. The Dst model's fifth run scored −0.67.
+
+**Not built:** a Playwright spec; the space-weather.html panel; the stored
+ledger. The join has never been scored on a real CME.
+

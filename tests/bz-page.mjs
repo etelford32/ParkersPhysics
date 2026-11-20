@@ -134,8 +134,10 @@ const l1 = analyzeL1({ mag, ephem, nowMs: NOW, minutes: 260 });
     assert.ok(!/fetch\(['"`]\/api\/bz\/column/.test(js), '…and is never fetched a second way');
     assert.ok(!/Math\.(sin|cos|sqrt|hypot|atan2)\(/.test(js), 'the renderer computes no physics');
     assert.ok(!/AI-powered/i.test(html));
-    // Three charts, three quantities, three axes — and no chart is given a second y scale.
-    assert.equal((html.match(/class="bz-svg"/g) ?? []).length, 3);
+    // Three charts on one shared time axis, plus the 24-hour outlook in the stage card (its own time axis, drawn
+    // only when a CME forecast exists) — and no chart is given a second y scale.
+    assert.equal((html.match(/class="bz-svg"/g) ?? []).length, 4);
+    assert.match(html, /\.bz-outlook\[hidden\]\s*\{\s*display:none/);
     assert.ok(!/yRight|y2Axis|secondAxis/i.test(js));
     // Colours: the validated all-pairs slots, used for identity only.
     assert.deepEqual([...SERIES_COLORS], ['#3987e5', '#d95926', '#199e70']);

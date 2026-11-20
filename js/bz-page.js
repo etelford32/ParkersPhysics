@@ -1,7 +1,8 @@
 /**
  * js/bz-page.js — bz.html's renderer.
  *
- * BZ_ENGINE_PLAN.md phase B6. It DRAWS ONLY what js/bz/page-model.js returns:
+ * BZ_ENGINE_PLAN.md phases B6 + B7. It DRAWS ONLY what js/bz/page-model.js,
+ * js/bz/planet-view.js and js/bz/forecast-join.js return:
  * no number on the page is computed here. The column arrives through the ONE
  * shared provider (js/bz-engine-provider.js); the three traces the charts
  * need (/api/bz/l1, /flux, /geo) are fetched here once a minute while the tab
@@ -19,11 +20,15 @@
  *   • Text is set with textContent / escaped; nothing from a feed is HTML.
  */
 import { startBzProvider, BZ_COLUMN_EVENT } from './bz-engine-provider.js';
-import { KINDS, VERDICTS, SERIES_COLORS, INK, UNVERIFIED_NAMES, ladderRows, scorecard, chartDomain, traceSeries, fluxSeries, yExtent, ticks, linePath, nearest, num } from './bz/page-model.js';
+import { sceneModel } from './bz/planet-view.js';
+import { mountPlanet, PLANET_COLORS } from './bz-planet-canvas.js';
+import { ropeSeries, joinForecast, scoreRope } from './bz/forecast-join.js';
+import { KINDS, VERDICTS, SERIES_COLORS, INK, UNVERIFIED_NAMES, ladderRows, scorecard, chartDomain, traceSeries, fluxSeries, yExtent, ticks, linePath, nearest, num, relTime } from './bz/page-model.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const S = { column: null, columnState: null, l1: null, flux: null, geo: null, ground: null, errors: {}, charts: [], dom: null };
+const S = { column: null, columnState: null, l1: null, flux: null, geo: null, ground: null, errors: {}, charts: [], dom: null,
+    fc: null, rope: ropeSeries(null), join: null, l1Long: null, ropeScore: null, planet: null };
 
 // ── status line ───────────────────────────────────────────────────────────
 function renderStatus() {
@@ -70,7 +75,7 @@ function renderLadder() {
 
 // ── the scorecard ─────────────────────────────────────────────────────────
 function renderScore() {
-    const sc = scorecard({ l1: S.l1, geo: S.geo, ground: S.ground?.ground, ring: S.ground?.ring_current });
+    const sc = scorecard({ l1: S.l1, geo: S.geo, ground: S.ground?.ground, ring: S.ground?.ring_current, rope: S.ropeScore });
     const body = $('bz-score-body');
     if (!sc.rows.length) { body.innerHTML = '<tr><td colspan="5" class="bz-empty">No scores yet.</td></tr>'; return; }
     body.innerHTML = sc.rows.map((r) => `
@@ -198,6 +203,94 @@ function wireHover() {
     });
 }
 
+
+// ── B7: the forecast past the L1 horizon, and the stage ───────────────────
+// The rope forecast is the ONE shared provider's (js/sun-flux-rope.js publishes it); this page
+// only joins it on (js/bz/forecast-join.js) and draws the result.
+function computeJoin() {
+    S.join = joinForecast({ trace: S.flux?.flux?.trace ?? null, rope: S.rope, nowMs: Date.now() });
+    S.ropeScore = S.rope.state === 'pending' ? { status: 'pending' }
+        : scoreRope({ rope: S.rope, l1: S.l1Long?.trace ? { t0: S.l1Long.trace.t0, step_s: S.l1Long.trace.step_s, bz: S.l1Long.trace.bz } : null, nowMs: Date.now() });
+}
+const buildScene = (nowMs) => sceneModel({ column: S.column, fluxTrace: S.flux?.flux?.trace ?? null, join: S.join, nowMs });
+
+function renderRead() {
+    const rung = (id) => (S.column?.rungs ?? []).find((r) => r.id === id);
+    const l1 = rung('l1'), sh = rung('bow_shock'), j = S.join, now = Date.now();
+    const item = (label, value, small = '', kind = '') => `<div data-kind="${kind}"><dt>${esc(label)}</dt><dd>${esc(value)}${small ? `<small>${esc(small)}</small>` : ''}</dd></div>`;
+    let last = '';
+    if (!j || j.status === 'pending') last = item('Beyond the L1 horizon', 'Checking for a CME in flight…', '', 'none');
+    else if (j.status === 'joined') last = item(`Beyond that — CME forecast (${j.rope.cmes} CME${j.rope.cmes > 1 ? 's' : ''})`,
+        `deepest median Bz ${num(j.deepest?.p50_nt, 1, { sign: true })} nT`, `${j.deepest ? relTime(new Date(j.deepest.t).toISOString(), now) : ""} · 1-in-20 case ${num(j.deepest?.p5_nt, 1, { sign: true })} nT · forecast, not measured`);
+    else if (j.status === 'rope_beyond' && j.silentSteps) last = item('Beyond the L1 horizon', 'A CME is in flight; its forecast does not reach Earth inside the next 24 hours.', '', 'none');
+    else last = item('Beyond the L1 horizon', j.statusText.charAt(0).toUpperCase() + j.statusText.slice(1) + '.', '', j.status === 'rope_down' ? 'down' : 'none');
+    $('bz-read').innerHTML = [
+        item('Measured at L1', l1?.values ? `Bz ${num(l1.values.bz_nt, 2, { sign: true })} ± ${num(l1.sigma?.bz_nt, 2)} nT` : '—', l1?.time ? relTime(l1.time, now) : 'no L1 measurement'),
+        item('Reaching the bow shock now', sh?.values ? `Bz ${num(sh.values.bz_nt, 2, { sign: true })} nT` : '—', sh?.values ? `${num(sh.values.speed_kms, 0)} km/s · estimated from L1` : ''),
+        item('Last wind L1 has seen', sh?.forecast ? `Bz ${num(sh.forecast.bz_nt, 2, { sign: true })} nT` : '—', sh?.forecast ? `arrives ${relTime(sh.forecast.time, now)}` : ''),
+        last,
+    ].join('');
+}
+
+function renderStage() {
+    computeJoin();
+    if (!S.planet) S.planet = mountPlanet($('bz-planet'), $('bz-planet-tip'), buildScene); else S.planet.refresh();
+    const sc = S.planet.scene();
+    renderRead();
+    $('bz-key-hollow').hidden = !(sc?.forecast.length);
+    $('bz-key-scale').textContent = sc ? `longest arrow = ${num(sc.arrowFullNt, 0)} nT` : '';
+    $('bz-stage-note').textContent = sc ? `${sc.disclosures.join(' ')} The thin streaks only show the flow direction.` : '';
+    renderOutlook();
+}
+
+// The joined forecast as a chart, drawn ONLY when a CME forecast exists. Its time axis (−3 h … +24 h)
+// is its own, which is why it lives in this card and not among the three charts that share one.
+function renderOutlook() {
+    const j = S.join, host = $('bz-outlook');
+    host.hidden = !(j && j.status === 'joined');
+    if (host.hidden) return;
+    const svg = $('bz-chart-outlook'), now = j.nowMs, t0 = now - 3 * 3600e3, t1 = j.endMs;
+    const w = Math.max(300, Math.min(Math.round(host.clientWidth || 900), 1200)), h = 200, m = { l: 40, r: 12, t: 12, b: 24 };
+    const x = (t) => m.l + ((t - t0) / (t1 - t0)) * (w - m.l - m.r);
+    const pts = (a) => a.filter((p) => p.t >= t0).map((p) => ({ t: p.t, v: p.bz }));
+    const arrived = pts(j.arrived), transit = pts(j.transit), med = j.prior.map((p) => ({ t: p.t, v: p.p50 }));
+    const [lo, hi] = yExtent([arrived, transit, j.prior.map((p) => ({ v: p.p5 })), j.prior.map((p) => ({ v: p.p95 }))]);
+    const y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * (h - m.t - m.b);
+    const CME = SERIES_COLORS[2];
+    let g = '';
+    for (const v of ticks(lo, hi)) g += `<line x1="${m.l}" x2="${w - m.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${v === 0 ? INK.axis : INK.grid}"/><text x="${m.l - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" class="bz-tick">${num(v, 0)}</text>`;
+    const stepH = w < 560 ? 6 : 3;
+    for (let k = Math.ceil(t0 / 3600e3); k * 3600e3 <= t1; k++) {
+        const t = k * 3600e3, hr = new Date(t).getUTCHours();
+        if (hr % stepH) continue;
+        g += `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="${h - m.b}" y2="${h - m.b + 4}" stroke="${INK.axis}"/><text x="${x(t).toFixed(1)}" y="${h - 6}" text-anchor="middle" class="bz-tick">${String(hr).padStart(2, '0')}:00</text>`;
+    }
+    const band = (a, b, op) => `<path d="M${j.prior.map((p) => `${x(p.t).toFixed(1)},${y(p[b]).toFixed(1)}`).join('L')}L${j.prior.slice().reverse().map((p) => `${x(p.t).toFixed(1)},${y(p[a]).toFixed(1)}`).join('L')}Z" fill="${CME}" opacity="${op}"/>`;
+    g += band('p5', 'p95', 0.13) + band('p25', 'p75', 0.2);
+    const mark = (t, label, anchor = 'start') => `<line x1="${x(t).toFixed(1)}" x2="${x(t).toFixed(1)}" y1="${m.t}" y2="${h - m.b}" stroke="${INK.muted}" stroke-dasharray="2 3"/><text x="${(x(t) + (anchor === 'start' ? 4 : -4)).toFixed(1)}" y="${m.t + 9}" text-anchor="${anchor}" class="bz-tick">${label}</text>`;
+    g += mark(now, 'now', 'end') + mark(j.l1HorizonMs, 'L1 has seen up to here');
+    g += `<path d="${linePath(arrived, x, y)}" fill="none" stroke="${INK.primary}" stroke-width="2" stroke-linejoin="round"/>`;
+    g += `<path d="${linePath(transit, x, y)}" fill="none" stroke="${INK.primary}" stroke-width="2" stroke-dasharray="5 4"/>`;
+    g += `<path d="${linePath(med, x, y)}" fill="none" stroke="${CME}" stroke-width="2" stroke-dasharray="2 4" stroke-linecap="round"/>`;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`); svg.innerHTML = g;
+    $('bz-legend-outlook').innerHTML = `<span><i style="background:${INK.primary}"></i>From L1 (solid: arrived · dashed: in transit)</span><span><i style="background:${CME}"></i>CME forecast: median, with its 50 % and 90 % bands</span>`;
+    const s = j.seam;
+    $('bz-outlook-note').textContent = [
+        s ? `Where the two meet, L1's last value is ${num(s.l1_bz_nt, 1, { sign: true })} nT and the CME forecast's median is ${num(s.rope_p50_nt, 1, { sign: true })} nT${s.l1_inside_rope_band === false ? ' — L1 is outside the forecast\'s 90 % band there' : ''}; the step is shown, not smoothed.` : '',
+        ...j.caveats.map((c) => c.charAt(0).toUpperCase() + c.slice(1) + '.'),
+    ].filter(Boolean).join(' ');
+}
+
+async function onRope(fc) {
+    S.fc = fc; S.rope = ropeSeries(fc);
+    // The score needs a longer L1 record than the charts do; fetched only when there is a rope to score.
+    if (S.rope.state === 'ok') await load('l1Long', '/api/bz/l1?minutes=1440');
+    renderStage(); renderScore();
+}
+window.addEventListener('flux-rope-forecast', (e) => onRope(e.detail));
+import('./sun-flux-rope.js').then((m) => { if (window.__fluxRopeForecast) onRope(window.__fluxRopeForecast); m.startFluxRopeProvider({ delayMs: 600 }); })
+    .catch((e) => onRope({ idle: true, failed: true, reason: `forecast module failed to load: ${e?.message ?? e}` }));
+
 // ── data ──────────────────────────────────────────────────────────────────
 async function load(key, url) {
     try {
@@ -211,13 +304,13 @@ async function load(key, url) {
 async function refreshTraces() {
     if (document.visibilityState === 'hidden') return;
     await Promise.all([load('l1', '/api/bz/l1?minutes=260'), load('flux', '/api/bz/flux?minutes=330'), load('geo', '/api/bz/geo?minutes=260'), load('ground', '/api/bz/ground?summary=1')]);
-    renderCharts(); renderScore(); renderStatus();
+    renderStage(); renderCharts(); renderScore(); renderStatus();
 }
 
 window.addEventListener(BZ_COLUMN_EVENT, (e) => {
     S.columnState = e.detail;
     if (e.detail.column) S.column = e.detail.column;
-    renderLadder(); renderStatus();
+    renderLadder(); renderStage(); renderStatus();
 });
 wireHover();
 renderStatus();
@@ -226,5 +319,5 @@ refreshTraces();
 setInterval(refreshTraces, 60_000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshTraces(); });
 let resizeTimer = null;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderCharts, 150); });
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { renderCharts(); renderOutlook(); }, 150); });
 window.__bzPage = { state: S, refresh: refreshTraces };

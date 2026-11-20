@@ -111,7 +111,7 @@ export const VERDICTS = Object.freeze({
  * Every prediction the engine makes that has a truth to be scored against,
  * each beside the control it must beat.
  */
-export function scorecard({ l1 = null, geo = null, ground = null, ring = null } = {}) {
+export function scorecard({ l1 = null, geo = null, ground = null, ring = null, rope = null } = {}) {
     const rows = [];
     for (const [sc, s] of Object.entries(l1?.withheld_score ?? {})) {
         rows.push({ id: `l1-${sc}`, claim: `Predict ${sc}'s Bz from the other spacecraft`,
@@ -134,6 +134,15 @@ export function scorecard({ l1 = null, geo = null, ground = null, ring = null } 
         skill: null, coverage: null, verdict: 'unscored',
         note: t.status === 'scored' ? null : ({ no_events_in_window: 'no pressure jump has arrived in the last hour — nothing to time',
             events_unmatched: 'a jump or an impulse was seen without its partner', no_wind: 'no arrived wind to predict from' }[t.status] ?? t.status) });
+    if (rope && rope.status !== 'pending') {
+        const scored = rope.status === 'scored';
+        rows.push({ id: 'rope', claim: 'Bz at L1 through an incoming CME, forecast from the eruption alone',
+            ours: scored ? rope.rmse_nt : null, control: scored ? rope.rmse_zero_nt : null, controlName: 'no CME: Bz stays at zero', unit: 'nT rms', n: rope.n ?? 0,
+            skill: scored ? rope.skill_vs_zero : null, coverage: null, verdict: scored ? verdictOf(rope.skill_vs_zero) : 'unscored',
+            note: scored ? `${Math.round(rope.coverage50 * 100)} % of outcomes inside its 50 % band, ${Math.round(rope.coverage90 * 100)} % inside its 90 % band · ${rope.n} forecast steps`
+                : ({ no_rope: 'no Earth-directed CME is in flight — nothing to score', rope_down: 'the CME forecast is unavailable',
+                    too_few_points: 'the CME has not been at L1 long enough to score', no_truth: 'no L1 record to score against' }[rope.status] ?? rope.status) });
+    }
     const tally = { ahead: 0, level: 0, behind: 0, unscored: 0 };
     for (const r of rows) tally[r.verdict]++;
     return { rows, tally };

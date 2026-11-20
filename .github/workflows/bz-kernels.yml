@@ -18,6 +18,8 @@ on:
       - 'js/bz/**'
       - 'js/bz-engine-provider.js'
       - 'js/bz-page.js'
+      - 'js/bz-planet-canvas.js'
+      - 'js/flux-rope-forecast.js'
       - 'bz.html'
       - 'js/ring-current-model.js'
       - 'js/geomag/dipole.js'
@@ -39,6 +41,8 @@ on:
       - 'js/bz/**'
       - 'js/bz-engine-provider.js'
       - 'js/bz-page.js'
+      - 'js/bz-planet-canvas.js'
+      - 'js/flux-rope-forecast.js'
       - 'bz.html'
       - 'js/ring-current-model.js'
       - 'js/geomag/dipole.js'
@@ -88,3 +92,7 @@ jobs:
         run: node tests/bz-ground.mjs
       - name: bz.html — the page's data model and static contract
         run: node tests/bz-page.mjs
+      - name: the hero canvas — scene model + renderer contract
+        run: node tests/bz-planet.mjs
+      - name: B7 — the forecast join past the L1 horizon, on the real flux-rope WASM
+        run: node tests/bz-forecast-join.mjs
