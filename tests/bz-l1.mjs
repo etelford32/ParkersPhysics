@@ -425,7 +425,7 @@ function feedPayloads(nowMs) {
         assert.equal(full.freshness, 'fresh');
         assert.equal(full.data.trace.bz.length, 60);
         assert.equal(full.data.reference_spacecraft, 'SOLAR1');
-        assert.ok(full.age_seconds >= 0 && full.age_seconds < 3600);
+        assert.ok(full.age_seconds >= -30 && full.age_seconds < 3600, `age ${full.age_seconds}`);   // the planted last sample is snapped to its nearest minute, up to 30 s ahead of the wall clock
         const sum = await (await handler(new Request('https://x.test/api/bz/l1?summary=1'))).json();
         assert.equal(sum.data.trace, undefined, 'summary=1 drops the trace');
         assert.ok(sum.data.withheld_score.ACE.n > 0);
