@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dipoleLatitude, dbdt, equivalentCurrent, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, stationSummary, GROUND_DEFAULTS } from '../js/bz/ground.js';
 import { analyzeGround, analyzeRing } from '../js/bz/ground-analysis.js';
-import { normalizeGroundSeries, normalizeDst, groundSeriesUrl, normalizeL1Mag, normalizeEphem, normalizeL1Plasma, DST_URL } from '../js/bz/feeds.js';
+import { normalizeGroundSeries, groundCoordinates, describeGroundPayload, normalizeDst, groundSeriesUrl, normalizeL1Mag, normalizeEphem, normalizeL1Plasma, DST_URL } from '../js/bz/feeds.js';
 import { analyzeFlux } from '../js/bz/flux-analysis.js';
 import { buildColumn, RUNG_ORDER } from '../js/bz/column.js';
 import { integrateDst } from '../js/ring-current-model.js';
@@ -39,6 +39,16 @@ const NOW = Date.parse('2026-11-20T14:20:00Z');
     assert.ok(s.x[2] !== s.x[2], 'the IAGA 99999 fill is a gap');
     assert.equal(s.valid, 6);
     assert.equal(s.cadence_s, 1);
+    assert.equal(s.coordinates_from, 'metadata.station.geometry.coordinates');
+    // The INTERMAGNET-style layout (coordinates under metadata.intermagnet.imo) reads the same.
+    const im = normalizeGroundSeries({ ...p, metadata: { intermagnet: { imo: { iaga_code: 'BOU', name: 'Boulder', coordinates: [254.76, 40.14, 1682] } } } }, { nowMs: NOW, station: 'BOU' });
+    close(im.lat, 40.14, 1e-9); close(im.lon, -105.24, 1e-9); assert.equal(im.coordinates_from, 'metadata.intermagnet.imo.coordinates'); assert.equal(im.iaga, 'BOU');
+    assert.equal(groundCoordinates({ metadata: { station: { latitude: 21.3, longitude: -158 } } }).from, 'metadata.station.latitude/longitude');
+    assert.equal(groundCoordinates({ metadata: { station: { latitude: null, longitude: null } } }), null, 'null is not the equator');
+    assert.equal(groundCoordinates({ metadata: { intermagnet: { imo: { coordinates: [254, 140] } } } }), null, 'a latitude of 140° is not a position');
+    const shape = describeGroundPayload({ ...p, metadata: { something: { new: 1 } } });
+    assert.deepEqual(shape.metadata, ["something"]); assert.equal(shape.coordinates_from, null); assert.deepEqual(shape.values, ["X", "Y", "Z"]); assert.equal(shape.times, 10);
+    assert.ok(!JSON.stringify(shape).includes("20000"), 'the description carries structure, never data');
     assert.equal(normalizeGroundSeries({ times: [] }, {}), null);
     assert.equal(normalizeGroundSeries({ ...p, metadata: {} }, {}), null, 'no coordinates in the payload ⇒ no station (never a typed position)');
     assert.equal(normalizeGroundSeries(usgsPayload('X', [1, 2], t, t.map(() => NaN), t.map(() => NaN)), {}), null, 'all-null ⇒ null');
@@ -51,7 +61,7 @@ const NOW = Date.parse('2026-11-20T14:20:00Z');
     assert.equal(normalizeDst([{ time_tag: '2026-11-20T12:00:00Z', dst: -40 }])[0].dst, -40);
     assert.deepEqual(normalizeDst('nope'), []);
     assert.match(DST_URL, /kyoto-dst\.json$/);
-    ok('ground series: coordinates from the payload, null padding cut, fills are gaps; Dst rows ascending');
+    ok('ground series: coordinates from a candidate list (two layouts), null padding cut, fills are gaps; an unreadable payload is described');
 }
 
 // ── 2. geometry: zones are COMPUTED ───────────────────────────────────────
@@ -297,6 +307,7 @@ const PRED = (() => {
         assert.equal(two.freshness, 'stale');
         assert.ok(two.reasons.includes('stations_down:GUA,SJG'));
         assert.deepEqual(two.upstream.usgs.failures, { 'fast:http_404': 2, 'slow:http_404': 2 }, 'each failure is described, not just counted');
+        assert.equal(two.upstream.usgs.coordinates_from, 'metadata.station.geometry.coordinates', 'and the route says where it found the positions');
         assert.equal(two.upstream.usgs.concurrency, 6);
 
         globalThis.fetch = serve(planted, ['l1', 'dst']);

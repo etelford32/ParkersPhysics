@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bz Column · Sun to Ground · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/bz.html">
+<meta name="description" content="The north–south interplanetary field and the magnetic flux it drives, at every altitude from the L1 spacecraft to the ground — each value marked measured, estimated or forecast, and every prediction scored in public against the instrument that sits there.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/bz.html">
+<meta property="og:title" content="Bz Column — the field from the Sun's wind to the ground">
+<meta property="og:description" content="Three spacecraft at L1, two at geosynchronous orbit, fourteen observatories on the ground. One ladder, each rung marked measured, estimated or forecast, and scored against its control.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/flux-rope.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Bz Column — Parkers Physics">
+<meta name="twitter:description" content="The interplanetary field at every altitude from L1 to the ground, with its uncertainty and its score.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/flux-rope.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is bz- prefixed; there is intentionally NO nav styling here. -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body { min-height:100vh; background:#060912; color:#c3c2b7; font-family:'Segoe UI', system-ui, sans-serif; overflow-x:clip; }
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
+.bz-wrap { max-width:1240px; margin:0 auto; padding:0 18px 64px; }
+.bz-hero { padding:22px 0 14px; display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; }
+.bz-hero h1 { font-size:1.6rem; font-weight:650; color:#f0efec; letter-spacing:.01em; }
+.bz-hero p { font-size:.95rem; color:#c3c2b7; max-width:62ch; }
+.bz-status { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:.82rem; color:#c3c2b7; }
+.bz-status::before { content:'●'; color:#0ca30c; }
+.bz-status[data-level="warn"]::before { content:'▲'; color:#fab219; }
+.bz-status[data-level="down"]::before { content:'■'; color:#d03b3b; }
+.bz-status[data-level="wait"]::before { content:'○'; color:#898781; }
+#bz-updated { color:#898781; }
+
+.bz-grid { display:grid; grid-template-columns:minmax(0, 5fr) minmax(0, 6fr); gap:18px; align-items:start; }
+.bz-card { background:#0a0f1c; border:1px solid #1b2233; border-radius:10px; padding:14px 16px 16px; }
+.bz-card h2 { font-size:.82rem; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:#898781; margin-bottom:10px; }
+.bz-card h2 + .bz-lede { margin-top:-4px; }
+.bz-lede { font-size:.86rem; color:#c3c2b7; margin-bottom:12px; max-width:70ch; }
+
+/* ── the ladder ───────────────────────────────────────────────────────── */
+.bz-ladder { list-style:none; position:relative; }
+.bz-ladder::before { content:''; position:absolute; left:5px; top:10px; bottom:10px; width:1px; background:#232a3a; }
+.bz-rung { display:grid; grid-template-columns:minmax(0, 150px) 92px minmax(0, 1fr); gap:4px 12px; padding:10px 0 10px 20px; border-top:1px solid #151b2a; position:relative; }
+.bz-rung:first-child { border-top:0; }
+.bz-rung::before { content:''; position:absolute; left:1px; top:16px; width:9px; height:9px; border-radius:50%; background:#0a0f1c; border:1.5px solid #898781; }
+.bz-rung[data-kind="MEASURED"]::before { background:#f0efec; border-color:#f0efec; }
+.bz-rung[data-kind="NOT_BUILT"]::before, .bz-rung[data-kind="NOT_AVAILABLE"]::before, .bz-rung[data-kind="DELEGATED"]::before { border-style:dashed; }
+.bz-rung-label { display:block; color:#f0efec; font-size:.9rem; font-weight:600; }
+.bz-rung-alt { display:block; color:#898781; font-size:.76rem; margin-top:2px; }
+.bz-rung-kind { font-size:.76rem; color:#c3c2b7; white-space:nowrap; padding-top:2px; }
+.bz-glyph { display:inline-block; width:1.15em; color:#f0efec; }
+/* Kind marks are DRAWN, not typed: the half-circle glyph is missing from common system fonts. */
+.bz-mark { display:inline-block; width:9px; height:9px; border-radius:50%; border:1.5px solid #f0efec; margin-right:6px; vertical-align:-1px; }
+.bz-mark[data-kind="MEASURED"] { background:#f0efec; }
+.bz-mark[data-kind="ESTIMATED"] { background:linear-gradient(90deg, #f0efec 50%, transparent 50%); }
+.bz-mark[data-kind="NOT_BUILT"], .bz-mark[data-kind="NOT_AVAILABLE"], .bz-mark[data-kind="DELEGATED"] { border-style:dashed; border-color:#898781; }
+.bz-headline { color:#f0efec; font-size:1rem; font-variant-numeric:tabular-nums; }
+.bz-rung[data-kind="NOT_BUILT"] .bz-headline, .bz-rung[data-kind="NOT_AVAILABLE"] .bz-headline, .bz-rung[data-kind="DELEGATED"] .bz-headline { color:#898781; }
+.bz-when { color:#898781; font-size:.76rem; margin-left:8px; }
+.bz-sub, .bz-fc { font-size:.8rem; color:#c3c2b7; margin-top:2px; font-variant-numeric:tabular-nums; }
+.bz-fc { color:#c3c2b7; }
+.bz-rung details { margin-top:5px; font-size:.78rem; color:#898781; }
+.bz-rung summary { cursor:pointer; color:#898781; width:fit-content; padding:3px 0; }
+.bz-rung summary:hover, .bz-rung summary:focus-visible { color:#c3c2b7; }
+.bz-rung details p { margin:4px 0; color:#c3c2b7; }
+.bz-rung details ul { margin:4px 0 0 16px; }
+.bz-rung details a { color:#3987e5; }
+.bz-key { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:.76rem; color:#898781; margin-top:12px; padding-top:10px; border-top:1px solid #151b2a; }
+.bz-unverified { margin-top:10px; font-size:.78rem; color:#c3c2b7; border-left:2px solid #fab219; padding:2px 0 2px 10px; }
+.bz-unverified[hidden] { display:none; }
+
+/* ── charts ───────────────────────────────────────────────────────────── */
+.bz-charts { position:relative; display:grid; gap:14px; }
+.bz-chart h3 { font-size:.86rem; font-weight:600; color:#f0efec; }
+.bz-chart h3 span { color:#898781; font-weight:400; }
+.bz-chart[data-empty="1"] svg { display:none; }
+.bz-chart[data-empty="1"]::after { content:'No data for this chart right now.'; display:block; padding:28px 0; color:#898781; font-size:.84rem; }
+.bz-svg { width:100%; height:auto; display:block; touch-action:pan-y; }
+.bz-tick { font-size:10px; fill:#898781; font-variant-numeric:tabular-nums; }
+.bz-dl { font-size:10.5px; fill:#c3c2b7; }
+.bz-legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.74rem; color:#c3c2b7; margin:3px 0 2px; }
+.bz-legend i, .bz-tip i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; }
+.bz-tip { position:absolute; z-index:5; pointer-events:none; background:#101728; border:1px solid #2a3348; border-radius:6px; padding:7px 9px; font-size:.76rem; color:#c3c2b7; min-width:150px; box-shadow:0 6px 18px rgba(0,0,0,.45); }
+.bz-tip[hidden] { display:none; }
+.bz-tip b { display:block; color:#f0efec; font-weight:600; margin-bottom:3px; }
+.bz-tip span { float:right; margin-left:12px; color:#f0efec; font-variant-numeric:tabular-nums; }
+
+/* ── scorecard ────────────────────────────────────────────────────────── */
+.bz-score { width:100%; min-width:620px; border-collapse:collapse; font-size:.84rem; }
+.bz-score th, .bz-score td { text-align:left; padding:8px 10px 8px 0; border-top:1px solid #151b2a; vertical-align:top; }
+.bz-score thead th { border-top:0; color:#898781; font-weight:500; font-size:.74rem; text-transform:uppercase; letter-spacing:.06em; }
+.bz-score tbody th { font-weight:500; color:#f0efec; }
+.bz-n { font-variant-numeric:tabular-nums; white-space:nowrap; color:#f0efec; }
+.bz-note { display:block; color:#898781; font-size:.74rem; font-weight:400; white-space:normal; }
+.bz-verdict { white-space:nowrap; color:#c3c2b7; }
+tr[data-verdict="ahead"] .bz-verdict .bz-glyph { color:#0ca30c; }
+tr[data-verdict="behind"] .bz-verdict .bz-glyph { color:#ec835a; }
+.bz-empty { color:#898781; }
+#bz-score-tally { font-size:.8rem; color:#c3c2b7; margin-top:10px; }
+.bz-about { margin-top:18px; }
+.bz-about p { font-size:.86rem; max-width:78ch; margin-bottom:8px; }
+.bz-about a { color:#3987e5; }
+.bz-table-wrap { overflow-x:auto; }
+
+@media (max-width: 980px) { .bz-grid { grid-template-columns:minmax(0, 1fr); } .bz-status { margin-left:0; width:100%; } }
+@media (max-width: 560px) {
+    .bz-rung { grid-template-columns:minmax(0, 1fr) auto; }
+    .bz-rung-value { grid-column:1 / -1; }
+    .bz-hero h1 { font-size:1.35rem; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#bz-main">Skip to content</a>
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element. -->
+<nav></nav>
+
+<main id="bz-main" class="bz-wrap">
+    <header class="bz-hero">
+        <h1>Bz Column</h1>
+        <p>The Sun's north–south field and the magnetic flux it drives, at every altitude from the L1 spacecraft to the ground.</p>
+        <div id="bz-status" class="bz-status" data-level="wait" role="status" aria-live="polite"><span class="bz-status-text">Loading the column…</span><span id="bz-updated"></span></div>
+    </header>
+
+    <div class="bz-grid">
+        <section class="bz-card" aria-labelledby="bz-h-ladder">
+            <h2 id="bz-h-ladder">Sun to ground, right now</h2>
+            <ol id="bz-ladder" class="bz-ladder"></ol>
+            <div class="bz-key" aria-label="What the marks mean">
+                <span><span class="bz-mark" data-kind="MEASURED" aria-hidden="true"></span>Measured — an instrument is there</span>
+                <span><span class="bz-mark" data-kind="ESTIMATED" aria-hidden="true"></span>Estimated — carried there by physics</span>
+                <span><span class="bz-mark" data-kind="FORECAST" aria-hidden="true"></span>Forecast — has not happened yet</span>
+            </div>
+            <p id="bz-unverified" class="bz-unverified" hidden>Some values on this ladder use published coefficients we have not yet checked against their source papers: <span id="bz-unverified-list"></span>. Treat those as provisional.</p>
+        </section>
+
+        <section class="bz-card" aria-labelledby="bz-h-charts">
+            <h2 id="bz-h-charts">The last three hours, and the next one</h2>
+            <div id="bz-charts" class="bz-charts">
+                <div class="bz-chart" data-empty="1">
+                    <h3>Bz at L1 <span>— GSM, nT</span></h3>
+                    <div id="bz-legend-l1" class="bz-legend"></div>
+                    <svg id="bz-chart-l1" class="bz-svg" role="img" aria-label="Bz at L1 from each spacecraft and fused, last three hours"></svg>
+                </div>
+                <div class="bz-chart" data-empty="1">
+                    <h3>Flux opening at the dayside magnetopause <span>— kV, by arrival time</span></h3>
+                    <div id="bz-legend-flux" class="bz-legend"></div>
+                    <svg id="bz-chart-flux" class="bz-svg" role="img" aria-label="Dayside reconnection rate by arrival time, estimated then forecast"></svg>
+                </div>
+                <div class="bz-chart" data-empty="1">
+                    <h3>Field at geosynchronous orbit <span>— north component minus the core field, nT</span></h3>
+                    <div id="bz-legend-geo" class="bz-legend"></div>
+                    <svg id="bz-chart-geo" class="bz-svg" role="img" aria-label="GOES magnetometer residual, measured and predicted"></svg>
+                </div>
+                <div id="bz-tip" class="bz-tip" hidden></div>
+            </div>
+        </section>
+    </div>
+
+    <section class="bz-card bz-about" aria-labelledby="bz-h-score">
+        <h2 id="bz-h-score">Does it work? Every prediction, beside its control</h2>
+        <p class="bz-lede">Wherever an instrument exists, the engine predicts what it will read and is scored against it — next to the simplest thing that could have been said instead. A prediction that loses to its control is shown as losing.</p>
+        <div class="bz-table-wrap">
+        <table class="bz-score">
+            <thead><tr><th scope="col">Prediction</th><th scope="col">Our error</th><th scope="col">Control's error</th><th scope="col">Result</th><th scope="col" title="Share of outcomes inside the stated 1σ. 68 % is honest.">Inside 1σ</th></tr></thead>
+            <tbody id="bz-score-body"><tr><td colspan="5" class="bz-empty">Loading scores…</td></tr></tbody>
+        </table>
+        </div>
+        <p id="bz-score-tally"></p>
+    </section>
+
+    <section class="bz-card bz-about" aria-labelledby="bz-h-about">
+        <h2 id="bz-h-about">What this is</h2>
+        <p>Most space-weather displays show one number: Bz from one spacecraft, a million and a half kilometres upstream. This page follows that field down. Three spacecraft at L1 are fused into one value with an error bar. Physics carries it to the bow shock and across it. Two GOES satellites measure what the magnetosphere did with it. Fourteen USGS observatories measure what reached the ground, once a second.</p>
+        <p>Nothing here is a simulation of the magnetosphere. Where there is an instrument, you see the instrument. Where there is none, you see an estimate with its uncertainty and a note saying what it leaves out. One rung, low Earth orbit, is not built: no public instrument reports there in real time.</p>
+        <p>Related: <a href="flux-rope-live.html">Compounding Watch</a> forecasts Bz inside incoming CMEs · <a href="ring-current.html">Ring Current</a> · <a href="tiga.html">TIGA</a> · <a href="earth-interior.html">Inner Earth</a> for the field induced below ground.</p>
+    </section>
+</main>
+
+<script type="module" src="./js/bz-page.js"></script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("bz");</script>
+</body>
+</html>

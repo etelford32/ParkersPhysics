@@ -713,11 +713,10 @@ export function groundSeriesUrl(station, samplingPeriod, windowS, nowMs) {
 export function normalizeGroundSeries(payload, { nowMs, station = null } = {}) {
     const times = Array.isArray(payload?.times) ? payload.times.map(timeMs) : [];
     if (!times.length) return null;
-    const meta = payload?.metadata?.station ?? {};
-    const coords = meta.geometry?.coordinates ?? null;
-    const lonRaw = coords ? Number(coords[0]) : Number(meta.longitude);
-    const lat = coords ? Number(coords[1]) : Number(meta.latitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lonRaw)) return null;
+    const where = groundCoordinates(payload);
+    if (!where) return null;
+    const { lat, lonRaw } = where;
+    const meta = { id: where.id };
     const series = Array.isArray(payload?.values) ? payload.values : [];
     const pick = (name) => series.find((q) => String(q?.id ?? q?.metadata?.element ?? '').toUpperCase() === name)?.values ?? null;
     const X = pick('X'), Y = pick('Y'), Z = pick('Z');
@@ -733,9 +732,55 @@ export function normalizeGroundSeries(payload, { nowMs, station = null } = {}) {
         t[i] = times[i] ?? NaN; x[i] = val(X[i]); y[i] = val(Y[i]); z[i] = Array.isArray(Z) ? val(Z[i]) : NaN;
         if (x[i] === x[i] && y[i] === y[i]) valid++;
     }
-    return { iaga: meta.id ?? station, lat, lon: ((lonRaw + 180) % 360 + 360) % 360 - 180, t, x, y, z,
+    return { iaga: station ?? meta.id, lat, lon: ((lonRaw + 180) % 360 + 360) % 360 - 180, coordinates_from: where.from, t, x, y, z,
         cadence_s: measureCadenceS(Array.from(t).filter((q) => q === q)), valid,
         latency_s: Number.isFinite(nowMs) ? Math.round((nowMs - t[end]) / 1000) : null };
+}
+
+/**
+ * Where a USGS payload says its station is. The metadata layout is NOT one
+ * shape — the first production run (2026-11-20) returned 28 well-formed
+ * payloads and the single layout assumed here matched none of them — so the
+ * position resolves from a CANDIDATE LIST, [lon, lat] GeoJSON order, and the
+ * result names which one answered.
+ * @returns {{ lat:number, lonRaw:number, id:string|null, from:string } | null}
+ */
+export function groundCoordinates(payload) {
+    const m = payload?.metadata ?? {};
+    const candidates = [
+        ['metadata.intermagnet.imo.coordinates', m.intermagnet?.imo?.coordinates, m.intermagnet?.imo?.iaga_code],
+        ['metadata.station.geometry.coordinates', m.station?.geometry?.coordinates, m.station?.id],
+        ['metadata.station.coordinates', m.station?.coordinates, m.station?.id],
+        ['metadata.geometry.coordinates', m.geometry?.coordinates, m.id ?? m.station],
+    ];
+    for (const [from, c, id] of candidates) {
+        if (Array.isArray(c) && Number.isFinite(Number(c[0])) && Number.isFinite(Number(c[1])) && Math.abs(Number(c[1])) <= 90) {
+            return { lat: Number(c[1]), lonRaw: Number(c[0]), id: typeof id === 'string' ? id : null, from };
+        }
+    }
+    const st = m.station ?? {};
+    if (Number.isFinite(Number(st.latitude)) && Number.isFinite(Number(st.longitude)) && st.latitude !== null) {
+        return { lat: Number(st.latitude), lonRaw: Number(st.longitude), id: typeof st.id === 'string' ? st.id : null, from: 'metadata.station.latitude/longitude' };
+    }
+    return null;
+}
+
+/**
+ * The STRUCTURE of a ground payload, with no data in it — what a route
+ * reports when it could not read one, so a single production request shows
+ * what the service actually sends.
+ */
+export function describeGroundPayload(payload) {
+    const keys = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).slice(0, 12) : null);
+    const m = payload?.metadata;
+    const v0 = Array.isArray(payload?.values) ? payload.values[0] : null;
+    return {
+        top: keys(payload), metadata: keys(m), intermagnet: keys(m?.intermagnet), imo: keys(m?.intermagnet?.imo), station: keys(m?.station),
+        times: Array.isArray(payload?.times) ? payload.times.length : null, first_time: Array.isArray(payload?.times) ? payload.times[0] ?? null : null,
+        values: Array.isArray(payload?.values) ? payload.values.map((q) => q?.id ?? q?.metadata?.element ?? '?').slice(0, 8) : null,
+        value_entry: keys(v0), value_metadata: keys(v0?.metadata),
+        coordinates_from: groundCoordinates(payload)?.from ?? null,
+    };
 }
 
 /** kyoto-dst.json (object rows or a header table) → [{t, dst}] ascending; fills dropped. */

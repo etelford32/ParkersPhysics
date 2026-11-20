@@ -17,6 +17,8 @@ on:
     paths:
       - 'js/bz/**'
       - 'js/bz-engine-provider.js'
+      - 'js/bz-page.js'
+      - 'bz.html'
       - 'js/ring-current-model.js'
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
@@ -36,6 +38,8 @@ on:
     paths:
       - 'js/bz/**'
       - 'js/bz-engine-provider.js'
+      - 'js/bz-page.js'
+      - 'bz.html'
       - 'js/ring-current-model.js'
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
@@ -82,3 +86,5 @@ jobs:
         run: node tests/bz-column.mjs
       - name: ground at 1 s — dB/dt, impulses + timing score, equivalent current, ring current, route
         run: node tests/bz-ground.mjs
+      - name: bz.html — the page's data model and static contract
+        run: node tests/bz-page.mjs

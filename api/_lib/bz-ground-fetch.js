@@ -14,7 +14,7 @@
  * (HTTP status / timeout / not JSON / no usable samples).
  */
 import { fetchWithTimeout } from './responses.js';
-import { groundSeriesUrl, normalizeGroundSeries } from '../../js/bz/feeds.js';
+import { groundSeriesUrl, normalizeGroundSeries, describeGroundPayload } from '../../js/bz/feeds.js';
 import { USGS_STATION_IDS } from '../../js/geomag/observatories.js';
 
 export const FAST_WINDOW_S = 3600, SLOW_WINDOW_S = 24 * 3600;
@@ -32,7 +32,8 @@ async function one(id, sp, win, nowMs) {
     let body;
     try { body = await res.json(); } catch { return { series: null, why: 'not_json' }; }
     const series = normalizeGroundSeries(body, { nowMs, station: id });
-    return { series, why: series ? null : 'no_usable_samples' };
+    // An unreadable payload is described (structure only) so one request shows what the service sends.
+    return { series, why: series ? null : 'no_usable_samples', shape: series ? null : describeGroundPayload(body), from: series?.coordinates_from ?? null };
 }
 
 /** Run `tasks` (functions returning promises) at most `limit` at a time, in order. */
@@ -53,11 +54,14 @@ export async function fetchGround(nowMs) {
     }
     const results = await mapLimit(jobs.map((j) => j.run), CONCURRENCY);
     const fast = {}, slow = {}, why = {};
+    let sample = null, coordsFrom = null;
     jobs.forEach((j, i) => {
         const r = results[i];
+        if (r.shape && !sample) sample = { station: j.id, cadence: j.kind, ...r.shape };
+        if (r.from) coordsFrom = r.from;
         if (r.series) (j.kind === 'fast' ? fast : slow)[j.id] = r.series;
         else why[`${j.kind}:${r.why}`] = (why[`${j.kind}:${r.why}`] ?? 0) + 1;
     });
     const failed = USGS_STATION_IDS.filter((id) => !fast[id] && !slow[id]);
-    return { fast, slow, failed, diagnostics: { requests: jobs.length, concurrency: CONCURRENCY, failures: why } };
+    return { fast, slow, failed, diagnostics: { requests: jobs.length, concurrency: CONCURRENCY, failures: why, coordinates_from: coordsFrom, ...(sample ? { unreadable_payload: sample } : {}) } };
 }
