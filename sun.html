@@ -1880,7 +1880,7 @@ import { DISC_GLSL, detailWeight, screenScaleAt, frameScale } from './js/sun-dis
 import * as CAM from './js/sun-camera.js';                 // framing, one-shot flights, shots (PURE)
 import * as DIRECTOR from './js/sun-flare-director.js';   // ONE flare event from any feed, and where it is in its life (PURE)
 import * as FG from './js/flare-geometry.js';
-import { createFlareArcade } from './js/flare-arcade.js';
+import { createFlareArcade, AEC_TARGET as ARCADE_AEC_TARGET, AEC_FLOOR as ARCADE_AEC_FLOOR, HOT_FUZZ as ARCADE_HOT_FUZZ } from './js/flare-arcade.js';
 import { createFlareRope } from './js/flare-rope.js';
 // The flare's COOLING DEM (js/flare-dem.js, node-gated): GOES class → peak T
 // → RTV density → conduction+radiation cooling, so 131/94 light first and the
@@ -13738,6 +13738,8 @@ window.__sun = {
     /** Hold both flare clocks at one age in sim units (null releases) — captures and the look gate. */
     holdFlareAt: (t) => { _flareHoldT = (t == null) ? null : Math.max(0, +t || 0); },
     flareArcade,
+    /** The arcade view's display constants (its exposure control's target and floor, the hot-loop fuzz). */
+    flareArcadeConst: { AEC_TARGET: ARCADE_AEC_TARGET, AEC_FLOOR: ARCADE_AEC_FLOOR, HOT_FUZZ: ARCADE_HOT_FUZZ },
     flareRope,
     /** The director's call for the flare on screen: is it eruptive, and on what basis. */
     get flareEruption() { return _flareEruption; },

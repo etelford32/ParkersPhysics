@@ -362,6 +362,10 @@ export const OPEN_TARGETS = Object.freeze([
       source: 'Krucker, Hurford & Lin 2003, ApJ 595, L103; Qiu et al. 2017.' },
     { id: 'downflows', what: 'Supra-arcade downflows above the loop tops in the hot channels are not drawn.',
       source: 'McKenzie & Hudson 1999, ApJ 519, L93.' },
+    { id: 'looptop_ridge', what: 'The tops of a real arcade\'s hot loops merge into one continuous bright ridge (thousands of unresolved loops); ours are a few dozen drawn loops whose tops are separate. A spine through the newest loops\' tops is the candidate.',
+      source: 'Bright looptop sources and the ridge they form along a flare arcade in soft X-rays and the hot EUV channels (e.g. Masuda et al. 1994; Warren et al. 2011, on the 131 Å arcade). From memory.' },
+    { id: 'rope_front', what: 'An erupting rope drives a bright leading edge and sheath ahead of it (the three-part CME: front, cavity, core); only the cavity\'s field lines and the core filament are drawn.',
+      source: 'Illing & Hundhausen 1985, JGR 90, 275 (three-part structure). From memory.' },
 ]);
 
 /**

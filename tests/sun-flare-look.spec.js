@@ -247,6 +247,15 @@ test.describe('sun.html: the flare as drawn', () => {
         async function measureAt(t, model, tag) {
             await page.evaluate(({ t, model }) => { const s = window.__sun; s.setFlareModel(model); s.holdFlareAt(t); s.flareArcade.setVisible(true); }, { t, model });
             await page.waitForFunction((t) => Math.abs(window.__sun.flareGeometry.arcade.builtT - t) < 1e-6 && window.__sun.flareGeometry.arcade.loops > 0, t, { timeout: 30_000 });
+            // The arcade's exposure control eases toward its answer over a few frames: measure it settled.
+            await page.waitForFunction(() => {
+                const a = window.__sun.flareArcade.state, A = window.__sun.flareArcadeConst;
+                if (!a.autoExposure) return a.exposure === 1;
+                if (!(a.stack > 0)) return false;
+                const want = a.stack > A.AEC_TARGET ? Math.max(A.AEC_FLOOR, A.AEC_TARGET / a.stack) : 1;
+                return Math.abs(a.exposure - want) < 0.01;
+            }, null, { timeout: 60_000 });
+            const exposure = await page.evaluate(() => { const a = window.__sun.flareArcade.state; return { stack: a.stack, exposure: a.exposure, gain: a.gain, auto: a.autoExposure }; });
             const on = await grab(page);
             const proj = await projectedBox(page, 'active');
             await page.evaluate(() => window.__sun.flareArcade.setVisible(false));
@@ -254,7 +263,7 @@ test.describe('sun.html: the flare as drawn', () => {
             const off = await grab(page);
             await page.evaluate(() => window.__sun.flareArcade.setVisible(true));
             const px = arcadePixels(on, off);
-            out[tag] = { t, model: proj.model, pixels: px, projected: proj };
+            out[tag] = { t, model: proj.model, pixels: px, projected: proj, exposure };
             frames[tag] = on;
             if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.waitForFunction(() => window.__sun.flareGeometry.arcade.active, null, { timeout: 30_000 }); await settle(page); writeFileSync(join(SHOTS, `${tag}.png`), await page.screenshot()); }
             return out[tag];
@@ -295,16 +304,30 @@ test.describe('sun.html: the flare as drawn', () => {
         await expect.poll(() => page.evaluate(() => document.querySelector('#flare-caption .fc-text')?.textContent || ''), { timeout: 15_000 }).toContain('shape model: flare-shape-v1');
         void caption;
 
-        // NEGATIVE CONTROL (colour): the strand gain that clipped every loop to a white tube.
+        // THE ARCADE'S EXPOSURE CONTROL, and its NEGATIVE CONTROLS (colour): the same arcade with the control
+        // off, and then at the strand gain that clipped every loop to a white tube (as it shipped: no control).
         await page.evaluate(() => window.__sun.setFlareModel(null));
         const before = await measureAt(HOT_T, null, 'v2-hot-again');
+        await page.evaluate(() => window.__sun.flareArcade.setAutoExposure(false));
+        const open = await measureAt(HOT_T, null, 'v2-hot-exposure-off');
         await page.evaluate(() => window.__sun.flareArcade.setGain(2.2));
         const loud = await measureAt(HOT_T, null, 'v2-hot-gain2.2');
-        await page.evaluate(() => window.__sun.flareArcade.setGain(1.15));
-        console.log('flare look, clipped-white share of the lit pixels:', JSON.stringify({ shipped: before.pixels.white, gain22: loud.pixels.white, cool: cool.pixels.white }));
+        await page.evaluate(() => { const A = window.__sun.flareArcade; A.setGain(1.15); A.setAutoExposure(true); });
+        const AEC = await page.evaluate(() => window.__sun.flareArcadeConst);
+        console.log('flare look, clipped-white share of the lit pixels:', JSON.stringify({ shipped: before.pixels.white, exposureOff: open.pixels.white, gain22: loud.pixels.white, cool: cool.pixels.white,
+            exposure: { hot: before.exposure, cool: cool.exposure } }));
         expect(before.pixels.white, 'the hot arcade is not a white slab').toBeLessThan(0.45);
         expect(cool.pixels.white, 'the cooled arcade keeps its colour').toBeLessThan(0.20);
-        expect(loud.pixels.white, 'gain 2.2 clips far more of it').toBeGreaterThan(before.pixels.white + 0.10);
+        expect(loud.pixels.white, 'gain 2.2 with no exposure control clips far more of it').toBeGreaterThan(before.pixels.white + 0.10);
+        // The control only ever turns the gain DOWN, never below its floor, and what it holds is its own stated target.
+        for (const m of [before, cool]) {
+            expect(m.exposure.exposure).toBeLessThanOrEqual(1); expect(m.exposure.exposure).toBeGreaterThanOrEqual(AEC.AEC_FLOOR);
+            if (m.exposure.stack > AEC.AEC_TARGET) expect(m.exposure.exposure * m.exposure.stack, 'stack × exposure is the target').toBeGreaterThan(Math.min(AEC.AEC_TARGET, AEC.AEC_FLOOR * m.exposure.stack) - 0.02);
+        }
+        expect(open.exposure.exposure, 'off means off').toBe(1);
+        // In this close-up the hot arcade stacks past the target, so the control is at work — and without it more of the arcade is white.
+        expect(before.exposure.stack, 'the close-up stacks strands past the target (else this check is not exercising the control)').toBeGreaterThan(AEC.AEC_TARGET);
+        expect(open.pixels.white, 'with the control off, more of the hot arcade clips').toBeGreaterThan(before.pixels.white + 0.03);
 
         // ── 3. THE RIBBONS ARE J-SHAPED ─────────────────────────────────────
         /** The flare's SURFACE light at one age under one model: arcade hidden, flares shown minus flares off. */

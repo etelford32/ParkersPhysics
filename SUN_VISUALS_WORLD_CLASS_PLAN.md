@@ -1127,6 +1127,65 @@ owner.*
     would darken observed pixels); a reported CME's measured speed is not
     used — the speed is a law of the flare class; the rope has no leading
     edge or sheath; verified on a software rasteriser only.
+- **2026-11-21 (fourth) — the rope and the hot arcade, looked at and fixed.**
+  The first replay of an eruption on the page showed four things no gate had
+  been asked about. Each is now measured.
+  - **The camera ran ahead of the rope.** The eruption shot's keys are the
+    rope's heights at future times; the flight was sampled on the wall clock,
+    and the flare clock is deliberately not the wall clock (it caps a long
+    frame at one second). At 2 s per frame the camera had pulled back to
+    7.6 R☉ with the rope at 1.75, and was home before the rope had faded. The
+    shot now reads the flare clock (`CAM.followClock`, pure): shot seconds are
+    model time ÷ the rate the keys were written at, so the camera is where the
+    rope is at any frame rate. A stopped model clock hands the shot back to
+    the wall clock after 1.5 s — pausing must not hold the camera either. The
+    node gate flies the shot at 60 fps, 4 fps, 0.5 fps and 0.29 fps; the wall
+    clock is its negative control (fine at 60 fps, ahead of the rope and home
+    early at 0.5). The follow also runs until the rope reaches its fade
+    radius (up to 100 s) rather than for a fixed 40 s.
+  - **The rope was a hairpin.** Its feet are 0.19 R☉ apart and that stayed
+    the only width it had, while its tube grew with height — by ~0.5 R☉ up
+    the tube was fatter than the gap between its own legs. Targets first: two
+    rows (the axis's angular width from Sun centre with the apex at 2 R☉,
+    25–80°; the clear gap between the legs ÷ apex height) took the shipped
+    model from 100 to 94.3 (12° and −0.26). `rope.spread` / `rope.spreadH`
+    lean the legs out along the foot-to-foot line as the rope rises: 37° and
+    0.64, and 100 again over 33 rows.
+  - **Leaning legs broke the frame.** The tube's frame was "the vertical,
+    made perpendicular to the axis" at every point — undefined where the axis
+    is vertical, which a leg that leans out passes through. Every strand was
+    pinched onto one line at each shoulder. The frame is now carried from the
+    apex by parallel transport (the gate keeps the old construction as its
+    negative control: a turn of more than 90° between two samples).
+  - **Strands.** Field lines lie on nested shells spread by the golden ratio,
+    with uneven brightness, instead of two shells at even phases (it read as
+    a spirograph). The cool strands are no longer just more field lines: a
+    filament's material sits in the dips of the helical field, on the rope's
+    underside, so they are a thin bundle offset below the axis
+    (`rope.filament`). In 304 Å the rope is now a braided prominence
+    erupting; in 131 Å, the hot channel around it. Drawn threads widen as
+    (h/h0)^0.7 and the display dilution is 0.6 — at 1, with hairline strands,
+    the rope was at 5 % brightness and sub-pixel by 1.9 R☉ while the camera
+    pulled back to frame it. Both are display choices and say so.
+  - **The hot arcade was a clipped white comb.** Three causes, three fixes in
+    the strand view (`js/flare-arcade.js`). (1) Hot loops are fuzzy and cool
+    ones crisp: a just-formed loop is drawn 2.4× wider and 2.4× fainter and
+    sharpens as it cools — its light per unit length never changes. (2) The
+    arcade has its own exposure control, as an EUV imager does on a flare:
+    each frame the light its loops will put on screen is divided by the
+    screen area they cover, and above a target the gain comes down to hold it
+    (never up, never below a floor). `arcadeExposure` is pure and node-gated,
+    and its light constant is pinned to the strand shader's own profile.
+    (3) A pointed looptop is smaller than the ribbon drawn round it, and a
+    strand pointing at the camera has no direction on screen: both drew as
+    bright blocks at every looptop, and both now fade instead. Measured by
+    the look gate on the hot arcade in close-up: clipped-white share 1.6 %
+    (was 35 %); 38.6 % with the exposure control off; 66.5 % at the old gain
+    with no control. Placement is unchanged (within ~2 px).
+  - **Still open:** the looptops of a few dozen drawn loops do not yet merge
+    into the continuous bright ridge a real arcade shows — a spine through
+    the newest loops' tops is the next step there; the rope has no leading
+    edge or sheath; everything above is a software-rasteriser result.
 ---
 
 ## 1. Scope & locked decisions

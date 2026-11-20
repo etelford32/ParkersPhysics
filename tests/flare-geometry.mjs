@@ -11,6 +11,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import * as THREE from '../js/vendor/three-0.160.0/three.module.js';
+import { arcadeExposure, AEC_TARGET, AEC_FLOOR, AEC_FILL, STRAND_LIGHT, HOT_FUZZ } from '../js/flare-arcade.js';
+import { readFileSync as _readArcade } from 'node:fs';
 import {
     diffRotFactor, slotRotAngle, solarEphemeris, heliographicToVec, REAL_TIME_ROT_MUL,
 } from '../js/sun-observed.js';
@@ -759,6 +761,47 @@ await ok('rope geometry: feet at the hooks\' centres, an orthonormal frame, a si
     close(winding(right[0], axr), P.twist, 0.02, 'χ = −1 winds right-handed');
     // Deterministic: the same flare draws the same rope.
     assert.deepEqual(M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', n: 6 })[3].pts[40], M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', n: 6 })[3].pts[40]);
+});
+
+await ok('the arcade\'s exposure control: untouched below its target, holds the target above it, never below its floor, never up', async () => {
+    const loop = (o) => ({ opacity: 0.5, lenPx: 300, halfPx: 2, x0: 100, x1: 400, y0: 100, y1: 300, ...o });
+    // One loop over a big box: far below the target, exposure exactly 1.
+    const one = arcadeExposure([loop()]);
+    close(one.light, 0.5 * 300 * 2 * STRAND_LIGHT, 1e-9); close(one.areaPx, 300 * 200 * AEC_FILL, 1e-9);
+    assert.ok(one.stack < AEC_TARGET); assert.equal(one.exposure, 1);
+    // Light adds, the box does not grow: N identical loops stack N-fold.
+    const many = arcadeExposure(Array.from({ length: 40 }, () => loop()));
+    close(many.stack, 40 * one.stack, 1e-9);
+    assert.ok(many.stack > AEC_TARGET);
+    close(many.exposure * many.stack, AEC_TARGET, 1e-12, 'stack × exposure = the target');
+    // The same arcade seen from twice as far: lengths and widths halve, the box quarters — stacking is unchanged… until
+    // the strands hit their pixel floor, where width stops shrinking and the stacking RISES.
+    const far = arcadeExposure(Array.from({ length: 40 }, () => loop({ lenPx: 150, halfPx: 1, x0: 0, x1: 150, y0: 0, y1: 100 })));
+    close(far.stack, many.stack, 1e-9);
+    const floored = arcadeExposure(Array.from({ length: 40 }, () => loop({ lenPx: 150, halfPx: 2, x0: 0, x1: 150, y0: 0, y1: 100 })));
+    close(floored.stack, 2 * many.stack, 1e-9);
+    // Edge-on: the box collapses to a line and is held at two pixels across, not zero.
+    const edge = arcadeExposure([loop({ x0: 200, x1: 200 })]);
+    assert.ok(Number.isFinite(edge.stack)); close(edge.areaPx, 2 * 200 * AEC_FILL, 1e-9);
+    // The floor, and the gain in the estimate.
+    assert.equal(arcadeExposure(Array.from({ length: 4000 }, () => loop())).exposure, AEC_FLOOR);
+    close(arcadeExposure([loop()], { gain: 2 }).stack, 2 * one.stack, 1e-12);
+    // Nothing drawn: no division by nothing.
+    assert.deepEqual(arcadeExposure([]), { stack: 0, exposure: 1, light: 0, areaPx: 0 });
+    assert.deepEqual(arcadeExposure([loop({ opacity: 0 })]), { stack: 0, exposure: 1, light: 0, areaPx: 0 });
+    // STRAND_LIGHT is the strand shader's own cross-profile × its mean along-loop factor — integrated here from the
+    // shader's expressions (found in the source, so a retuned profile fails this until the constant follows).
+    const src = _readArcade(new URL('../js/flare-arcade.js', import.meta.url), 'utf8');
+    for (const frag of ['exp(-sw * sw * 1.4)', 'exp(-sw * sw * 0.14) * (1.0 - vSide * vSide)', 'core * mix(0.30, 1.0, vFloor) + 0.11 * halo', '(0.30 + 0.70 * along)', '(1.0 + 0.8 * core)', 'mix(0.45, 1.0, sA)', '0.50 + 0.50 * (1.0 - sA * sA)'])
+        assert.ok(src.includes(frag), `the strand shader still reads "${frag}"`);
+    const K = 4; let cross = 0;
+    for (let i = 0; i < 4000; i++) { const side = -1 + (i + 0.5) / 2000, sw = side * K, core = Math.exp(-sw * sw * 1.4), halo = Math.exp(-sw * sw * 0.14) * (1 - side * side); cross += (core + 0.11 * halo) * (1 + 0.8 * core) * (K / 2000); }
+    let hot = 0, cool = 0;
+    for (let i = 0; i < 1000; i++) { const sA = Math.sin(Math.PI * (i + 0.5) / 1000); hot += (0.30 + 0.70 * (0.45 + 0.55 * sA)) / 1000; cool += (0.30 + 0.70 * (0.50 + 0.50 * (1 - sA * sA))) / 1000; }
+    const light = cross * 0.5 * (hot + cool);
+    assert.ok(Math.abs(light - STRAND_LIGHT) < 0.06 * STRAND_LIGHT, `STRAND_LIGHT ${STRAND_LIGHT} vs the shader's ${light.toFixed(3)} (cross ${cross.toFixed(3)}, along ${hot.toFixed(3)} hot / ${cool.toFixed(3)} cool)`);
+    // Fuzz conserves a strand's light: HOT_FUZZ × wider, ÷ HOT_FUZZ fainter (both in the shader).
+    assert.ok(HOT_FUZZ > 1 && src.includes('u_halfW * vFuzz') && src.includes('* vEndOn / vFuzz'));
 });
 
 console.log(`\n${passes} passed, ${failures} failed`);
