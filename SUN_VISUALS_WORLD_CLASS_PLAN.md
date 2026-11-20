@@ -973,11 +973,22 @@ owner.*
     derives the camera distance so the ribbons' 1/e length fills
     `FLARE_FILL` of the frame; the typed per-class distances left a
     real-size arcade a sixth of the picture (the gate's negative control).
+  - **Gates, and what they found.** Every Sun spec passes on the final code
+    (60 browser tests; node gates all green). Three things the run turned up:
+    a flare began with an EMPTY arcade (the zip started from the exact centre
+    and no station sits there — the central `ZIP_CORE` now forms at onset);
+    the Sun Watch rows and the region popup's flare list still started a
+    flare by hand (both now go through `playFlare` as a replay from onset);
+    and the hero framing costs fill rate — 495 → 620–672 ms/frame on
+    SwiftShader, against 799 ms for the OLD code with the Sun at the new
+    size, so per pixel the page is cheaper (two specs carry a 150 s budget
+    for it). The real-frame probe was sampling a frame one framing behind
+    the camera under load (5 failures in 6, identical numbers); it now waits
+    for a settled camera and a frame drawn with it.
   - **Still open:** all of it is verified on a software rasteriser only.
     The loops are still too regular up close (a comb); the flash's lifetime
-    is in sim time and could not be judged at 1–2 fps; Sun Watch's flare
-    rows still start a flare by hand (a seventh path, not yet through
-    `playFlare`); model field lines still draw over observed pixels.
+    is in sim time and could not be judged at 1–2 fps; model field lines
+    still draw over observed pixels.
 
 ---
 
@@ -1450,8 +1461,8 @@ log. Re-read CLAUDE.md §5 before opening it.
 - **Cinematic mode in `?preview=1`** and depth of field — the Phase 5 items
   not built on 2026-11-20. (Per-loop variation in the arcade shipped the same
   day: `arcadeShells`.)
-- **Route Sun Watch's flare rows through `playFlare`** — `onFlareSelect` in
-  sun.html still calls `setFlareSite` + friends by hand.
+- ~~Route Sun Watch's flare rows through `playFlare`~~ — DONE 2026-11-20
+  (and the region popup's flare list).
 
 - **GONG far-side plage seeding** (`/api/solar/farside?format=series` →
   the strongest detections modulate a far-hemisphere plage term; no
