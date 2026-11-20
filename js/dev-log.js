@@ -130,6 +130,22 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'bz-column', date: '2026-11-20', pr: 1085,
+      title: 'Bz Column: the Sun\'s north–south field followed from L1 to the ground', kind: 'simulation',
+      section: 'space-weather', icon: 'magnet',
+      summary: 'A new page follows the interplanetary field down through ten altitudes, from three spacecraft a million '
+             + 'and a half kilometres upstream to fourteen observatories on the ground, and marks every value as '
+             + 'measured, estimated or forecast. Each prediction it makes is scored in public against the simplest alternative.',
+      highlights: [
+          'The page opens on a cut through Earth from noon to midnight: each arrow is one minute of solar wind an L1 spacecraft has already measured, drawn where that wind is right now on its way in.',
+          'Three L1 spacecraft are kept separate and combined into one value with an error bar, instead of the single-spacecraft number most displays show.',
+          'USGS ground data is read once a second. A one-minute product reads the peak rate of change several times too low, and the page prints both.',
+          'Tested over 131 days of our own record: given the measured wind, the ring-current model beats "no change" during disturbed periods from 2 to 24 hours. As a forecast beyond about an hour it does not, and the page says so.',
+          'Where a prediction loses to its control it is shown as losing. On the first live day, two of them did.',
+          'One rung, low Earth orbit, is marked "not built": no public instrument reports there in real time.',
+          'Correction: the route that feeds live observatory data to TIGA and Inner Earth was reading station coordinates from a field USGS does not send, and returned an error while USGS was healthy. It now returns all fourteen stations.',
+      ],
+      links: [{ href: 'bz.html' }, { href: 'tiga.html' }] },
     { id: 'cme-calendar-daily-ledger', date: '2026-11-09', pr: 1080,
       title: 'CME forecast calendar: every day now says what was checked', kind: 'fix',
       section: 'space-weather', icon: 'flux-rope',

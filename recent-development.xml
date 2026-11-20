@@ -11,12 +11,22 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Mon, 09 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Fri, 20 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Bz Column: the Sun&#39;s north–south field followed from L1 to the ground</title>
+      <link>https://parkersphysics.com/recent-development.html#bz-column</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#bz-column</guid>
+      <pubDate>Fri, 20 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Space Weather</category>
+      <description>&lt;p&gt;A new page follows the interplanetary field down through ten altitudes, from three spacecraft a million and a half kilometres upstream to fourteen observatories on the ground, and marks every value as measured, estimated or forecast. Each prediction it makes is scored in public against the simplest alternative.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The page opens on a cut through Earth from noon to midnight: each arrow is one minute of solar wind an L1 spacecraft has already measured, drawn where that wind is right now on its way in.&lt;/li&gt;&lt;li&gt;Three L1 spacecraft are kept separate and combined into one value with an error bar, instead of the single-spacecraft number most displays show.&lt;/li&gt;&lt;li&gt;USGS ground data is read once a second. A one-minute product reads the peak rate of change several times too low, and the page prints both.&lt;/li&gt;&lt;li&gt;Tested over 131 days of our own record: given the measured wind, the ring-current model beats &amp;quot;no change&amp;quot; during disturbed periods from 2 to 24 hours. As a forecast beyond about an hour it does not, and the page says so.&lt;/li&gt;&lt;li&gt;Where a prediction loses to its control it is shown as losing. On the first live day, two of them did.&lt;/li&gt;&lt;li&gt;One rung, low Earth orbit, is marked &amp;quot;not built&amp;quot;: no public instrument reports there in real time.&lt;/li&gt;&lt;li&gt;Correction: the route that feeds live observatory data to TIGA and Inner Earth was reading station coordinates from a field USGS does not send, and returned an error while USGS was healthy. It now returns all fourteen stations.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/bz.html&quot;&gt;Open Bz Column&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/tiga.html&quot;&gt;Open TIGA · Geomagnetic&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>CME forecast calendar: every day now says what was checked</title>
