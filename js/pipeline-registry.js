@@ -218,6 +218,14 @@ export const PIPELINES = [
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
       notes: 'B4 of the Bz engine and the endpoint pages read (through js/bz-engine-provider.js): every rung from L1 to the ground in one object, each tagged MEASURED / ESTIMATED / FORECAST / NOT_BUILT / NOT_AVAILABLE with sigma, basis and caveats (js/bz/column.js). Five lower rungs are NOT_BUILT on purpose and say so. Degrades by rung without 5xx: one measured end down (L1 or GOES) = freshness:stale with reasons and that rung NOT_AVAILABLE; both down = freshness:expired with the ladder still returned. Tries the 7-day GOES files first (unverified) and falls back to the 1-day ones; `feeds` reports which answered.' },
 
+    { id: 'bz-ground',          label: 'Bz engine · ground at 1 s + ring current',
+      endpoint: '/api/bz/ground',
+      probePath: '/api/bz/ground?summary=1',
+      category: 'space-weather', upstream: 'USGS Geomagnetism Program + NOAA SWPC',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 25_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B5 of the Bz engine: the 14 USGS observatories at ONE SECOND (dB/dt with what a minute product would have read, Pc3-5 bands, per-station equivalent current, a REGIONAL electrojet proxy that is not AL/AU, sudden impulses and the timing score against predicted pressure-jump arrivals) plus the ring-current rung (hourly Dst beside js/ring-current-model.js driven by the arrived wind). Fans out 28 USGS requests; a station that fails is a dropout named in reasons (stations_down:…) and the row reads stale, not broken. No station at all = freshness:expired. No query parameter selects a station or URL.' },
+
     { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
       endpoint: '/api/bz/feeds?feed=geo-mag',
       probePath: '/api/bz/feeds?feed=geo-mag&meta=1',

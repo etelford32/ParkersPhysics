@@ -7,7 +7,8 @@
  * `buildColumn` turns the engine's analyses into one list of RUNGS, top
  * (L1) to bottom (the ground), each carrying:
  *
- *   kind     MEASURED · ESTIMATED · FORECAST · NOT_BUILT   (plan §2 — never
+ *   kind     MEASURED · ESTIMATED · FORECAST · NOT_BUILT · NOT_AVAILABLE ·
+ *            DELEGATED (another part of the site owns it)   (plan §2 — never
  *            omitted, never merged: an estimate must not wear a
  *            measurement's clothes)
  *   values   the numbers, each with its own unit in the key
@@ -41,11 +42,12 @@ function arrivedIndex(arrivalMs, tMs) {
 }
 
 /**
- * @param {{ flux: object|null, geo: object|null, nowMs: number }} input
+ * @param {{ flux: object|null, geo: object|null, ground?: object|null, ring?: object|null, nowMs: number }} input
+ *        ground = analyzeGround(...), ring = analyzeRing(...) (js/bz/ground-analysis.js)
  *        flux = analyzeFlux(...) (with `_series`), geo = analyzeGeo(...)
  * @returns {{ time:string, rungs:Array, unverified:string[], summary:object }}
  */
-export function buildColumn({ flux, geo, nowMs }) {
+export function buildColumn({ flux, geo, ground = null, ring = null, nowMs }) {
     const rungs = [];
     const unverified = new Set();
     const w = flux?._series ?? null;
@@ -144,14 +146,56 @@ export function buildColumn({ flux, geo, nowMs }) {
         rungs.push({ id: 'geosynchronous', label: 'Geosynchronous orbit', kind: 'NOT_AVAILABLE', values: null, basis: 'no GOES magnetometer data', caveats: [] });
     }
 
-    // ── 4–8. not built — listed so the ladder cannot read as complete ────
-    for (const [id, label, where, phase, note] of [
-        ['ring_current', 'Ring current', '2–6 R_E', 'B5+', 'the site\'s ring-current model is not joined to this ladder yet'],
-        ['leo', 'LEO / topside', '400–850 km', 'B5', 'no public real-time instrument; field-aligned currents and Poynting flux will be ESTIMATED'],
-        ['e_region', 'E-region', '~110 km', 'B5', 'equivalent currents from ground magnetometers, regional only'],
-        ['ground', 'Ground', '0 km', 'B5', '1-second USGS data is confirmed live (~2 min behind) but not ingested by the engine yet'],
-        ['subsurface', 'Below ground', 'conducting Earth', 'B5', 'hand-off to the existing geoelectric kernel'],
-    ]) rungs.push({ id, label, where, kind: 'NOT_BUILT', values: null, basis: `planned for ${phase}`, caveats: [note] });
+    // ── 4. ring current: measured Dst beside the site's own Dst model ────
+    if (ring?.measured) {
+        const m = ring.model;
+        rungs.push({ id: 'ring_current', label: 'Ring current', where: '2–6 R_E (seen from the ground as Dst)',
+            kind: 'MEASURED', time: ring.measured.time,
+            values: { dst_nt: ring.measured.dst_nt },
+            model: m ? { kind: m.kind, time: m.latest.time, dst_nt: m.latest.dst_nt, anchored_at: m.anchored_at,
+                skill_vs_persistence: m.score.skill_vs_persistence, rmse_nt: m.score.rmse_nt, hours_scored: m.score.hours } : null,
+            basis: 'hourly Kyoto quicklook Dst; model = O\'Brien–McPherron (js/ring-current-model.js) driven by the arrived wind, anchored once and free-run',
+            caveats: ['Dst is one number for a current that is not symmetric; it is hourly and about an hour old',
+                ...(m ? [] : ['no arrived wind: the model was not run'])] });
+    } else {
+        rungs.push({ id: 'ring_current', label: 'Ring current', where: '2–6 R_E', kind: 'NOT_AVAILABLE', values: null, basis: 'no Dst data', caveats: [] });
+    }
+
+    // ── 5. LEO: nothing to measure with and no model chosen ──────────────
+    rungs.push({ id: 'leo', label: 'LEO / topside', where: '400–850 km', kind: 'NOT_BUILT', values: null,
+        basis: 'no public real-time instrument; a field-aligned-current / Poynting-flux model has not been chosen',
+        caveats: ['the candidate empirical models carry licence terms that have not been checked — an owner decision (plan §16)'] });
+
+    // ── 6–7. E-region and the ground, both from the USGS network ─────────
+    if (ground) {
+        const strongest = ground.stations.filter((s) => s.equivalent_current).sort((a, b) => b.equivalent_current.a_per_km - a.equivalent_current.a_per_km)[0] ?? null;
+        rungs.push({ id: 'e_region', label: 'E-region currents', where: '~110 km, over the stations only',
+            kind: 'ESTIMATED', time: strongest?.latest ?? null,
+            values: { strongest_a_per_km: strongest?.equivalent_current.a_per_km ?? null, at_station: strongest?.iaga ?? null,
+                toward_deg: strongest?.equivalent_current.toward_deg ?? null,
+                electrojet_westward_nt: ground.electrojet_proxy.westward_nt, electrojet_eastward_nt: ground.electrojet_proxy.eastward_nt,
+                auroral_stations: ground.electrojet_proxy.stations.length },
+            basis: 'infinite-sheet equivalent current of each station\'s horizontal perturbation; electrojet proxy = extreme ΔX over the auroral-zone stations',
+            caveats: [ground.equivalent_current_note, 'the proxy is NOT the AL/AU index', 'baseline is a trailing median (provisional)'] });
+        rungs.push({ id: 'ground', label: 'Ground', where: `0 km — ${ground.stations_total} USGS observatories, ${ground.stations_1s} at 1 s`,
+            kind: 'MEASURED', time: ground.dbdt?.at_time ?? null,
+            values: { dbdt_peak_nt_s: ground.dbdt?.peak_nt_s ?? null, at_station: ground.dbdt?.at_station ?? null,
+                minute_product_would_read_nt_s: ground.dbdt?.minute_product_would_read_nt_s ?? null,
+                dbdt_underread_median: ground.dbdt?.underread_median ?? null,
+                sudden_impulses: ground.sudden_impulses.length, latency_s: ground.latency_s },
+            timing_score: ground.timing_score,
+            basis: 'USGS variation data at one second; dB/dt differenced only across consecutive seconds',
+            caveats: ['one continent\'s network', ...(ground.stations_1s < ground.stations_total ? [`${ground.stations_total - ground.stations_1s} station(s) without 1-second data`] : [])] });
+    } else {
+        rungs.push({ id: 'e_region', label: 'E-region currents', where: '~110 km', kind: 'NOT_AVAILABLE', values: null, basis: 'no ground magnetometer data', caveats: [] });
+        rungs.push({ id: 'ground', label: 'Ground', where: '0 km', kind: 'NOT_AVAILABLE', values: null, basis: 'no ground magnetometer data', caveats: [] });
+    }
+
+    // ── 8. below ground: the site already has this, so it is not rebuilt ─
+    rungs.push({ id: 'subsurface', label: 'Below ground', where: 'conducting Earth', kind: 'DELEGATED', values: null,
+        basis: 'the geoelectric field is the existing nowcast (js/earth-interior/geoelectric-nowcast.js, earth-interior.html) on the same USGS stations',
+        href: 'earth-interior.html',
+        caveats: ['that kernel is validated at one-minute cadence with a 4-hour warm-up; it has NOT been run on the 1-second series here'] });
 
     const kinds = {};
     for (const r of rungs) kinds[r.kind] = (kinds[r.kind] ?? 0) + 1;

@@ -21,6 +21,9 @@ on:
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
       - 'js/geomag/igrf.js'
+      - 'js/geomag/observatories.js'
+      - 'api/_lib/bz-ground-fetch.js'
+      - 'tests/helpers/bz-planted-ground.mjs'
       - 'tests/helpers/bz-planted-wind.mjs'
       - 'js/flux-rope-noise.js'
       - 'api/_lib/bz-fetch.js'
@@ -37,6 +40,9 @@ on:
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
       - 'js/geomag/igrf.js'
+      - 'js/geomag/observatories.js'
+      - 'api/_lib/bz-ground-fetch.js'
+      - 'tests/helpers/bz-planted-ground.mjs'
       - 'tests/helpers/bz-planted-wind.mjs'
       - 'js/flux-rope-noise.js'
       - 'api/_lib/bz-fetch.js'
@@ -74,3 +80,5 @@ jobs:
         run: node tests/bz-geo.mjs
       - name: column — shock jump, learning filter (OSSE), ladder, provider, route
         run: node tests/bz-column.mjs
+      - name: ground at 1 s — dB/dt, impulses + timing score, equivalent current, ring current, route
+        run: node tests/bz-ground.mjs

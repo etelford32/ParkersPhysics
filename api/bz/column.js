@@ -22,25 +22,30 @@ import { FEEDS, runFeed, feedFreshness } from '../../js/bz/feeds.js';
 import { analyzeFlux } from '../../js/bz/flux-analysis.js';
 import { analyzeGeo } from '../../js/bz/geo-analysis.js';
 import { buildColumn } from '../../js/bz/column.js';
+import { analyzeGround, analyzeRing } from '../../js/bz/ground-analysis.js';
+import { fetchGround } from '../_lib/bz-ground-fetch.js';
+import { normalizeDst, DST_URL } from '../../js/bz/feeds.js';
 
 export const config = { runtime: 'edge' };
 
 export default async function handler() {
     const nowMs = Date.now();
-    let geo, mag, ephem, plasma;
+    let geo, mag, ephem, plasma, g, dstRes;
     try {
-        [geo, mag, ephem, plasma] = await Promise.all([
+        [geo, mag, ephem, plasma, g, dstRes] = await Promise.all([
             runFeed('geo-mag', { fetchJson, nowMs }),
             runFeed('l1-mag', { fetchJson, nowMs }),
             runFeed('l1-ephem', { fetchJson, nowMs }),
             runFeed('l1-plasma', { fetchJson, nowMs }),
+            fetchGround(nowMs).catch(() => ({ fast: {}, slow: {}, failed: [] })),
+            fetchJson(DST_URL),
         ]);
     } catch (e) {
         return jsonError('internal', String(e?.message ?? e).slice(0, 160), { status: 500 });
     }
 
     const reasons = [];
-    let flux = null, geoA = null;
+    let flux = null, geoA = null, ground = null, ring = null;
     try {
         if (mag.data) flux = analyzeFlux({ mag: mag.data, ephem: ephem.data, plasma: plasma.data, nowMs, minutes: 1 });
         else reasons.push('l1_mag_unavailable');
@@ -48,11 +53,16 @@ export default async function handler() {
         if (mag.data && !ephem.data) reasons.push('ephemerides_unavailable');
         if (geo.data) geoA = analyzeGeo({ geo: geo.data, wind: flux?._series ?? null, nowMs, minutes: 1 });
         else reasons.push('goes_mag_unavailable');
+        ground = analyzeGround({ fast: g.fast, slow: g.slow, wind: flux?._series ?? null, nowMs });
+        if (!ground) reasons.push('ground_unavailable');
+        const dst = dstRes.ok ? normalizeDst(dstRes.body) : [];
+        ring = analyzeRing({ dst, wind: flux?._series ?? null, nowMs });
+        if (!ring) reasons.push('dst_unavailable');
     } catch (e) {
         return jsonError('internal', `analysis: ${String(e?.message ?? e).slice(0, 140)}`, { status: 500 });
     }
 
-    const column = buildColumn({ flux, geo: geoA, nowMs });
+    const column = buildColumn({ flux, geo: geoA, ground, ring, nowMs });
     const l1Fresh = flux ? feedFreshness(FEEDS['l1-mag'], { rows: 1, age_s: flux.age_s }) : 'expired';
     const geoFresh = geo.data ? feedFreshness(FEEDS['geo-mag'], geo.data) : 'expired';
     let freshness = 'fresh';
@@ -66,7 +76,8 @@ export default async function handler() {
         freshness,
         ...(reasons.length ? { reasons } : {}),
         age_seconds: flux?.age_s ?? geo.data?.age_s ?? null,
-        feeds: { l1_mag: mag.source_id, l1_plasma: plasma.source_id, l1_ephem: ephem.source_id, geo_mag: geo.source_id },
+        feeds: { l1_mag: mag.source_id, l1_plasma: plasma.source_id, l1_ephem: ephem.source_id, geo_mag: geo.source_id,
+            ground_stations: ground ? ground.stations_total : 0, ground_1s: ground ? ground.stations_1s : 0, dst: !!ring },
         data: { updated: flux?.latest?.time ?? column.time, ...column },
     }, { maxAge: 60, swr: 60 });
 }

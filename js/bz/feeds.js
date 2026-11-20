@@ -193,6 +193,13 @@ export const FEEDS = Object.freeze({
     },
 });
 
+/**
+ * Hourly Dst (Kyoto quicklook, relayed by SWPC) — the ground shadow of the
+ * ring current. The URL is the one /api/noaa/dst has read in production for
+ * months; it is not part of FEEDS because nothing about it needs settling.
+ */
+export const DST_URL = `${SWPC}/products/kyoto-dst.json`;
+
 export const FEED_IDS = Object.freeze(Object.keys(FEEDS));
 
 // ── primitives ────────────────────────────────────────────────────────────
@@ -681,6 +688,66 @@ export function groundProbeUrl(candidate, nowMs, windowS = 600) {
         + `&type=variation&elements=X,Y,Z&sampling_period=${sp}&format=json`
         + `&starttime=${encodeURIComponent(isoSecond(nowMs, win))}`
         + `&endtime=${encodeURIComponent(isoSecond(nowMs, 0))}`;
+}
+
+/**
+ * A station's series URL for the engine's ground rung. Built ONLY from an
+ * IAGA code the caller took from the fixed roster and one of two sampling
+ * periods — there is no passthrough parameter.
+ */
+export function groundSeriesUrl(station, samplingPeriod, windowS, nowMs) {
+    const sp = samplingPeriod === 1 ? 1 : 60;
+    return `${USGS}?id=${encodeURIComponent(String(station).slice(0, 4))}`
+        + `&type=variation&elements=X,Y,Z&sampling_period=${sp}&format=json`
+        + `&starttime=${encodeURIComponent(isoSecond(nowMs, windowS))}`
+        + `&endtime=${encodeURIComponent(isoSecond(nowMs, 0))}`;
+}
+
+/**
+ * One USGS IAGA-JSON payload → a station series: coordinates READ FROM THE
+ * PAYLOAD (never typed — the TIGA rule), time tags, and X (north) / Y (east) /
+ * Z (down) as Float64Arrays with NaN gaps. The trailing null padding USGS adds
+ * up to "now" is CUT so the series ends at its newest real sample.
+ * @returns {{ iaga, lat, lon, t:Float64Array, x,y,z:Float64Array, cadence_s, valid, latency_s } | null}
+ */
+export function normalizeGroundSeries(payload, { nowMs, station = null } = {}) {
+    const times = Array.isArray(payload?.times) ? payload.times.map(timeMs) : [];
+    if (!times.length) return null;
+    const meta = payload?.metadata?.station ?? {};
+    const coords = meta.geometry?.coordinates ?? null;
+    const lonRaw = coords ? Number(coords[0]) : Number(meta.longitude);
+    const lat = coords ? Number(coords[1]) : Number(meta.latitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lonRaw)) return null;
+    const series = Array.isArray(payload?.values) ? payload.values : [];
+    const pick = (name) => series.find((q) => String(q?.id ?? q?.metadata?.element ?? '').toUpperCase() === name)?.values ?? null;
+    const X = pick('X'), Y = pick('Y'), Z = pick('Z');
+    if (!Array.isArray(X) || !Array.isArray(Y)) return null;
+    const val = (v) => { const n = num0(v); return n != null && Math.abs(n) < 88888 ? n : NaN; };
+    let end = -1;
+    for (let i = Math.min(times.length, X.length) - 1; i >= 0; i--) if (val(X[i]) === val(X[i]) && val(Y[i]) === val(Y[i]) && times[i] != null) { end = i; break; }
+    if (end < 0) return null;
+    const n = end + 1;
+    const t = new Float64Array(n), x = new Float64Array(n), y = new Float64Array(n), z = new Float64Array(n);
+    let valid = 0;
+    for (let i = 0; i < n; i++) {
+        t[i] = times[i] ?? NaN; x[i] = val(X[i]); y[i] = val(Y[i]); z[i] = Array.isArray(Z) ? val(Z[i]) : NaN;
+        if (x[i] === x[i] && y[i] === y[i]) valid++;
+    }
+    return { iaga: meta.id ?? station, lat, lon: ((lonRaw + 180) % 360 + 360) % 360 - 180, t, x, y, z,
+        cadence_s: measureCadenceS(Array.from(t).filter((q) => q === q)), valid,
+        latency_s: Number.isFinite(nowMs) ? Math.round((nowMs - t[end]) / 1000) : null };
+}
+
+/** kyoto-dst.json (object rows or a header table) → [{t, dst}] ascending; fills dropped. */
+export function normalizeDst(raw) {
+    const recs = toRecords(raw);
+    const { map } = resolveFields(unionKeys(recs), { time: ['time_tag', 'time'], dst: ['dst', 'dst_index'] });
+    const out = [];
+    for (const r of recs) {
+        const t = timeMs(map.time ? r[map.time] : null), d = map.dst ? num(r[map.dst]) : null;
+        if (t != null && d != null && Math.abs(d) < 1000) out.push({ t, dst: d });
+    }
+    return out.sort((a, b) => a.t - b.t);
 }
 
 /**

@@ -21,6 +21,7 @@ import { normalizeL1Mag, normalizeEphem, normalizeL1Plasma, normalizeGeoMag, FEE
 import { GOES_SLOTS, igrfEpn, meadEpn, arrivedValue } from '../js/bz/geo-residual.js';
 import { boundaryModel, NOMINAL_WIND } from '../js/geomag/geospace.js';
 import { rng, unitNormal, plantedField, plantedFeeds } from './helpers/bz-planted-wind.mjs';
+import { plantedGround, usgsResponder } from './helpers/bz-planted-ground.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let checks = 0;
@@ -172,7 +173,7 @@ const P = plantAll();
     assert.deepEqual(c.rungs.map((r) => r.id), RUNG_ORDER, 'every rung, top to bottom, including the ones not built');
     const by = Object.fromEntries(c.rungs.map((r) => [r.id, r]));
     for (const r of c.rungs) {
-        assert.ok(['MEASURED', 'ESTIMATED', 'FORECAST', 'NOT_BUILT', 'NOT_AVAILABLE'].includes(r.kind), `${r.id}: has a kind`);
+        assert.ok(['MEASURED', 'ESTIMATED', 'FORECAST', 'NOT_BUILT', 'NOT_AVAILABLE', 'DELEGATED'].includes(r.kind), `${r.id}: has a kind`);
         assert.ok(typeof r.basis === 'string' && r.basis.length > 5, `${r.id}: says where its numbers come from`);
         assert.ok(Array.isArray(r.caveats), `${r.id}: carries its caveats`);
     }
@@ -193,12 +194,14 @@ const P = plantAll();
         assert.ok(s.forecast.sigma_nt > 0, 'a forecast never travels without its σ');
         assert.equal(s.forecast.lead_min, 30);
     }
-    for (const id of ['ring_current', 'leo', 'e_region', 'ground', 'subsurface']) {
-        assert.equal(by[id].kind, 'NOT_BUILT'); assert.equal(by[id].values, null); assert.match(by[id].basis, /planned for B5/);
-    }
+    // With no ground / Dst input the lower rungs say so; LEO is the one rung not built; below ground is delegated.
+    for (const id of ['ring_current', 'e_region', 'ground']) { assert.equal(by[id].kind, 'NOT_AVAILABLE'); assert.equal(by[id].values, null); }
+    assert.equal(by.leo.kind, 'NOT_BUILT');
+    assert.equal(by.subsurface.kind, 'DELEGATED');
+    assert.equal(by.subsurface.href, 'earth-interior.html');
     assert.deepEqual(c.unverified.slice().sort(), ['mead_coefficients', 'siscoe_hill_coefficients']);
     assert.ok(by.magnetopause.caveats.some((x) => x.includes('UNVERIFIED')), 'the flag sits on the rung that uses the coefficients');
-    assert.equal(c.summary.kinds.NOT_BUILT, 5);
+    assert.equal(c.summary.kinds.NOT_BUILT, 1);
     assert.equal(c.summary.bz_l1_nt, by.l1.values.bz_nt);
     // No rung smuggles a number in without a kind beside it.
     const walk = (o, path) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { if (k === 'forecast' && v) assert.equal(v.kind, 'FORECAST', `${path}.forecast is tagged`); walk(v, `${path}.${k}`); } };
@@ -211,7 +214,7 @@ const P = plantAll();
     assert.equal(noGeo.rungs.length, RUNG_ORDER.length);
     const nothing = buildColumn({ flux: null, geo: null, nowMs: NOW });
     assert.deepEqual(nothing.rungs.map((r) => r.id), RUNG_ORDER);
-    assert.equal(nothing.rungs.filter((r) => r.kind === 'NOT_AVAILABLE').length, 5);
+    assert.equal(nothing.rungs.filter((r) => r.kind === 'NOT_AVAILABLE').length, 8);
     assert.equal(nothing.summary.bz_l1_nt, null, 'no data ⇒ null, never 0');
     assert.deepEqual(nothing.unverified, []);
     ok('column degrades by rung: a dead feed is NOT_AVAILABLE with its reason, the ladder keeps all ten rungs');
@@ -260,8 +263,13 @@ const P = plantAll();
     try {
         Date.now = () => NOW;
         const { default: handler } = await import('../api/bz/column.js');
+        const GROUND = usgsResponder(plantedGround({ nowMs: NOW }));
+        const DST = [['time_tag', 'dst'], ...Array.from({ length: 24 }, (_, i) => [new Date(NOW - (23 - i) * 3600e3).toISOString().slice(0, 13).replace('T', ' ') + ':00:00', '-20'])];
         const serve = (omit = []) => async (u) => {
             const s = String(u);
+            const gr = GROUND(s);
+            if (gr) return omit.includes('ground') ? new Response('down', { status: 503 }) : gr;
+            if (s.includes('kyoto-dst')) return omit.includes('ground') ? new Response('down', { status: 503 }) : Response.json(DST);
             if (s.includes('magnetometers-7-day')) return new Response('nope', { status: 404 });           // 7-day absent: the 1-day files carry on
             if (s.includes('goes/primary') && !omit.includes('geo')) return Response.json(P.rows.filter((r) => r.satellite === 19));
             if (s.includes('goes/secondary') && !omit.includes('geo')) return Response.json(P.rows.filter((r) => r.satellite === 18));
@@ -275,7 +283,11 @@ const P = plantAll();
         assert.equal(full.freshness, 'fresh');
         assert.deepEqual(full.data.rungs.map((r) => r.id), RUNG_ORDER);
         assert.equal(full.feeds.geo_mag, 'goes-primary-1d+goes-secondary-1d', 'reports which GOES files answered');
-        assert.ok(JSON.stringify(full).length < 12000, `the column is ${JSON.stringify(full).length} bytes`);
+        assert.ok(JSON.stringify(full).length < 14000, `the column is ${JSON.stringify(full).length} bytes`);
+        const fk = Object.fromEntries(full.data.rungs.map((r) => [r.id, r.kind]));
+        assert.equal(fk.ground, 'MEASURED'); assert.equal(fk.e_region, 'ESTIMATED'); assert.equal(fk.ring_current, 'MEASURED');
+        assert.equal(fk.subsurface, 'DELEGATED'); assert.equal(fk.leo, 'NOT_BUILT');
+        assert.equal(full.feeds.ground_stations, 14); assert.equal(full.feeds.ground_1s, 14);
         assert.equal(full.data.rungs[0]._series, undefined);
         assert.ok(!JSON.stringify(full).includes('_series'), 'the internal hand-off never leaves the server');
 
@@ -290,6 +302,12 @@ const P = plantAll();
         const noGeo = await (await handler(new Request('https://x.test/api/bz/column'))).json();
         assert.equal(noGeo.freshness, 'stale');
         assert.deepEqual(noGeo.reasons, ['goes_mag_unavailable']);
+
+        globalThis.fetch = serve(['ground']);
+        const noGround = await (await handler(new Request('https://x.test/api/bz/column'))).json();
+        assert.equal(noGround.freshness, 'stale');
+        assert.deepEqual(noGround.reasons, ['ground_unavailable', 'dst_unavailable']);
+        assert.equal(noGround.data.rungs.find((r) => r.id === 'ground').kind, 'NOT_AVAILABLE');
 
         globalThis.fetch = serve(['geo', 'l1']);
         const dead = await handler(new Request('https://x.test/api/bz/column'));
