@@ -359,8 +359,13 @@ await ok('arcadeShells: a NESTED arcade from the same laws — newest loops oute
     const FG = await import('../js/flare-geometry.js');
     const base = { latRad: 14 * DEG, lonRad: 28 * DEG, pilAngle: FG.pilAngleRad(14 * DEG), cls: 'X', n: 13 };
     const at = (t) => FG.arcadeShells({ ...base, t });
+    // A flare does not start with an empty arcade: the central ZIP_CORE is there at onset,
+    // one generation, age 0 (not yet faded in), and the ends have not lit.
+    const onset = at(0);
+    assert.ok(onset.length >= 1 && onset.length < 13, `loops at onset: ${onset.length}`);
+    assert.ok(onset.every(L => L.generation === 0 && L.age === 0 && L.alpha === 0), 'onset loops are the first generation, just forming');
     // Nothing before onset; one generation at first; more with time; never more than stations × generations.
-    assert.equal(at(0).length, 0);
+    assert.equal(at(-1).length, 0);
     const n5 = at(5).length, n60 = at(60).length, n300 = at(300).length;
     assert.ok(n5 >= 1 && n5 < n60 && n60 < n300, `${n5} ${n60} ${n300}`);
     assert.ok(n300 <= 13 * FG.ARCADE.MAX_GENERATIONS);

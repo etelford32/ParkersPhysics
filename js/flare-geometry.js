@@ -412,6 +412,7 @@ export const ARCADE = Object.freeze({
     FORM_GROWTH: 1.5,        // each generation waits this much longer than the last
     ZIP_T: 45,               // sim units for the brightening to reach the arcade's ends
     FADE_IN: 9,              // sim units for a new loop to come up
+    ZIP_CORE: 0.22,          // the central fraction of the arcade that lights AT onset (the zip starts from its edge)
     ALONG_JITTER: 0.38,      // station spacing irregularity, fraction of the mean spacing
     HEIGHT_JITTER: 0.14,     // loop-to-loop height scatter, fraction
     TIME_JITTER: 0.35,       // formation-time scatter, fraction of the gap to the next generation
@@ -451,8 +452,12 @@ export function arcadeShells({
         const jit = n === 1 ? 0 : (arcadeHash(seed, i, 0, 1) - 0.5) * ARCADE.ALONG_JITTER / (n - 1);
         const along = -span + 2 * span * Math.min(1, Math.max(0, u0 + jit));
         // The brightening zips outward along the PIL: this station's own clock.
-        const tl = t - ARCADE.ZIP_T * Math.abs(along) / Math.max(span, 1e-9);
-        if (!(tl > 0)) continue;
+        // The central ZIP_CORE of the arcade lights AT onset — with the zip
+        // starting from the exact centre there was no loop at all at t = 0
+        // (no station sits exactly on it), so a flare began with an empty arcade.
+        const off = Math.max(0, Math.abs(along) / Math.max(span, 1e-9) - ARCADE.ZIP_CORE) / (1 - ARCADE.ZIP_CORE);
+        const tl = t - ARCADE.ZIP_T * off;
+        if (!(tl >= 0)) continue;
         const mid   = unit(add(frame.radial, scale(frame.pilAxis, along)));
         const pilM  = unit(add(frame.pilAxis, scale(mid, -dot(mid, frame.pilAxis))));
         const loopM = cross(mid, pilM);
@@ -461,7 +466,7 @@ export function arcadeShells({
             const gap = arcadeFormTime(k + 1) - arcadeFormTime(k);
             const tForm = k === 0 ? 0 : arcadeFormTime(k) + (arcadeHash(seed, i, k, 2) - 0.5) * ARCADE.TIME_JITTER * gap;
             const age = tl - tForm;
-            if (!(age > 0)) break;                               // later generations have not formed
+            if (!(age >= 0)) break;                              // later generations have not formed
             const tau = Math.max(tForm, 0);
             const sep = ribbonSeparation(tau);
             const shear = arcadeShear(tau, complex);
