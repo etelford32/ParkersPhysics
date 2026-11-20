@@ -796,6 +796,9 @@ await ok('plasma along a loop: it fills from its feet at the evaporation speed, 
     const peakIn = (phase, lo, hi) => { let best = 0, at = 0; for (let i = 0; i <= 400; i++) { const arc = lo + (hi - lo) * i / 400; const v = FG.strandFlowGain(arc, 2, 0.3, 1, phase, 4); if (v > best) { best = v; at = arc; } } return at; };
     assert.ok(peakIn(0.30, 0.45, 0.70) > peakIn(0.20, 0.45, 0.70), 'above the parting point they move up');
     assert.ok(peakIn(0.30, 0.05, 0.28) < peakIn(0.22, 0.05, 0.28), 'below it they move down');
+    // A sheet line fades into both of its ends (a ribbon ends square; its halo must not).
+    assert.equal(FG.strandFlowGain(0, 2, 0.3, 1, 1.7, 2), 0); assert.equal(FG.strandFlowGain(1, 2, 0.3, 1, 1.7, 2), 0);
+    assert.ok(FG.strandFlowGain(0.5, 2, 0.3, 0, 1.7, 2) === 1, 'and is untouched in between');
 });
 
 await ok('STRAND_FLOW_GLSL is strandFlowGain: the shader text, transliterated to JS, gives the same numbers', async () => {

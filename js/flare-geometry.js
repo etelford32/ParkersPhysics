@@ -489,7 +489,9 @@ export function polylineLength(pts) {
  *            loop and the gain is exactly 1. p2 = rain (0…1): clumps, `k` to a leg, moving toward the feet
  *            as p3 (their travel, in clumps) grows.
  *   mode 2   a SHEET (arc 0 its lower end). p1 = where the flows part; p2 = how much of the pattern shows;
- *            p3 = travel: blobs move AWAY from p1 on both sides as it grows.
+ *            p3 = travel: blobs move AWAY from p1 on both sides as it grows. A sheet line FADES INTO BOTH ENDS:
+ *            a ribbon quad ends square, and the wide faint halo of an unfaded line drew as a rectangle of
+ *            light at each end of every sheet line (seen on the first captures).
  */
 export function strandFlowClump(x) {
     const a = 0.5 + 0.5 * Math.sin(6.2831853 * x);
@@ -513,6 +515,7 @@ export function strandFlowGain(arc, mode, p1, p2, p3, k) {
         const d2 = arc - p1;
         const side = d2 < 0.0 ? 0.41 : 0.0;
         g = mix(1.0, 0.45 + 1.1 * strandFlowClump(Math.abs(d2) * k - p3 + side), p2);
+        g = g * smoothstep(0.0, 0.12, arc) * (1.0 - smoothstep(0.88, 1.0, arc));
     }
     return g;
 }
@@ -537,6 +540,7 @@ export const STRAND_FLOW_GLSL = /* glsl */`
             float d2 = arc - p1;
             float side = d2 < 0.0 ? 0.41 : 0.0;
             g = mix(1.0, 0.45 + 1.1 * strandFlowClump(abs(d2) * k - p3 + side), p2);
+            g = g * smoothstep(0.0, 0.12, arc) * (1.0 - smoothstep(0.88, 1.0, arc));
         }
         return g;
     }
