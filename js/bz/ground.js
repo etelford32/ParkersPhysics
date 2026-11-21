@@ -64,6 +64,11 @@ export const GROUND_DEFAULTS = Object.freeze({
     neighbourFloorNt: 100,       // never flag a departure smaller than this
     neighbourMadFactor: 8,       // …or smaller than this many robust σ of the other stations
     neighbourMinOthers: 4,       // with fewer comparable stations there is no test, and no flag
+    // The SAME test on the peak rate of change (measured 2026-11-20 20:22 UT, the day the level test
+    // shipped: FRN's level was normal, +12 nT, but one second of its record jumped 2.544 nT/s while the
+    // other eight low/mid stations peaked at 0.06–0.15 — a spike, and it owned the network peak again).
+    // A real fast change at these latitudes is a sudden impulse and arrives at every station together.
+    neighbourDbdtFloorNtS: 0.5,  // never flag a rate less than this above the others
 });
 
 const MU0 = 4e-7 * Math.PI;
@@ -263,6 +268,32 @@ export function flagNeighbourOutliers(stations, opts = {}) {
     }
     // Flag after the loop: every station is judged against the same pool.
     for (const f of flagged) { f.s.suspect = true; f.s.suspectReason = 'neighbour'; f.s.neighbour = { excess_nt: f.excess, limit_nt: f.limit, others_median_nt: f.median }; }
+    return flagged.map((f) => f.s.iaga);
+}
+
+/**
+ * The neighbour test on dB/dt (see GROUND_DEFAULTS). Marks, in place, a LOW/MID-latitude station whose
+ * peak rate stands above the median of the other sound low/mid stations' peaks by more than
+ * max(floor, factor × 1.4826 × their MAD). It sets `dbdtSuspect` ONLY: a one-second spike says nothing
+ * against the station's level, so its perturbation and equivalent current stay in. Returns the codes.
+ *
+ * Same limit as the level test: it cannot tell a spike in the record from a real change confined to
+ * one low-latitude station, and it has not been tested on a real storm. The flagged station is still
+ * listed with its number.
+ */
+export function flagDbdtOutliers(stations, opts = {}) {
+    const o = { ...GROUND_DEFAULTS, ...opts };
+    const rate = (s) => s.dbdt?.peak_nt_s;
+    const pool = stations.filter((s) => s.zone === 'low-mid' && !s.suspect && rate(s) === rate(s) && rate(s) != null);
+    const flagged = [];
+    for (const s of pool) {
+        const others = pool.filter((q) => q !== s).map(rate);
+        if (others.length < o.neighbourMinOthers) continue;
+        const med = median(others), mad = median(others.map((v) => Math.abs(v - med)));
+        const limit = Math.max(o.neighbourDbdtFloorNtS, o.neighbourMadFactor * 1.4826 * mad);
+        if (rate(s) - med > limit) flagged.push({ s, excess: rate(s) - med, limit, median: med });
+    }
+    for (const f of flagged) { f.s.dbdtSuspect = true; f.s.dbdtNeighbour = { excess_nt_s: f.excess, limit_nt_s: f.limit, others_median_nt_s: f.median }; }
     return flagged.map((f) => f.s.iaga);
 }
 

@@ -55,6 +55,7 @@ export default async function handler(req) {
         return jsonError('internal', `analysis: ${String(e?.message ?? e).slice(0, 140)}`, { status: 500 });
     }
     if (g.failed.length) reasons.push(`stations_down:${g.failed.join(',')}`);
+    if (g.deadlineHit) reasons.push('usgs_slow');
     const upstream = g.diagnostics ? { usgs: g.diagnostics } : null;
 
     const base = { source: 'USGS Geomagnetism Program + NOAA SWPC via Vercel Edge · js/bz/ground-analysis.js', model: 'bz-ground-v0' };
@@ -67,7 +68,7 @@ export default async function handler(req) {
     if (freshness === 'fresh' && (ground.stations_1s === 0 || reasons.some((r) => !r.startsWith('stations_suspect')))) freshness = 'stale';
     if (ground.stations_1s === 0) reasons.push('no_1s_data');
     if (ground.suspect_stations.length) reasons.push(`stations_suspect:${ground.suspect_stations.join(',')}`);
-    if (summary) ground.stations = ground.stations.map(({ iaga, dipole_lat, zone, suspect, delta_nt, dbdt_peak_nt_s, dbdt_underread }) => ({ iaga, dipole_lat, zone, suspect, north_nt: delta_nt.north, dbdt_peak_nt_s, dbdt_underread }));
+    if (summary) ground.stations = ground.stations.map(({ iaga, dipole_lat, zone, suspect, delta_nt, dbdt_peak_nt_s, dbdt_underread, dbdt_suspect }) => ({ iaga, dipole_lat, zone, suspect, north_nt: delta_nt.north, dbdt_peak_nt_s, dbdt_underread, ...(dbdt_suspect ? { dbdt_suspect } : {}) }));
 
     return jsonOk({
         ...base, freshness, ...(reasons.length ? { reasons } : {}),
