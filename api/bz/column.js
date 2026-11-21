@@ -55,6 +55,7 @@ export default async function handler() {
         else reasons.push('goes_mag_unavailable');
         ground = analyzeGround({ fast: g.fast, slow: g.slow, wind: flux?._series ?? null, nowMs });
         if (!ground) reasons.push('ground_unavailable');
+        if (g.deadlineHit) reasons.push('usgs_slow');
         const dst = dstRes.ok ? normalizeDst(dstRes.body) : [];
         ring = analyzeRing({ dst, wind: flux?._series ?? null, nowMs });
         if (!ring) reasons.push('dst_unavailable');
