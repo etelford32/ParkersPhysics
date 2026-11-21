@@ -1221,6 +1221,33 @@ owner.*
     fixing it means changing the ribbon law, so it is on the backlog with
     its source. Supra-arcade downflows are not drawn. All six ranges are
     from memory and unverified, like the rest. Software rasteriser only.
+- **2026-11-22 (second) — the reconnection rate is tied to the rope's
+  acceleration (owner: "tie the reconnection rate to the rope's acceleration
+  next").** The ribbons mark where newly reconnected field meets the surface,
+  so the speed at which they part is the reconnection rate. In the model they
+  parted fastest at onset, 8.5 minutes before the rope accelerated; in real
+  flares the two rise and fall together.
+  - **Targets first.** Two rows — the lag of the ribbon-speed peak behind the
+    rope's acceleration peak (±3 min), and the correlation of the two curves
+    over the first half hour — took the shipped model from 100 to 95.5 (lag
+    −8.5 min, correlation 0.59).
+  - **The law.** The ribbons now ride the rope's own progress: separation =
+    start + slow creep + gain × (share of its final speed the rope has
+    gained). The slope of that share is the rope's acceleration, so the
+    ribbons are slow at onset (15 km/s over the first two minutes), fastest
+    as the rope launches, then creep at 3.7 km/s. Lag 0, correlation 1.00,
+    and 100 again over 41 rows; the old laws score 34.9.
+  - **What the sweep showed.** With no creep the ribbons stop dead after the
+    acceleration and the arcade shrinks as its shear relaxes (−2.4 km/s at
+    25–30 min). The creep that keeps both that row and the deceleration row
+    in range is 1.5–2.1 × 10⁻⁵ rad per unit; 1.5 is shipped.
+  - **Seen on the page.** The current sheet is as bright as the reconnection
+    is fast: faint at onset, brightest as the rope accelerates, a faint ray
+    afterwards.
+  - **A weak gate found on the way.** The check that every scored row
+    responds to some parameter had been passing for the "both ribbons hook"
+    row only because the then-zero creep was probed at an absurd value. It
+    now also probes each parameter switched off.
 ---
 
 ## 1. Scope & locked decisions

@@ -206,7 +206,7 @@ export function createFlareRope({
             mesh.material.userData.flowK.value = ss.clumps;
             mesh.visible = true; drawn++;
         }
-        lastSheet = ss ? { active: drawn > 0, lines: drawn, lowH: ss.lowH, highH: ss.highH, phase: ss.phase, x: ss.x } : null;
+        lastSheet = ss ? { active: drawn > 0, lines: drawn, lowH: ss.lowH, highH: ss.highH, phase: ss.phase, x: ss.x, rate: ss.rate, alpha: ss.alpha } : null;
         group.visible = true;
     }
 

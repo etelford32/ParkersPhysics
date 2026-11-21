@@ -287,12 +287,16 @@ export const FLARE_SHAPE_V2 = deepFreeze({
     classFactor: { A: 0.35, B: 0.45, C: 0.60, M: 0.85, X: 1.15 },
     ribbon: {
         sep0: 0.008,        // half-separation across the PIL at onset — ribbons start close to the inversion line
-        sepRate: 0,         // linear term, rad per sim unit (the v1 law; off)
+        sepRate: 1.5e-5,    // the slow creep of the gradual phase, rad per sim unit (3.7 km/s). It was 0 while the
+                            // saturating term carried the late motion; with the gain tied to the rope (couple) the
+                            // ribbons would stop dead after the acceleration and the arcade would SHRINK as its shear
+                            // relaxed (−2.4 km/s at 25–30 min, the `apex_rise_late` row) — swept: 1.5e-5…2.1e-5 holds 100, 2.4e-5 loses `sep_decel`
         sepGain: 0.032,     // reach of the saturating term per unit classFactor: sep → sep0 + sepGain·cf
         sepTau: 250,        // its e-folding, sim units — ribbons part fast, then slow
         wid0: 0.005, widRate: 6.0e-6,           // ribbon width (Gaussian scale) and its growth
         len0: 0.095, lenGrowT: 2500.0,          // along-PIL 1/e half-length per unit classFactor; σ² doubles in lenGrowT
         decayT: 175.0,                          // e-folding of the ribbon brightness
+        couple: 1,          // share of sepGain that follows the rope's progress: the ribbons part in step with the eruption
     },
     /** Shear angle: between the line joining a loop's feet and the normal to the PIL. Relaxes in tan-space. */
     shear: { onsetDeg: 62, onsetComplexDeg: 72, finalDeg: 22, relaxT: 250 },
@@ -351,7 +355,7 @@ export const FLARE_SHAPE_V1 = deepFreeze({
     id: 'flare-shape-v1',
     classFactor: { A: 0.35, B: 0.45, C: 0.60, M: 0.85, X: 1.15 },
     ribbon: { sep0: 0.020, sepRate: 2.5e-5, sepGain: 0, sepTau: 250,
-              wid0: 0.005, widRate: 6.0e-6, len0: 0.095, lenGrowT: 2500.0, decayT: 175.0 },
+              wid0: 0.005, widRate: 6.0e-6, len0: 0.095, lenGrowT: 2500.0, decayT: 175.0, couple: 0 },
     // tan(shear) was 0.45·e^(−t/250) + 0.12 (0.75 for δ regions): the same form, in angles.
     shear: { onsetDeg: Math.atan(0.57) / DEG, onsetComplexDeg: Math.atan(0.87) / DEG, finalDeg: Math.atan(0.12) / DEG, relaxT: 250 },
     // height was 2·sep·(0.6 + 0.7·cf), on the separation — not the footpoint chord.
@@ -578,8 +582,39 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         return P.classFactor[k] ?? P.classFactor.M;
     }
     /** Half-separation of the ribbons across the PIL: a fast start that saturates (bigger flares part further). */
-    const ribbonSeparation = (t, cls = 'M') =>
-        R.sep0 + t * R.sepRate + R.sepGain * classFactor(cls) * (1 - Math.exp(-Math.max(t, 0) / R.sepTau));
+    /**
+     * THE ERUPTION'S PROGRESS, 0 → 1: the share of its final speed the rope has gained since onset. Its
+     * rate of change IS the rope's acceleration (normalised), so anything that rides this curve rises and
+     * falls with the acceleration by construction.
+     */
+    const ropeProgress = (t) => {
+        const sg = (x) => 1 / (1 + Math.exp(-x)), s0 = sg(-RP.t0 / RP.tau);
+        return (sg((Math.max(t, 0) - RP.t0) / RP.tau) - s0) / Math.max(1 - s0, 1e-12);
+    };
+    /**
+     * Ribbon separation from the inversion line. The ribbons are where newly reconnected field meets the
+     * surface, so how fast they part is the reconnection rate — and that is observed to peak WITH the
+     * rope's acceleration, not at onset. `couple` is the share of the separation gain that follows the
+     * rope's progress (1 = the ribbons part in step with the eruption); the rest follows the old law,
+     * fastest at onset and slowing on `sepTau`. `sepRate` is the slow creep that goes on through the
+     * gradual phase. With `couple` 0 this is the law as shipped until 2026-11-22.
+     */
+    const ribbonSeparation = (t, cls = 'M') => {
+        const tt = Math.max(t, 0), early = 1 - Math.exp(-tt / R.sepTau);
+        const gain = R.couple > 0 ? (1 - R.couple) * early + R.couple * ropeProgress(tt) : early;
+        return R.sep0 + t * R.sepRate + R.sepGain * classFactor(cls) * gain;
+    };
+    /**
+     * The reconnection rate as the ribbons show it: `speed` = how fast one ribbon is moving from the
+     * inversion line (R☉ per sim unit), `norm` = that as a share of its peak over the event (0…1).
+     */
+    const _reconPeak = new Map();
+    function reconnectionRate(t, cls = 'M') {
+        const sp = (tt) => (ribbonSeparation(tt + 0.5, cls) - ribbonSeparation(Math.max(tt - 0.5, 0), cls)) / (tt >= 0.5 ? 1 : tt + 0.5);
+        if (!_reconPeak.has(cls)) { let pk = 0; for (let k = 0; k <= 360; k++) pk = Math.max(pk, sp(k * 2.5)); _reconPeak.set(cls, pk); }
+        const speed = Math.max(0, sp(Math.max(t, 0))), pk = _reconPeak.get(cls);
+        return { speed, norm: pk > 0 ? Math.min(1, speed / pk) : 0 };
+    }
     const ribbonWidth = (t) => R.wid0 + t * R.widRate;
     /**
      * Along-PIL 1/e half-length of the ribbons at onset, radians — SCALED BY CLASS.
@@ -966,9 +1001,13 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         const lenAt = (tt) => { const s2 = ropeState(tt, cls); return s2.apexH - s2.minorR - lowAt(tt); };
         const lowH = lowAt(t), highH = st.apexH - st.minorR, length = highH - lowH;
         const active = st.active && FL.sheetOut > 0 && length > 0;
+        // The sheet is where the reconnection is happening, so it is as bright as the reconnection is fast:
+        // `rate` is the ribbons' own (reconnectionRate), 0…1 of its peak. A floor keeps the faint ray that
+        // outlasts the eruption.
+        const rate = reconnectionRate(t, cls).norm;
         return {
-            active, lowH, highH, length: Math.max(length, 0), x: FL.sheetX, clumps: FL.sheetClumps,
-            alpha: active ? st.alpha * smooth01((length - 0.01) / 0.05) : 0,
+            active, lowH, highH, length: Math.max(length, 0), x: FL.sheetX, clumps: FL.sheetClumps, rate,
+            alpha: active ? st.alpha * smooth01((length - 0.01) / 0.05) * (0.3 + 0.7 * rate) : 0,
             phase: active ? FL.sheetClumps * travel(FL.sheetOut, lenAt, t) : 0,
         };
     }
@@ -1011,7 +1050,7 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
         loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
         ropeSpeed, ropeApexHeight, ropeState, ropeAxis, ropeStrands,
-        loopFlow, sheetState, sheetStrands, ropeDrain,
+        loopFlow, sheetState, sheetStrands, ropeDrain, ropeProgress, reconnectionRate,
         // The parameter set under the names the consumers and gates already read.
         CLASS_FACTOR: P.classFactor,
         RIBBON: Object.freeze({ SEP0: R.sep0, SEP_RATE: R.sepRate, SEP_GAIN: R.sepGain, SEP_TAU: R.sepTau,
@@ -1029,7 +1068,7 @@ export const {
     arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
     loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
     ropeSpeed, ropeApexHeight, ropeState, ropeAxis, ropeStrands,
-    loopFlow, sheetState, sheetStrands, ropeDrain,
+    loopFlow, sheetState, sheetStrands, ropeDrain, ropeProgress, reconnectionRate,
     CLASS_FACTOR, RIBBON, ARCADE,
 } = FLARE_MODEL;
 /** The along-PIL σ every class used until 2026-11-20 (see ribbonLength0). */

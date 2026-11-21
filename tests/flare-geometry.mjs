@@ -227,9 +227,35 @@ await ok('the shipped laws: ribbons part fast then slow, bigger flares further; 
     const FG = await import('../js/flare-geometry.js');
     const M = FG.FLARE_MODEL, R = M.params.ribbon;
     close(M.ribbonSeparation(0, 'X'), R.sep0, 1e-15);
-    close(M.ribbonSeparation(1e6, 'X'), R.sep0 + R.sepGain * M.classFactor('X'), 1e-12, 'saturates at sep0 + sepGain·cf');
+    // THE RIBBONS PART IN STEP WITH THE ERUPTION (couple = 1): sep = sep0 + creep·t + sepGain·cf·(the rope's progress).
+    const P = M.params.rope, sg = (x) => 1 / (1 + Math.exp(-x));
+    const progress = (t) => (sg((t - P.t0) / P.tau) - sg(-P.t0 / P.tau)) / (1 - sg(-P.t0 / P.tau));
+    assert.equal(R.couple, 1);
+    for (const t of [0, 40, 180, 400, 900]) {
+        close(M.ropeProgress(t), progress(t), 1e-14);
+        close(M.ribbonSeparation(t, 'X'), R.sep0 + R.sepRate * t + R.sepGain * M.classFactor('X') * progress(t), 1e-15, `tied separation at t=${t}`);
+    }
+    assert.equal(M.ropeProgress(0), 0); close(M.ropeProgress(1e6), 1, 1e-12);
+    // The rope's progress IS its speed gained: (v(t) − v(0)) / (V − v(0)) — so its slope is the acceleration.
+    const V = P.speed * M.classFactor('X');
+    for (const t of [60, 180, 300]) close(M.ropeProgress(t), (M.ropeSpeed(t, 'X') - M.ropeSpeed(0, 'X')) / (V - M.ropeSpeed(0, 'X')), 1e-12);
     const v = (t) => M.ribbonSeparation(t + 1, 'X') - M.ribbonSeparation(t, 'X');
-    assert.ok(v(0) > 5 * v(600) && v(600) > 0, 'decelerating, never reversing');
+    // Slow, then fast as the rope accelerates (peak at rope.t0), then a slow creep that never reverses.
+    assert.ok(v(P.t0) > 2 * v(0) && v(P.t0) > 5 * v(700) && v(700) > 0, `slow ${v(0).toExponential(2)} → fast ${v(P.t0).toExponential(2)} → creep ${v(700).toExponential(2)}`);
+    close(v(900), R.sepRate, 0.02 * R.sepRate, 'the gradual phase is the creep alone');
+    // reconnectionRate is that speed, as a share of its peak — 1 at the rope's peak acceleration, and it follows the acceleration.
+    close(M.reconnectionRate(P.t0, 'X').norm, 1, 2e-3);
+    const acc = (t) => M.ropeState(t, 'X').accel / M.ropeState(P.t0, 'X').accel;
+    assert.ok(M.reconnectionRate(60, 'X').norm > M.reconnectionRate(0, 'X').norm && M.reconnectionRate(400, 'X').norm < 0.4);
+    assert.ok(Math.abs((M.reconnectionRate(120, 'X').speed - R.sepRate) / (M.reconnectionRate(P.t0, 'X').speed - R.sepRate) - acc(120)) < 0.01, 'creep aside, ribbon speed ∝ rope acceleration');
+    // The current sheet is as bright as the reconnection is fast.
+    assert.ok(M.sheetState(P.t0, 'X').alpha > 3 * M.sheetState(420, 'X').alpha && M.sheetState(P.t0, 'X').rate > 0.99);
+    // NEGATIVE CONTROL — couple 0, the law shipped until 2026-11-22: fastest at onset, saturating at sep0 + sepGain·cf.
+    const U = FG.makeFlareModel({ ribbon: { couple: 0, sepRate: 0 } }), vu = (t) => U.ribbonSeparation(t + 1, 'X') - U.ribbonSeparation(t, 'X');
+    for (const t of [0, 100, 600]) close(U.ribbonSeparation(t, 'X'), R.sep0 + R.sepGain * U.classFactor('X') * (1 - Math.exp(-t / R.sepTau)), 1e-15);
+    close(U.ribbonSeparation(1e6, 'X'), R.sep0 + R.sepGain * U.classFactor('X'), 1e-12);
+    assert.ok(vu(0) > vu(P.t0) && vu(0) > 5 * vu(600), 'untied: fastest at onset');
+    assert.ok(U.reconnectionRate(0, 'X').norm > 0.99 && U.reconnectionRate(P.t0, 'X').norm < 0.6);
     assert.ok(M.ribbonSeparation(600, 'C') < M.ribbonSeparation(600, 'M') && M.ribbonSeparation(600, 'M') < M.ribbonSeparation(600, 'X'));
     close(M.arcadeShearAngle(0) / DEG, M.params.shear.onsetDeg, 1e-9);
     close(M.arcadeShearAngle(0, true) / DEG, M.params.shear.onsetComplexDeg, 1e-9);

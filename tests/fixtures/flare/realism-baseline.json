@@ -34,6 +34,8 @@
     "rope_aspect": 1,
     "rope_fan": 1,
     "rope_legs": 1,
+    "recon_lag": 1,
+    "recon_corr": 1,
     "flow_evap": 1,
     "flow_fill": 1,
     "flow_rain": 1,
@@ -42,5 +44,5 @@
     "sheet_out": 1,
     "class_order": 1
   },
-  "recorded": "2026-11-20"
+  "recorded": "2026-11-21"
 }

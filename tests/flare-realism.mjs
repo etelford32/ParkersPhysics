@@ -168,6 +168,20 @@ ok('rope measurements: speeds and the acceleration peak in km/s from the model\'
     assert.ok(near(measure(FG.makeFlareModel({ flow: { evap: 2 * FLW.evap } })).flowFillMin, m.flowFillMin / 2, 1e-9), 'twice the speed, half the fill time');
     assert.ok(near(m.flowRainOnsetMin, FLW.rainOnset / SIM_UNITS_PER_S / 60, 1e-12));
     for (const k of ['flowEvapKms', 'flowFillMin', 'flowRainKms', 'flowRainFreeFall', 'flowRainOnsetMin', 'sheetOutKms']) assert.equal(a[k], 0, k);
+    // RECONNECTION IN STEP WITH THE ERUPTION: the ribbons' speed peaks when the rope's acceleration does, and the two
+    // curves are the same shape (the ribbons ride the rope's own progress, plus a constant creep).
+    assert.ok(Math.abs(m.reconLagMin) <= 0.25 + 1e-9, `lag ${m.reconLagMin} min`);
+    assert.ok(m.reconCorr > 0.999, `correlation ${m.reconCorr}`);
+    // NEGATIVE CONTROL — the law as shipped until 2026-11-22 (couple 0): the ribbons part fastest at ONSET, 8.5 minutes
+    // before the rope accelerates.
+    const untied = measure(FG.makeFlareModel({ ribbon: { couple: 0, sepRate: 0 } }));
+    assert.ok(near(untied.reconLagMin, -8.5, 0.26), `untied lag ${untied.reconLagMin} min`);
+    assert.ok(untied.reconCorr < 0.7, `untied correlation ${untied.reconCorr}`);
+    // Half tied: the peak is still pulled toward the acceleration, the correlation is in between.
+    const half = measure(FG.makeFlareModel({ ribbon: { couple: 0.5 } }));
+    assert.ok(half.reconCorr > untied.reconCorr && half.reconCorr < m.reconCorr);
+    // With no rope there is nothing to be in step with: not a number, so the rows score 0 rather than a lucky 1.
+    assert.ok(Number.isNaN(a.reconLagMin) && Number.isNaN(a.reconCorr));
     assert.equal(measure(FG.makeFlareModel({ rope: { speed: 0 } })).sheetOutKms, 0, 'no rope, no sheet to flow along');
 });
 
@@ -179,8 +193,12 @@ ok('every scored row moves when some parameter moves (no decorative rows)', () =
     const moved = new Map(TARGETS.map((t) => [t.id, []]));
     for (const path of leaves) {
         const cur = path.reduce((o, k) => o[k], FG.FLARE_SHAPE_DEFAULT);
-        for (const f of [0.5, 1.5]) {
-            const v = cur === 0 ? (f < 1 ? 0 : 0.01) : cur * f;
+        // Halved, raised by half, and SWITCHED OFF (0). The last is what a yes/no row answers to: "both ribbons hook, at
+        // opposite ends" does not change when a hook is half as big, only when there is none. (Until 2026-11-22 that row
+        // passed this check by accident — ribbon.sepRate was 0, so its probe was the absurd 0.01, a ribbon speed of
+        // 2 400 km/s, which broke the hooks. With a real sepRate the accident went away and the check failed.)
+        for (const f of [0.5, 1.5, 0]) {
+            const v = cur === 0 ? (f > 0 && f < 1 ? 0 : 0.01) : cur * f;
             const over = path.reduceRight((acc, k) => ({ [k]: acc }), v);
             let m; try { m = measure(FG.makeFlareModel(over)); } catch { continue; }
             for (const t of TARGETS) if (Math.abs(m[t.key] - base[t.key]) > 1e-9 * Math.max(1, Math.abs(base[t.key]))) moved.get(t.id).push(path.join('.'));
@@ -189,7 +207,8 @@ ok('every scored row moves when some parameter moves (no decorative rows)', () =
     for (const [id, by] of moved) assert.ok(by.length > 0, `row "${id}" does not respond to any parameter`);
     // …and the parameters that matter are the ones you would expect.
     assert.ok(moved.get('shear_onset').includes('shear.onsetDeg') && !moved.get('shear_onset').includes('ribbon.sep0'));
-    assert.ok(moved.get('zip').includes('arcade.zipT') && moved.get('sep_decel').includes('ribbon.sepTau'));
+    assert.ok(moved.get('zip').includes('arcade.zipT') && moved.get('sep_decel').includes('ribbon.sepRate')
+        && moved.get('recon_lag').includes('ribbon.couple') && moved.get('recon_corr').includes('ribbon.couple'));
     assert.ok(moved.get('j_hook').includes('hook.sweepDeg') && moved.get('cusp_new').includes('cusp.onset') && moved.get('shrinkage').includes('cusp.shrink'));
     assert.ok(moved.get('rope_speed').includes('rope.speed') && moved.get('rope_accel').includes('rope.tau') && moved.get('rope_accel_t').includes('rope.t0')
         && moved.get('rope_above').includes('rope.h0') && moved.get('rope_twist').includes('rope.twist'));
@@ -234,7 +253,7 @@ ok('NEGATIVE CONTROL: the laws shipped until 2026-11-21 score lower, on the rows
     const row = (c, id) => c.metrics.find((x) => x.id === id);
     for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order', 'j_hook', 'j_double', 'j_size', 'cusp_new', 'shrinkage',
         'rope_feet', 'rope_above', 'rope_slow', 'rope_accel', 'rope_accel_t', 'rope_speed', 'rope_twist', 'rope_aspect', 'rope_fan', 'rope_legs',
-        'flow_evap', 'flow_fill', 'flow_rain', 'flow_rain_ff', 'flow_rain_onset', 'sheet_out'])
+        'flow_evap', 'flow_fill', 'flow_rain', 'flow_rain_ff', 'flow_rain_onset', 'sheet_out', 'recon_lag', 'recon_corr'])
         assert.ok(!row(v1, id).pass, `v1 should miss "${id}" (it reads ${row(v1, id).value})`);
     // The measured values that are the reason for each change, pinned.
     assert.ok(near(row(v1, 'shear_onset').value, 29.68, 0.01), 'v1 loops started 30° sheared — the surveys say 50–80°');
