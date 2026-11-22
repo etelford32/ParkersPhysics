@@ -17,6 +17,8 @@
      the HTML parses. No three.js on this page any more — the live
      magnetosphere hero moved to live-sky.html — so three is NOT preloaded
      (a modulepreload of it here would be ~700 KB the page never runs). -->
+<link rel="modulepreload" href="/js/home-title-variants.js">
+<link rel="modulepreload" href="/js/experiments.js">
 <link rel="modulepreload" href="/js/home-launchpad.js">
 <link rel="modulepreload" href="/js/home-launchpad-model.js">
 <link rel="modulepreload" href="/js/home-launchpad-media.js">
@@ -109,22 +111,60 @@ img{display:block}
    Text INSIDE a slide or tile is white in both themes: it sits on a
    photograph of a dark scene under a dark scrim. Everything outside them
    uses the tokens, which js/theme-light.css remaps. */
-#hero{position:relative;overflow:hidden;padding:20px 20px 26px;background:
-  radial-gradient(ellipse 60% 55% at 78% 30%,rgba(91,30,255,.16),transparent 65%),
-  radial-gradient(ellipse 50% 45% at 12% 80%,rgba(255,31,156,.07),transparent 70%),
+#hero{position:relative;overflow:hidden;padding:34px 24px 34px;background:
+  radial-gradient(ellipse 60% 55% at 78% 22%,rgba(91,30,255,.18),transparent 65%),
+  radial-gradient(ellipse 50% 45% at 8% 86%,rgba(255,31,156,.07),transparent 70%),
   linear-gradient(180deg,#03010e 0%,#07021a 100%)}
-.lp-inner{position:relative;z-index:1;max-width:1320px;margin:0 auto}
-.lp-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 28px;margin-bottom:14px}
-.lp-head .btn-primary{padding:11px 22px;font-size:.74rem}
-.lp-head .btn-secondary{padding:10px 20px;font-size:.84rem}
-.lp-head .hero-cta{margin-top:0}
-.lp-head-copy{min-width:0;flex:1 1 520px}
-.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.64rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:9px}
+/* An instrument-panel grid, faded out toward the edges: it gives the wide
+   margins something to hold (spacious is not the same as empty). */
+#hero::before{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(154,133,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(154,133,255,.07) 1px,transparent 1px);
+  background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse 85% 75% at 50% 30%,#000 25%,transparent 100%);
+  mask-image:radial-gradient(ellipse 85% 75% at 50% 30%,#000 25%,transparent 100%)}
+.lp-inner{position:relative;z-index:1;max-width:1360px;margin:0 auto}
+.lp-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);gap:20px 48px;align-items:end;margin-bottom:26px}
+.lp-head-copy{min-width:0}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.62rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:16px}
 .hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
-.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.3rem,2.6vw,1.9rem);letter-spacing:.04em;line-height:1.14;margin-bottom:6px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.hero-sub{font-size:clamp(.88rem,1.6vw,1rem);color:var(--fg-3);line-height:1.6;max-width:720px}
+/* THE TITLE (2026-11-22). Two lines on purpose: a statement in near-white and
+   a short accented punch under it. The copy is the `home_title` experiment
+   (js/experiments.js; variants in js/home-title-variants.js) — the static
+   markup is its control arm. `lp-title-pending` (set by the inline script
+   under the <h1>, cleared when the variant is applied or after 900 ms) holds
+   the title transparent so a challenger arm never flashes the control line. */
+.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.55rem,3.7vw,3.05rem);letter-spacing:.02em;line-height:1.04;text-transform:uppercase;margin-bottom:14px;text-wrap:balance;transition:opacity .35s ease}
+.hero-h1 .lp-t1{display:block;color:var(--fg-1);text-shadow:0 0 34px rgba(154,133,255,.35)}
+.hero-h1 .lp-t2{display:block;margin-top:.12em;background:linear-gradient(100deg,#8ff0ff 0%,#9d3aff 48%,#ff1f9c 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 22px rgba(157,58,255,.45))}
+.hero-sub{font-size:clamp(.9rem,1.25vw,1.04rem);color:var(--fg-3);line-height:1.6;max-width:68ch;transition:opacity .35s ease}
 .hero-sub em{font-style:normal;color:var(--fg-1)}
+#hero.lp-title-pending .hero-h1,#hero.lp-title-pending .hero-sub{opacity:0}
+/* Telemetry strip: four derived numbers (js/home-launchpad-model.js
+   launchpadStats) — the dense line under a roomy title. */
+.lp-stats{display:flex;flex-wrap:wrap;gap:0;margin-top:18px;border-top:1px solid rgba(154,133,255,.18)}
+.lp-stats[hidden]{display:none}
+.lp-stat{padding:10px 26px 0 0;margin-right:26px;border-right:1px solid rgba(154,133,255,.14)}
+.lp-stat:last-child{border-right:0;margin-right:0;padding-right:0}
+.lp-stat dt{font-family:var(--font-mono);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-4);margin-bottom:2px}
+.lp-stat dd{font-family:var(--font-display);font-weight:700;font-size:1.12rem;letter-spacing:.03em;color:var(--fg-1);font-variant-numeric:tabular-nums}
+.lp-stat dd small{font-family:var(--font-sans);font-weight:500;font-size:.72rem;letter-spacing:0;color:var(--fg-3);margin-left:6px}
+/* The ask column: sign up (one tap, Google) ABOVE the dashboard. */
+.lp-cta{display:flex;flex-direction:column;align-items:stretch;gap:12px;margin-top:0}
+.lp-google{display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:12px;text-align:left;cursor:pointer;padding:12px 18px;border-radius:14px;border:1px solid #dadce0;background:#fff;color:#1f1f1f;font-family:var(--font-sans);
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 -3px 0 rgba(60,64,67,.16) inset,0 6px 0 #9aa0a6,0 14px 34px rgba(143,240,255,.22),0 0 0 1px rgba(143,240,255,.25);transition:transform .08s,box-shadow .12s,filter .2s}
+.lp-google[hidden]{display:none}       /* author display:grid above would beat the UA [hidden] rule */
+.lp-google svg{grid-row:1/3;width:22px;height:22px}
+.lp-google [data-label]{font-weight:700;font-size:.98rem;line-height:1.2}
+.lp-google small{font-size:.72rem;color:#5f6368;line-height:1.3}
+.lp-google:hover{transform:translateY(-1px);filter:brightness(1.02)}
+.lp-google:active{transform:translateY(4px);box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 -1px 0 rgba(60,64,67,.16) inset,0 2px 0 #9aa0a6,0 6px 16px rgba(143,240,255,.2)}
+.lp-google:focus-visible{outline:2px solid #8ff0ff;outline-offset:4px}
+.lp-google[disabled]{cursor:progress;opacity:.8;transform:none}
+.lp-cta .btn-secondary{padding:12px 18px;font-size:.9rem;text-align:center}
+.lp-cta .hero-cta-note{margin-top:0;text-align:left;font-size:.72rem;line-height:1.5}
+.lp-cta .hero-cta-note a{border-bottom:1px solid rgba(154,133,255,.4);color:var(--fg-2)}
+.lp-cta .hero-cta-note [hidden]{display:none}
 .lp-main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:stretch}
 .lp-col{display:flex;flex-direction:column;min-width:0}
 .lp-col-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 2px 9px}
@@ -132,7 +172,7 @@ img{display:block}
 .lp-col-h a{font-size:.76rem;color:var(--fg-3);border-bottom:1px solid rgba(154,133,255,.3);white-space:nowrap}
 .lp-col-h a:hover{color:var(--fg-1)}
 /* Carousel */
-.lp-recent{position:relative;flex:1;aspect-ratio:16/9;min-height:340px;max-height:min(440px,calc(100vh - 430px));border-radius:18px;overflow:hidden;background:#070b1c;border:1px solid rgba(154,133,255,.22);box-shadow:0 18px 50px rgba(2,0,10,.5)}
+.lp-recent{position:relative;flex:1;aspect-ratio:16/9;min-height:340px;max-height:max(340px,min(460px,calc(100vh - 470px)));border-radius:18px;overflow:hidden;background:#070b1c;border:1px solid rgba(154,133,255,.22);box-shadow:0 18px 50px rgba(2,0,10,.5)}
 .lp-recent[aria-busy="true"]::before{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(154,133,255,.08) 50%,transparent 70%);background-size:200% 100%;animation:lp-shimmer 1.6s linear infinite}
 @keyframes lp-shimmer{to{background-position:-200% 0}}
 .lp-track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;outline:none;overscroll-behavior-x:contain}
@@ -161,15 +201,29 @@ img{display:block}
 .lp-open:focus-visible,.lp-changed:focus-visible,.lp-fix:focus-visible,.lp-door:focus-visible,.lp-log a:focus-visible{outline:2px solid #8ff0ff;outline-offset:3px}
 .lp-changed{font-size:.8rem;color:rgba(245,240,255,.86);border-bottom:1px solid rgba(245,240,255,.4)}
 .lp-changed:hover{color:#fff;border-color:#fff}
-.lp-arrow{position:absolute;top:38%;z-index:2;width:38px;height:38px;border-radius:50%;border:1px solid rgba(245,240,255,.3);background:rgba(2,0,10,.55);color:#fff;font-size:1.3rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px);transition:background .2s,border-color .2s}
+.lp-arrow{position:absolute;bottom:14px;z-index:2;width:36px;height:36px;border-radius:50%;border:1px solid rgba(245,240,255,.3);background:rgba(2,0,10,.55);color:#fff;font-size:1.3rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px);transition:background .2s,border-color .2s}
 .lp-arrow:hover{background:rgba(2,0,10,.85);border-color:#8ff0ff}
 .lp-arrow:focus-visible{outline:2px solid #8ff0ff;outline-offset:2px}
-.lp-prev{left:12px}.lp-next{right:12px}
+/* Bottom-right, clear of the copy: centred on the frame's edges they sat on the slide's chips. */
+.lp-prev{right:62px}.lp-next{right:18px}
 .lp-dots{position:absolute;left:24px;bottom:16px;z-index:2;display:flex;gap:7px}
 .lp-dot{width:22px;height:14px;padding:0;border:0;background:none;cursor:pointer;position:relative}
 .lp-dot::before{content:'';position:absolute;left:0;right:0;top:5px;height:4px;border-radius:2px;background:rgba(245,240,255,.3);transition:background .25s}
 .lp-dot[aria-current="true"]::before{background:#8ff0ff}
 .lp-dot:focus-visible{outline:2px solid #8ff0ff;outline-offset:2px}
+/* HUD dressing: a slide counter and corner brackets on the carousel frame. */
+.lp-counter{position:absolute;top:14px;right:16px;z-index:2;font-family:var(--font-mono);font-size:.66rem;letter-spacing:.14em;color:rgba(245,240,255,.85);background:rgba(2,0,10,.55);padding:4px 9px;border-radius:4px;backdrop-filter:blur(4px);font-variant-numeric:tabular-nums}
+.lp-counter b{color:#8ff0ff;font-weight:600}
+.lp-recent::after{content:'';position:absolute;inset:8px;z-index:1;pointer-events:none;
+  background:
+    linear-gradient(#8ff0ff,#8ff0ff) top left/18px 1px no-repeat,linear-gradient(#8ff0ff,#8ff0ff) top left/1px 18px no-repeat,
+    linear-gradient(#8ff0ff,#8ff0ff) top right/18px 1px no-repeat,linear-gradient(#8ff0ff,#8ff0ff) top right/1px 18px no-repeat,
+    linear-gradient(#8ff0ff,#8ff0ff) bottom left/18px 1px no-repeat,linear-gradient(#8ff0ff,#8ff0ff) bottom left/1px 18px no-repeat,
+    linear-gradient(#8ff0ff,#8ff0ff) bottom right/18px 1px no-repeat,linear-gradient(#8ff0ff,#8ff0ff) bottom right/1px 18px no-repeat;
+  opacity:.55}
+.lp-slide-hl{display:none;margin-top:6px;padding-left:14px;position:relative;font-size:.78rem;line-height:1.45;color:rgba(232,228,250,.72);max-width:64ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lp-slide-hl::before{content:'';position:absolute;left:0;top:.55em;width:7px;height:1px;background:var(--lp-acc,#8ff0ff)}
+@media(min-width:1240px) and (min-height:820px){.lp-slide-hl{display:block}}
 /* Permanent tiles */
 .lp-fixtures{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:12px}
 .lp-fix{position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:112px;border-radius:14px;overflow:hidden;color:#fff;background:#070b1c;border:1px solid rgba(154,133,255,.2);transition:transform .22s cubic-bezier(.2,.7,.2,1),border-color .22s,box-shadow .22s}
@@ -187,7 +241,7 @@ img{display:block}
 .lp-fix-latest{display:block;margin-top:4px;font-family:var(--font-mono);font-size:.6rem;line-height:1.35;color:var(--lp-acc,#8ff0ff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lp-fix-latest[hidden]{display:none}   /* author display:block above would beat the UA [hidden] rule */
 /* Foot: the build log + the sections */
-.lp-foot{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;margin-top:14px}
+.lp-foot{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;margin-top:20px}
 .lp-panel{min-width:0;padding:13px 16px 12px;border-radius:14px;background:rgba(13,6,38,.5);border:1px solid rgba(154,133,255,.16)}
 .lp-log{list-style:none}
 .lp-log a{display:grid;grid-template-columns:52px 92px minmax(0,1fr);gap:10px;align-items:baseline;padding:4px 0;font-size:.82rem;color:var(--fg-2)}
@@ -204,13 +258,18 @@ img{display:block}
 .lp-note{margin-top:10px;font-size:.7rem;color:var(--fg-4);line-height:1.5}
 .lp-note a{border-bottom:1px solid rgba(154,133,255,.35)}
 @media(max-width:980px){
+  .lp-head{grid-template-columns:1fr;align-items:start}
+  .lp-cta{max-width:420px}
   .lp-main,.lp-foot{grid-template-columns:1fr}
   .lp-recent{aspect-ratio:auto;height:min(470px,74vh);min-height:400px}
   .lp-fix{min-height:132px}
 }
 @media(max-width:560px){
-  #hero{padding:46px 12px 24px}   /* clears the theme switch under the logo */
-  .lp-head .hero-cta{width:100%}
+  #hero{padding:46px 14px 26px}   /* clears the theme switch under the logo */
+  .lp-cta{max-width:none}
+  .lp-stats{display:grid;grid-template-columns:1fr 1fr;column-gap:18px}
+  .lp-stat{padding-right:0;margin-right:0;border-right:0}
+  .lp-stat dd{font-size:.98rem}
   .lp-slide-body{padding:16px 16px 42px}
   .lp-arrow{display:none}          /* swipe is the control on a phone */
   .lp-dots{left:16px}
@@ -219,7 +278,7 @@ img{display:block}
 }
 @media (prefers-reduced-motion:reduce){
   .hero-badge::before,.lp-live::before,.lp-recent[aria-busy="true"]::before{animation:none}
-  .lp-fix,.lp-fix>img,.lp-open{transition:none}
+  .lp-fix,.lp-fix>img,.lp-open,.lp-google,.hero-h1,.hero-sub{transition:none}
 }
 
 /* ── LIVE DEMO EMBEDS (EarthView + flux-rope stage) ──────────────────────── */
@@ -446,7 +505,16 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
 html.theme-light #hero{background:
   radial-gradient(ellipse 70% 55% at 76% 20%,rgba(21,96,212,.12),transparent 70%),
   linear-gradient(180deg,#f6f9fe 0%,#ffffff 100%)}
-html.theme-light #hero .hero-h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text;filter:none}
+html.theme-light #hero::before{background-image:linear-gradient(rgba(21,96,212,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(21,96,212,.07) 1px,transparent 1px)}
+html.theme-light #hero .hero-h1 .lp-t1{color:var(--pl-text-1);text-shadow:none}
+html.theme-light #hero .hero-h1 .lp-t2{background:linear-gradient(100deg,#0976ba 0%,#1560d4 50%,#2f86f6 100%);-webkit-background-clip:text;background-clip:text;filter:none}
+html.theme-light .lp-stats{border-top-color:var(--pl-border)}
+html.theme-light .lp-stat{border-right-color:var(--pl-border)}
+html.theme-light .lp-stat dt{color:var(--pl-text-4)}
+html.theme-light .lp-stat dd{color:var(--pl-text-1)}
+html.theme-light .lp-stat dd small{color:var(--pl-text-3)}
+html.theme-light .lp-google{border-color:#747775;box-shadow:0 1px 0 #fff inset,0 -3px 0 rgba(60,64,67,.12) inset,0 6px 0 #b6bcc6,0 12px 28px rgba(21,96,212,.18)}
+html.theme-light .lp-cta .hero-cta-note a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
 html.theme-light #hero .hero-sub{color:var(--pl-text-3)}
 html.theme-light #hero .hero-sub em{color:var(--pl-text-1)}
 html.theme-light #hero .hero-badge{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.32);color:var(--pl-blue-deep);box-shadow:none}
@@ -683,15 +751,38 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
      (hero_magnetosphere) so the before/after series stays continuous. -->
 <section id="hero" class="lp" aria-label="Newest simulations and the real-time worlds">
   <div class="lp-inner">
-    <div class="lp-head">
+    <div class="lp-head" data-signup-scope>
       <div class="lp-head-copy">
-        <div class="hero-badge" role="status"><span><span data-lp-count-wrap hidden><span data-lp-count></span> simulations · </span>Live NASA &amp; NOAA data</span></div>
-        <h1 class="hero-h1">Watch space weather happen. Live.</h1>
-        <p class="hero-sub">New simulations and upgrades land here first, <em>straight from the build log</em>. Six real-time worlds are always one click away.</p>
+        <div class="hero-badge" role="status">Live NASA &amp; NOAA data · updated every 60 seconds</div>
+        <h1 class="hero-h1" data-lp-title><span class="lp-t1" data-lp-t1>Watch space weather happen.</span> <span class="lp-t2" data-lp-t2>Live.</span></h1>
+        <script>
+        /* Hold the title transparent until the home_title variant is applied
+           (the module below), so a challenger arm never flashes the control
+           copy. 900 ms backstop: a module that never arrives shows control. */
+        (function () {
+          var h = document.getElementById('hero');
+          h.classList.add('lp-title-pending');
+          setTimeout(function () { h.classList.remove('lp-title-pending'); }, 900);
+        })();
+        </script>
+        <p class="hero-sub" data-lp-sub>New simulations and upgrades land here first, <em>straight from the build log</em>. Six real-time worlds are always one click away.</p>
+        <dl class="lp-stats" data-lp-stats hidden></dl>
       </div>
-      <div class="hero-cta" role="group" aria-label="Primary actions">
-        <a href="simulations.html" class="btn-primary" data-funnel-cta="launchpad_browse_all">Browse every simulation <span aria-hidden="true">→</span></a>
-        <a href="space-weather.html" class="btn-secondary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard</a>
+      <!-- THE ASK (2026-11-22, owner request): one-tap sign-up ABOVE the
+           dashboard. The Google button creates the account through the same
+           OAuth call signup.html makes (js/home-google-signup.js — read its
+           header for why this is not js/oauth-buttons.js, and for the ONE ASK
+           history it deliberately overrides). Hidden when signed in, with
+           everything marked data-signup-only. The dashboard CTA keeps its
+           funnel id (hero_magnetosphere) so the series stays continuous. -->
+      <div class="hero-cta lp-cta" role="group" aria-label="Primary actions">
+        <button type="button" class="lp-google" id="lp-signup-google" data-funnel-cta="launchpad_signup_google">
+          <svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.616z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/><path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
+          <span data-label>Sign up with Google</span>
+          <small>Free account · one tap · no password</small>
+        </button>
+        <a href="space-weather.html" class="btn-secondary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard <span aria-hidden="true">→</span></a>
+        <p class="hero-cta-note"><span data-signup-only>No credit card. Saves your location, alerts and layouts. <a href="signup.html" data-funnel-cta="launchpad_signup_email">Use email instead</a></span></p>
       </div>
     </div>
 
@@ -762,16 +853,35 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
   </div>
 </section>
 <script type="module">
-  // Mounted at once: this IS the first screen. The permanent tiles and every
-  // link above already work; this fills the carousel, the log and each tile's
-  // "latest change" line from the build log.
+  // The title first: the home_title experiment (js/experiments.js) picks the
+  // headline + sub; control is the static markup. Then the launchpad itself —
+  // the permanent tiles and every link above already work without it.
+  import { experiments } from './js/experiments.js';
+  import { TITLE_EXPERIMENT, titleFor } from './js/home-title-variants.js';
+  import { SIM_COUNT } from './js/simulations-catalog.js';
+  const root = document.getElementById('hero');
+  try {
+    const variant = experiments.assign(TITLE_EXPERIMENT);
+    const t = titleFor(variant, SIM_COUNT);
+    root.dataset.titleVariant = variant;
+    if (variant !== 'control') {
+      root.querySelector('[data-lp-t1]').textContent = t.a;
+      root.querySelector('[data-lp-t2]').textContent = t.b;
+      root.querySelector('[data-lp-sub]').innerHTML = t.sub;     // our own constant copy
+    }
+  } catch (err) { console.warn('[home] title experiment failed; showing control:', err); }
+  root.classList.remove('lp-title-pending');
+
+  import('./js/home-google-signup.js')
+    .then((m) => m.mountGoogleSignup(document.getElementById('lp-signup-google'), { source: 'home' }))
+    .catch((err) => {
+      // The button must never be dead: without its module it becomes a plain link's worth of behaviour.
+      console.warn('[home] Google sign-up failed to mount:', err);
+      document.getElementById('lp-signup-google')?.addEventListener('click', () => { location.href = 'signup.html?from=home'; });
+    });
+
   import('./js/home-launchpad.js')
-    .then((m) => {
-      const root = document.getElementById('hero');
-      m.mountHomeLaunchpad(root);
-      const wrap = root.querySelector('[data-lp-count-wrap]');
-      if (wrap && root.querySelector('[data-lp-count]')?.textContent) wrap.hidden = false;
-    })
+    .then((m) => m.mountHomeLaunchpad(root))
     .catch((err) => {
       console.warn('[home] launchpad failed to mount:', err);
       const host = document.querySelector('[data-lp-recent]');

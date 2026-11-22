@@ -32,7 +32,7 @@
  *     { slides, index, go(i), next(), prev(), destroy() }
  * Debug: ?debug=1 exposes it as window.__ppLaunchpad (tests/home-launchpad.spec.js).
  */
-import { recentSlides, fixtures, logStrip, SIM_COUNT } from './home-launchpad-model.js';
+import { recentSlides, fixtures, logStrip, launchpadStats } from './home-launchpad-model.js';
 import { KINDS, formatDate } from './dev-log.js';
 import { LAUNCHPAD_MEDIA, LAUNCHPAD_MEDIA_DIR } from './home-launchpad-media.js';
 import { glyph } from './glyphs.js';
@@ -92,6 +92,7 @@ function slideNode({ sim, entry, href, fresh }, i, n) {
         el('h3', { class: 'lp-slide-sim', text: sim.title }),
         el('p', { class: 'lp-slide-title', text: entry.title }),
         el('p', { class: 'lp-slide-sum', text: entry.summary }),
+        entry.highlights?.length ? el('p', { class: 'lp-slide-hl', text: entry.highlights[0] }) : null,
         el('div', { class: 'lp-slide-cta' },
             el('a', { class: 'lp-open', href, 'data-funnel-cta': 'launchpad_recent_' + sim.id, text: `Open ${sim.title} →` }),
             el('a', { class: 'lp-changed', href: 'recent-development.html#' + entry.id,
@@ -110,8 +111,20 @@ export function mountHomeLaunchpad(root, opts = {}) {
     const autoMs = opts.autoMs ?? AUTO_MS;
     const motion = opts.motion ?? motionAllowed();
 
-    // ── Count ───────────────────────────────────────────────────────────────
-    for (const n of root.querySelectorAll('[data-lp-count]')) n.textContent = String(SIM_COUNT);
+    // ── The telemetry strip: four derived numbers under the title ───────────
+    const statsHost = root.querySelector('[data-lp-stats]');
+    if (statsHost) {
+        const st = launchpadStats({ nowMs });
+        const cell = (label, value, note) => el('div', { class: 'lp-stat' },
+            el('dt', { text: label }),
+            el('dd', {}, document.createTextNode(String(value)), note ? el('small', { text: note }) : null));
+        statsHost.replaceChildren(
+            cell('Simulations', st.simulations, `in ${st.sections} sections`),
+            cell(`Shipped · last ${st.days} days`, st.recent, st.recentNew ? `${st.recentNew} new simulation${st.recentNew === 1 ? '' : 's'}` : 'changes'),
+            cell('Last update', st.lastDate ? formatDate(st.lastDate, { year: false }) : '—', 'build log'),
+            cell('Data', 'Live', 'NASA · NOAA · USGS · JPL'));
+        statsHost.hidden = false;
+    }
 
     // ── Permanent tiles: each one's newest logged change ────────────────────
     for (const f of fixtures()) {
@@ -150,7 +163,10 @@ export function mountHomeLaunchpad(root, opts = {}) {
         return b;
     });
     dots.append(...dotBtns);
-    host.replaceChildren(track, prevBtn, nextBtn, dots);
+    const pad = (n) => String(n).padStart(2, '0');
+    const counterNow = el('b', { text: '01' });
+    const counter = el('div', { class: 'lp-counter', 'aria-hidden': 'true' }, counterNow, document.createTextNode(` / ${pad(slides.length)}`));
+    host.replaceChildren(track, prevBtn, nextBtn, dots, counter);
     host.removeAttribute('aria-busy');
 
     let index = -1;
@@ -159,6 +175,7 @@ export function mountHomeLaunchpad(root, opts = {}) {
         index = ctl.index = i;
         nodes.forEach((n, k) => { n.toggleAttribute('inert', k !== i); n.classList.toggle('lp-active', k === i); });
         dotBtns.forEach((b, k) => b.setAttribute('aria-current', k === i ? 'true' : 'false'));
+        counterNow.textContent = pad(i + 1);
     };
     const go = (i, { smooth = motion } = {}) => {
         const n = slides.length;

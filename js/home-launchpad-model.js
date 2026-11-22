@@ -137,4 +137,26 @@ export function sectionDoors(sections = SITE_SECTIONS, catalog = SIMULATIONS) {
     }));
 }
 
+/**
+ * The header's telemetry strip: four numbers, all DERIVED (catalogue + log).
+ * `recent` counts entries of any kind within `days` of `nowMs`; with no clock
+ * it counts back from the newest entry, so the number never depends on when a
+ * build ran.
+ */
+export function launchpadStats({ log = DEV_LOG, catalog = SIMULATIONS, sections = SITE_SECTIONS, nowMs = NaN, days = 30 } = {}) {
+    const sorted = newestFirst(log);
+    const last = sorted[0] || null;
+    const ref = Number.isFinite(nowMs) ? nowMs : (last ? dateMs(last.date) : NaN);
+    const span = days * 86400000;
+    const inWindow = sorted.filter((e) => { const t = dateMs(e.date); return ref - t >= -86400000 && ref - t <= span; });
+    return {
+        simulations: catalog.length,
+        sections: sections.length,
+        recent: inWindow.length,
+        recentNew: inWindow.filter((e) => e.kind === 'simulation').length,
+        days,
+        lastDate: last ? last.date : null,
+    };
+}
+
 export { SIM_COUNT };

@@ -114,6 +114,23 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'carousel', w: 50 },
         ],
     },
+    // Homepage launchpad TITLE (index.html #hero h1 + sub). RUNNING since
+    // 2026-11-22, owner request: the first screen became a simulation
+    // launchpad but kept the 2026-07 winner "Watch space weather happen.
+    // Live." — which is also the <title>, the footer tagline and the social
+    // card, so the page's biggest line said nothing the tab did not. control
+    // = that line; the two challengers say what the launchpad IS. Copy lives
+    // in js/home-title-variants.js (ids must match — tests/home-launchpad.mjs
+    // gates it). Primary goal = any launchpad CTA click. QA-force:
+    // ?exp_home_title=scale|universe|control.
+    home_title: {
+        status: 'running',
+        variants: [
+            { id: 'control',  w: 34 },   // "Watch space weather happen. Live."
+            { id: 'scale',    w: 33 },   // "From Earth's core to the cosmic web. Running live."
+            { id: 'universe', w: 33 },   // "Step inside the working universe. Every model live."
+        ],
+    },
     // CONCLUDED 2026-07 — the redesign shipped in place as index.html and
     // the middleware 50/50 split was retired (`/` always serves index.html;
     // middleware.js keeps only host canonicalization). No page calls
@@ -176,6 +193,11 @@ export const EXPERIMENT_GOALS = Object.freeze({
     sw_layout_v1: [
         { stage: 'sw_panel_interact',  label: 'Panel interaction (primary)' },
         { stage: 'sw_dwell_60s',       label: 'Dwelled 60 s' },
+    ],
+    home_title: [
+        { stage: 'landing_cta_click',  label: 'Launchpad CTA click (primary)' },
+        { stage: 'scroll_depth',       label: 'Scroll past first screen' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
     ],
     home_bg_carousel: [
         { stage: 'landing_cta_click',  label: 'CTA click (primary)' },

@@ -152,6 +152,8 @@ export const DEV_LOG = [
           'Six permanent doors — Galaxy, Solar System, EarthView, Climalytix, Real-Time Mars and Sun Watch — each showing its most recent logged change.',
           'The newest log entries and all five sections are listed directly under the carousel.',
           'The live magnetosphere and personal sky console that used to open the homepage now have their own page.',
+          'A one-tap "Sign up with Google" button sits above the dashboard button: no form and no password. Signed-in visitors do not see it.',
+          'A strip under the headline gives the live counts: simulations, what shipped in the last 30 days, and the date of the last update.',
       ],
       links: [{ href: 'index.html', label: 'Home' }, { href: 'live-sky.html', label: 'Live Sky Console' },
               { href: 'simulations.html', label: 'All simulations' }] },

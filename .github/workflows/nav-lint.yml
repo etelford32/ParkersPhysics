@@ -92,4 +92,4 @@ jobs:
       # permanent tiles are static markup pinned to the catalogue, and the
       # thumbnails must match the showcase manifest.
       - name: homepage launchpad gate
-        run: node tests/home-launchpad.mjs
+        run: node tests/home-launchpad.mjs && node tests/home-google-signup.mjs

@@ -19,7 +19,7 @@
  */
 import { test, expect } from '@playwright/test';
 
-const PAGE = '/index.html?debug=1&theme=dark';
+const PAGE = '/index.html?debug=1&theme=dark&exp_home_title=control';
 
 async function offline(page) {
     await page.route((u) => !/^(localhost|127\.0\.0\.1)$/.test(u.hostname), (r) => r.abort());
@@ -149,9 +149,11 @@ test.describe('homepage launchpad', () => {
             else expect(got[id]).toContain(title);
         }
         expect(Object.values(want).some((t) => t != null)).toBe(true);
-        // The count badge is filled from the catalogue.
+        // The stats strip is filled from the catalogue and the log.
         const count = await page.evaluate(async () => (await import('/js/simulations-catalog.js')).SIM_COUNT);
-        await expect(page.locator('.hero-badge')).toContainText(`${count} simulations`);
+        await expect(page.locator('[data-lp-stats]')).toBeVisible();
+        await expect(page.locator('[data-lp-stats] .lp-stat').first()).toContainText(String(count));
+        expect(await page.locator('[data-lp-stats] .lp-stat').count()).toBe(4);
     });
 
     test('fits the first screen at 1440×900; no sideways scroll on a phone; light theme', async ({ page }) => {
@@ -163,7 +165,8 @@ test.describe('homepage launchpad', () => {
             carousel: document.querySelector('.lp-recent').getBoundingClientRect(),
             tiles: [...document.querySelectorAll('.lp-fix')].map((a) => a.getBoundingClientRect().bottom),
         }));
-        expect(fold.hero).toBeLessThanOrEqual(900);
+        // The carousel and the six tiles are on the first screen; the log strip may sit just under it.
+        expect(fold.carousel.bottom).toBeLessThanOrEqual(900);
         expect(fold.carousel.height).toBeGreaterThan(300);
         expect(Math.max(...fold.tiles)).toBeLessThanOrEqual(900);
         await page.setViewportSize({ width: 390, height: 844 });
@@ -175,7 +178,7 @@ test.describe('homepage launchpad', () => {
         }));
         expect(phone.sw).toBeLessThanOrEqual(390);
         expect(phone.over).toBe(0);
-        await boot(page, '/index.html?debug=1&theme=light');
+        await boot(page, '/index.html?debug=1&theme=light&exp_home_title=control');
         const light = await page.evaluate(() => ({
             bg: getComputedStyle(document.getElementById('hero')).backgroundImage,
             panel: getComputedStyle(document.querySelector('.lp-panel')).backgroundColor,
@@ -184,6 +187,116 @@ test.describe('homepage launchpad', () => {
         expect(light.bg).toMatch(/rgb\(246, 249, 254\)/);
         expect(light.panel).toBe('rgb(255, 255, 255)');
         expect(light.sim).toBe('rgb(255, 255, 255)');     // type on a slide stays white: it sits on a dark photograph
+    });
+
+    test('home_title: each arm shows its own copy, no arm flashes another, exposure is recorded once', async ({ page }) => {
+        await offline(page);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const copy = await (async () => {
+            await page.goto('/js/home-title-variants.js');
+            return page.evaluate(async () => {
+                const m = await import('/js/home-title-variants.js');
+                const { SIM_COUNT } = await import('/js/simulations-catalog.js');
+                return Object.fromEntries(Object.keys(m.TITLE_VARIANTS).map((id) => [id, m.titleFor(id, SIM_COUNT)]));
+            });
+        })();
+        expect(Object.keys(copy)).toEqual(['control', 'scale', 'universe']);
+        for (const id of Object.keys(copy)) {
+            // Record every title the visitor could have SEEN (opacity > 0) from the first frame on.
+            await page.addInitScript(() => {
+                window.__seenTitles = new Set();
+                const tick = () => {
+                    const h = document.querySelector('#hero .hero-h1');
+                    if (h && Number(getComputedStyle(h).opacity) > 0.02) window.__seenTitles.add(h.textContent.replace(/\s+/g, ' ').trim());
+                    requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            });
+            await boot(page, `/index.html?debug=1&theme=dark&exp_home_title=${id}`);
+            await page.waitForTimeout(700);                         // past the opacity transition
+            const got = await page.evaluate(() => ({
+                variant: document.getElementById('hero').dataset.titleVariant,
+                pending: document.getElementById('hero').classList.contains('lp-title-pending'),
+                a: document.querySelector('[data-lp-t1]').textContent, b: document.querySelector('[data-lp-t2]').textContent,
+                sub: document.querySelector('[data-lp-sub]').textContent,
+                h1s: document.querySelectorAll('h1').length,
+                seen: [...window.__seenTitles],
+                opacity: getComputedStyle(document.querySelector('.hero-h1')).opacity,
+            }));
+            expect(got.variant).toBe(id);
+            expect(got.pending).toBe(false);
+            expect(got.opacity).toBe('1');
+            expect(got.a).toBe(copy[id].a); expect(got.b).toBe(copy[id].b);
+            expect(got.sub).toBe(copy[id].sub.replace(/<[^>]+>/g, ''));
+            expect(got.sub).not.toContain('{n}');
+            expect(got.h1s).toBe(1);
+            // NO FLASH: the only title ever visible is this arm's.
+            expect(got.seen).toEqual([`${copy[id].a} ${copy[id].b}`]);
+            // The title fits: no horizontal overflow, and the tiles stay on the first screen.
+            const fit = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth,
+                tiles: Math.max(...[...document.querySelectorAll('.lp-fix')].map((n) => n.getBoundingClientRect().bottom)) }));
+            expect(fit.sw).toBeLessThanOrEqual(1440);
+            expect(fit.tiles).toBeLessThanOrEqual(900);
+        }
+        // NEGATIVE CONTROL for the guard: with the module held back, the title stays
+        // hidden (never the control line under a challenger) until the 900 ms backstop.
+        let release; const gate = new Promise((r) => { release = r; });
+        await page.route('**/js/home-title-variants.js', async (route) => { await gate; await route.continue(); });
+        // 'commit', not 'domcontentloaded': a held module import holds that event too.
+        await page.goto('/index.html?debug=1&theme=dark&exp_home_title=scale', { waitUntil: 'commit' });
+        await page.waitForSelector('#hero.lp-title-pending .hero-h1', { state: 'attached' });
+        expect(await page.evaluate(() => getComputedStyle(document.querySelector('.hero-h1')).opacity)).toBe('0');
+        await page.waitForFunction(() => !document.getElementById('hero').classList.contains('lp-title-pending'), null, { timeout: 3000 });
+        expect(await page.evaluate(() => document.querySelector('[data-lp-t1]').textContent)).toBe(copy.control.a);   // backstop = control, visible
+        release();
+    });
+
+    test('Google sign-up: above the dashboard, starts OAuth on click, hidden when signed in, never dead', async ({ page }) => {
+        await offline(page);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        // Stub auth.js: record the OAuth call instead of leaving the page.
+        await page.route('**/js/auth.js', (route) => route.fulfill({ contentType: 'text/javascript', body:
+            'export const auth = { signInWithProvider: async (p, o) => { window.__oauth = { p, o }; return { success: true }; } };' }));
+        await boot(page);
+        const btn = page.locator('#lp-signup-google');
+        await expect(btn).toBeVisible();
+        await expect(btn).toContainText('Sign up with Google');
+        const geo = await page.evaluate(() => {
+            const g = document.getElementById('lp-signup-google').getBoundingClientRect();
+            const d = document.querySelector('[data-funnel-cta="hero_magnetosphere"]').getBoundingClientRect();
+            return { above: g.bottom <= d.top + 1, sameColumn: Math.abs(g.left - d.left) < 2 && Math.abs(g.width - d.width) < 2, gy: g.bottom, h: g.height };
+        });
+        expect(geo.above).toBe(true);
+        expect(geo.sameColumn).toBe(true);
+        expect(geo.gy).toBeLessThan(900);
+        expect(geo.h).toBeGreaterThanOrEqual(44);                 // a touch target
+        await btn.click();
+        await page.waitForFunction(() => !!window.__oauth);
+        const call = await page.evaluate(() => window.__oauth);
+        expect(call.p).toBe('google');
+        expect(call.o.redirectTo).toMatch(/\/auth-callback\.html\?from=home$/);
+        await expect(btn).toBeDisabled();
+        await expect(btn).toContainText('Redirecting');
+
+        // Signed in: the button and its email alternative are gone; the dashboard CTA stays.
+        await page.addInitScript(() => { try { localStorage.setItem('pp_auth', JSON.stringify({ signedIn: true })); } catch {} });
+        await boot(page);
+        await expect(page.locator('#lp-signup-google')).toBeHidden();
+        await expect(page.locator('[data-funnel-cta="launchpad_signup_email"]')).toBeHidden();
+        await expect(page.locator('[data-funnel-cta="hero_magnetosphere"]')).toBeVisible();
+        await page.evaluate(() => localStorage.removeItem('pp_auth'));
+    });
+
+    test('Google sign-up falls back to signup.html when the flow cannot start', async ({ page }) => {
+        await offline(page);
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.route('**/js/auth.js', (route) => route.fulfill({ contentType: 'text/javascript', body:
+            'export const auth = { signInWithProvider: async () => ({ success: false, error: "Supabase client not configured" }) };' }));
+        await boot(page);
+        await Promise.all([
+            page.waitForURL(/\/signup\.html\?from=home$/, { waitUntil: 'commit' }),
+            page.locator('#lp-signup-google').click(),
+        ]);
     });
 
     test('the live demo embed carries no src at load and gets one only when scrolled near', async ({ page }) => {
