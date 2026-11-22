@@ -24,6 +24,8 @@
 import * as O from '../js/chicxulub/observations.js';
 import * as M from '../js/chicxulub/impact-model.js';
 import * as R from '../js/chicxulub/reconstruct.js';
+import * as SM from '../js/chicxulub/scene-model.js';
+import fs from 'node:fs';
 import { impactEnergy } from '../js/neo-space.js';
 import { EBM_HEAT_CAPACITY, EBM_FEEDBACK } from '../js/volcano-engine.js';
 
@@ -257,6 +259,78 @@ section('8. climate box');
     ok(near(co2.addedPpm, 54.4, 0.5) && co2.forcingWm2 > 0.3 && co2.forcingWm2 < 0.7, `425 Gt CO₂ = +${co2.addedPpm.toFixed(0)} ppm, +${co2.forcingWm2.toFixed(2)} W/m²`);
     const re = M.reentryHeating();
     ok(re.solarConstants > 5 && re.solarConstants < 50, `re-entry upper bound ${re.solarConstants.toFixed(0)} × the Sun`);
+}
+
+// ── 9 ───────────────────────────────────────────────────────────────────────
+section('9. the 3-D scene kernel');
+{
+    const b = R.reconstructImpactor({ scenario: 'asteroid' });
+    const fwd = M.forward({ diameterKm: b.diameterKm.med, speedKms: b.speedKms.med, angleDeg: b.angleDeg.med, density: b.density.med });
+    const tl = SM.timeline(fwd, { fromAzimuthDeg: 45 });
+    ok(SM.SKETCH.verified === false, 'the collapse sketch is flagged as a sketch');
+    ok(rel(tl.transientRadiusKm * 2, fwd.transientKm) < 1e-12 && rel(tl.finalRadiusKm * 2, fwd.finalKm) < 1e-12 && rel(tl.transientDepthKm, fwd.transientDepthKm) < 1e-12, 'crater sizes are the forward model\'s');
+    ok(rel(tl.fireballKm, fwd.fireballKm) < 1e-12, 'fireball radius is the forward model\'s');
+    ok(tl.contactS < tl.atmosphereS && tl.atmosphereS < 20 && tl.formS > 30 && tl.formS < 200 && tl.collapseEndS < SM.END_S, `clock: bury ${tl.contactS.toFixed(1)} s < air ${tl.atmosphereS.toFixed(1)} s; bowl ${tl.formS.toFixed(0)} s; collapse done ${tl.collapseEndS.toFixed(0)} s`);
+    ok(tl.diameterKm > SM.REFERENCE.everestKm && tl.diameterKm > SM.REFERENCE.cruiseKm, 'the body is taller than Everest and than cruise altitude');
+
+    // the body: straight line at the reconstructed speed, angle and bearing
+    const a = SM.impactorState(tl, -10), c = SM.impactorState(tl, -4);
+    const d = Math.hypot(a.east - c.east, a.north - c.north, a.up - c.up);
+    ok(rel(d, 6 * tl.speedKms) < 1e-12, 'it covers speed × time');
+    ok(near(Math.atan2(a.up - c.up, Math.hypot(a.east - c.east, a.north - c.north)) * 180 / Math.PI, tl.angleDeg, 1e-9), 'at the reconstructed angle to the ground');
+    ok(a.east > 0 && a.north > 0 && near(a.east, a.north, 1e-9), 'coming from the north-east');
+    const dir = SM.travelDirection(tl);
+    ok(near(Math.hypot(dir.east, dir.north, dir.up), 1, 1e-12) && dir.east < 0 && dir.north < 0 && dir.up < 0, 'travel direction is a unit vector pointing south-west and down');
+    const touch = SM.impactorState(tl, 0);
+    ok(near(touch.up, tl.diameterKm / 2, 1e-12) && touch.east === 0 && touch.remaining === 1, 't = 0 is first contact, at the centre');
+    ok(SM.impactorState(tl, tl.contactS).remaining === 0 && SM.impactorState(tl, tl.contactS / 2).remaining === 0.5, 'consumed over the contact time');
+    ok(!SM.impactorState(tl, -SM.APPROACH_S).inAtmosphere && SM.impactorState(tl, -tl.atmosphereS * 0.5).inAtmosphere, 'enters the air at 100 km');
+    let lo = 9, hi = 0; for (let i = 0; i < 4000; i++) { const u = Math.cos(i * 2.399) , v = Math.sin(i * 2.399), z = 1 - 2 * (i + 0.5) / 4000, q = Math.sqrt(1 - z * z); const f = SM.lumpiness(q * u, q * v, z); lo = Math.min(lo, f); hi = Math.max(hi, f); }
+    ok(lo > 0.75 && hi < 1.25 && hi - lo > 0.1, `rock shape factor ${lo.toFixed(2)}–${hi.toFixed(2)} (lumpy, bounded)`);
+    ok(SM.lumpiness(0.3, 0.4, 0.5, 66) === SM.lumpiness(0.3, 0.4, 0.5, 66), 'deterministic shape');
+
+    // the ground
+    ok(SM.surfaceHeightKm(tl, 0, -5) === 0 && SM.craterRadiusKm(tl, -5) === 0, 'undisturbed before contact');
+    ok(near(SM.surfaceHeightKm(tl, 0, tl.formS - 1e-9), -tl.transientDepthKm, 1e-6), 'the bowl reaches the transient depth');
+    ok(near(SM.craterRadiusKm(tl, tl.formS), tl.transientRadiusKm, 1e-9) && near(SM.craterRadiusKm(tl, SM.END_S), tl.finalRadiusKm, 1e-9), 'radius: transient at formation, final at the end');
+    let mono = true, prev = 0; for (let t = 0.5; t <= SM.END_S; t += 0.5) { const r = SM.craterRadiusKm(tl, t); if (r < prev - 1e-12) mono = false; prev = r; }
+    ok(mono, 'the hole never shrinks');
+    // continuity in time at the two seams, everywhere
+    let jump = 0; for (let r = 0; r <= 300; r += 1.5) for (const ts of [tl.formS, tl.collapseEndS]) jump = Math.max(jump, Math.abs(SM.surfaceHeightKm(tl, r, ts - 1e-6) - SM.surfaceHeightKm(tl, r, ts + 1e-6)));
+    ok(jump < 1e-3, `no jump in the ground at either seam (${jump.toExponential(1)} km)`);
+    // continuity in space
+    let step = 0; for (const t of [5, 40, tl.formS, 150, 250, 600]) for (let r = 0; r < 300; r += 0.05) step = Math.max(step, Math.abs(SM.surfaceHeightKm(tl, r + 0.05, t) - SM.surfaceHeightKm(tl, r, t)));
+    ok(step < 0.6, `no cliff taller than ${step.toFixed(2)} km per 50 m of ground`);
+    ok(Math.abs(SM.surfaceHeightKm(tl, 440, 600)) < 0.02, 'far ground is undisturbed');
+    const end = (r) => SM.surfaceHeightKm(tl, r, SM.END_S);
+    ok(near(end(tl.finalRadiusKm), tl.finalRimKm, 1e-9) && end(0) < 0 && near(end(0), -tl.finalDepthKm, 0.01), `final: rim +${tl.finalRimKm.toFixed(2)} km at the final radius, floor −${tl.finalDepthKm.toFixed(2)} km`);
+    ok(end(tl.peakRingRadiusKm) - end(tl.peakRingRadiusKm - 15) > 0.3 && end(tl.peakRingRadiusKm) - end(tl.peakRingRadiusKm + 15) > 0.2, 'a peak ring stands on the floor at the measured radius');
+    ok(near(tl.peakRingRadiusKm * 2, O.CRATER.peakRingDiameterKm.value, 1e-9), 'peak ring diameter is the measured one');
+    const mid = (tl.formS + tl.collapseEndS) / 2;
+    ok(SM.surfaceHeightKm(tl, 0, mid) > 0 && SM.surfaceHeightKm(tl, 0, mid) < tl.transientDepthKm, `the centre rebounds above the surface mid-collapse (+${SM.surfaceHeightKm(tl, 0, mid).toFixed(1)} km) and falls back`);
+    ok(rel(SM.curvatureDropKm(100), 0.785) < 0.01, 'Earth curves 0.78 km in 100 km');
+
+    // the sky
+    ok(SM.landingRadiusKm(10) === 0 && SM.landingRadiusKm(SM.END_S) > 2000, 'debris front starts at the crater and is past 2000 km in 15 min');
+    for (const km of [100, 500, 1500]) { const T = M.ballisticFlight(km * 1000).timeS; ok(rel(SM.landingRadiusKm(T), km) < 0.01, `landing front at ${T.toFixed(0)} s is ${km} km (inverse of the flight time)`); }
+    const cu = SM.curtainState(tl, 30);
+    ok(cu.visible && near(cu.baseKm, SM.craterRadiusKm(tl, 30), 1e-9) && cu.topKm > cu.baseKm, 'the curtain stands on the rim and leans outward');
+    ok(!SM.curtainState(tl, 0.1).visible && !SM.curtainState(tl, SM.END_S).visible, 'no curtain before the body is buried, none once it has left the scene');
+    const fb = SM.fireballState(tl, 400);
+    ok(near(fb.radiusKm, tl.fireballKm, 1e-3) && SM.fireballState(tl, 5).radiusKm < tl.fireballKm * 0.5 && fb.opacity < 0.1, 'fireball grows to its radius and fades');
+
+    // the clock
+    let worst = 0; for (let s = 0; s <= 1.0001; s += 0.01) worst = Math.max(worst, Math.abs(SM.timeToSlider(SM.sliderToTime(s)) - Math.min(1, s)));
+    ok(worst < 1e-9, 'slider ↔ time round trip');
+    ok(SM.sliderToTime(0) === -SM.APPROACH_S && near(SM.sliderToTime(1), SM.END_S, 1e-9) && Math.abs(SM.sliderToTime(SM.timeToSlider(0))) < 1e-9, 'slider spans approach → 15 min, with contact inside it');
+    const ids = [-15, -3, tl.contactS / 2, 30, 200, 800].map((t) => SM.phaseAt(tl, t).id);
+    ok(ids.join() === SM.PHASES.join(), `phases in order: ${ids.join(' → ')}`);
+    ok(SM.formatClock(-12.34) === 'T−12 s' && SM.formatClock(3.21) === 'T+3.2 s' && SM.formatClock(230) === 'T+3 min 50 s', 'clock text');
+
+    // the renderer holds no physics: no scaling-law call, no typed crater number
+    const src = fs.readFileSync(new URL('../js/chicxulub/stage.js', import.meta.url), 'utf8');
+    ok(!/impact-model|reconstruct\.js|Math\.sqrt|Math\.pow|\*\* ?0\.\d/.test(src), 'stage.js imports no physics kernel and has no power law of its own');
+    ok(/camera\.up/.test(src) === false || !/camera\.up\.set/.test(src), 'stage.js never moves camera.up');
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

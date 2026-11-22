@@ -21,6 +21,14 @@
 <meta name="twitter:description" content="A reconstruction of the Chicxulub impactor, its trajectory and its effects from the crater, the iridium layer and the ejecta.">
 <meta name="description" content="A reconstruction of the Chicxulub impact 66 million years ago: the measured crater, iridium layer and ejecta are run backwards through impact scaling laws and orbital mechanics to the asteroid's size, speed, trajectory and orbit, and forwards to its effects on the planet.">
 
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
 <link rel="stylesheet" href="colors_and_type.css">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
@@ -85,6 +93,22 @@ table.chx-t tr.grp td { color:#7fb0ff; font-size:.64rem; letter-spacing:.12em; t
 .chx-timeline li b { color:#f3f5ff; font-variant-numeric:tabular-nums; }
 .chx-timeline li span { color:#b9c2da; }
 .chx-open li { font-size:.78rem; color:#b9c2da; line-height:1.6; margin-left:18px; }
+
+/* 3-D stage */
+#chx-stage-wrap { position:relative; margin-top:10px; border-radius:10px; overflow:hidden; background:#04070f; border:1px solid rgba(255,255,255,.07); }
+#chx-stage { display:block; width:100%; height:clamp(340px, 62vh, 640px); touch-action:none; cursor:grab; }
+#chx-stage:active { cursor:grabbing; }
+#chx-stage-clock { position:absolute; left:12px; top:10px; font-size:1.05rem; font-weight:700; color:#f3f5ff; font-variant-numeric:tabular-nums; pointer-events:none; text-shadow:0 1px 6px #000; }
+#chx-stage-phase { position:absolute; left:0; bottom:0; right:0; padding:26px 14px 11px; pointer-events:none; background:linear-gradient(to top, rgba(4,7,15,.88), rgba(4,7,15,0)); }
+#chx-stage-phase span { display:block; max-width:620px; }
+#chx-stage-phase b { display:block; font-size:.9rem; color:#f3f5ff; }
+#chx-stage-phase span { font-size:.8rem; color:#cfd6ea; line-height:1.5; }
+#chx-stage-note { position:absolute; right:12px; top:10px; font-size:.68rem; color:#aab3cb; pointer-events:none; text-align:right; text-shadow:0 1px 6px #000; }
+#chx-stage-fail { padding:28px 16px; font-size:.84rem; color:#e3b765; }
+#chx-stage-fail[hidden] { display:none; }
+.chx-play { background:#1c3a6b; color:#fff; border:1px solid rgba(160,190,255,.35); border-radius:8px; font:inherit; font-size:.78rem; padding:6px 14px; min-height:34px; min-width:74px; cursor:pointer; }
+.chx-play:focus-visible { outline:2px solid #7fb0ff; outline-offset:1px; }
+#chx-time { flex:1 1 220px; min-width:160px; width:auto; }
 </style>
 </head>
 <body>
@@ -105,6 +129,40 @@ table.chx-t tr.grp td { color:#7fb0ff; font-size:.64rem; letter-spacing:.12em; t
     <p class="chx-fine">Tiles show the reconstruction's median and 68 % range for a main-belt asteroid. It is a scaling-law
       reconstruction, not a shock-physics simulation; the scaling coefficients and some evidence values were written from memory of the
       literature and are marked as unchecked below.</p>
+  </section>
+
+  <section class="chx-panel chx-span" id="chx-watch">
+    <div class="chx-step">Watch it · true scale</div>
+    <h2>The last twenty seconds, and the first fifteen minutes
+      <small>The reconstructed asteroid, its path from the north-east, and the crater it leaves — one scene unit is one kilometre. Drag to look around.</small></h2>
+    <div class="chx-ctl">
+      <button type="button" class="chx-play" id="chx-play" aria-pressed="false">Play</button>
+      <input type="range" id="chx-time" min="0" max="1" step="0.001" value="0" aria-label="Time relative to impact">
+      <span class="chx-seg" id="chx-view" role="group" aria-label="Camera view">
+        <button type="button" data-v="approach" aria-pressed="true">Approach</button>
+        <button type="button" data-v="size" aria-pressed="false">How big</button>
+        <button type="button" data-v="crater" aria-pressed="false">Crater</button>
+        <button type="button" data-v="region" aria-pressed="false">Region</button>
+      </span>
+      <span class="chx-seg" id="chx-exag" role="group" aria-label="Vertical scale of the ground">
+        <button type="button" data-v="1" aria-pressed="true">Relief ×1</button>
+        <button type="button" data-v="5" aria-pressed="false">×5</button>
+      </span>
+    </div>
+    <div id="chx-stage-wrap">
+      <canvas id="chx-stage" aria-label="3-D view of the Chicxulub impact"></canvas>
+      <div id="chx-stage-clock"></div>
+      <div id="chx-stage-note"></div>
+      <div id="chx-stage-phase" aria-live="polite"><b></b><span></span></div>
+      <div id="chx-stage-fail" hidden>This browser could not start WebGL, so the 3-D view is not shown. Everything below works without it.</div>
+    </div>
+    <dl class="chx-kv" id="chx-stage-kv"></dl>
+    <p class="chx-fine"><b>What is real here:</b> the body's size, speed, angle and bearing, the two crater sizes and depths, the time it
+      takes to cross the air and to bury itself, where thrown-out rock is landing, and the peak ring's measured radius.
+      <b>What is a sketch:</b> how the hole gets from one shape to the next — the growth of the bowl, the rebound of its floor, the
+      height of the debris curtain, and the fireball's growth and fading are an interpolation timed to the published picture, not a
+      shock-physics simulation. The asteroid's lumpy shape is invented; nothing is known about it. The ground is drawn plain because
+      the coastline of 66 million years ago is not in this model, and the sea, the layered rock and the returning water are not drawn.</p>
   </section>
 
   <section class="chx-panel">

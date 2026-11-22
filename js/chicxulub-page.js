@@ -9,6 +9,7 @@
 import * as O from './chicxulub/observations.js';
 import * as M from './chicxulub/impact-model.js';
 import * as R from './chicxulub/reconstruct.js';
+import * as SM from './chicxulub/scene-model.js';
 
 const $ = (id) => document.getElementById(id);
 const INK = '#f3f5ff', INK2 = '#aab3cb', MUTED = '#8a93ad', GRID = 'rgba(255,255,255,.08)', SURFACE = '#0a0e1e';
@@ -353,6 +354,63 @@ function renderClimate() {
     $('chx-climate-note').textContent = `${soot.massTg.toLocaleString('en-US')} million tonnes of soot spread evenly is an optical depth of ${fx(tau0, 0)}: no direct sunlight at all. The darkness lasts the ${soot.darkYears} years the published climate model found (that is an input here). A box with a 60 m ocean layer then cools by ${fx(shallow.peakCoolingK, 0)} °C — four times the model's ${soot.peakCoolingK} °C. Matching the model takes the heat of about ${fx(dep.oceanDepthM, 0)} m of ocean: the cold surface water sinks and the deep ocean keeps the planet from freezing. Not shown: the first hours, when re-entering debris heated the upper air by up to ${fx(re.fluxWm2 / 1000, 0)} kW/m² (an upper bound); the ${O.VOLATILES.sulfurGt.value} billion tonnes of sulfur, which add to the cooling; and the ${O.VOLATILES.co2Gt.value} billion tonnes of CO₂, worth about +${fx(co2.forcingWm2 / 1.2, 1)} °C once the sky cleared.`;
 }
 
+// ── the 3-D stage ───────────────────────────────────────────────────────────
+// three.js is imported dynamically so a browser without WebGL still gets the
+// rest of the page; the stage draws scene-model.js and nothing else.
+const TL = SM.timeline(FWD, { fromAzimuthDeg: O.TRAJECTORY.fromAzimuthDeg.value });
+const W = { t: -SM.APPROACH_S, playing: false, stage: null, last: 0, loopS: 34 };
+function renderStageText() {
+    const ph = SM.phaseAt(TL, W.t), st = SM.impactorState(TL, W.t), cu = SM.curtainState(TL, W.t);
+    $('chx-stage-clock').textContent = SM.formatClock(W.t);
+    $('chx-stage-phase').querySelector('b').textContent = ph.title;
+    $('chx-stage-phase').querySelector('span').textContent = ph.text;
+    $('chx-stage-note').textContent = W.stage?.state.exaggeration > 1 ? `ground relief drawn ×${W.stage.state.exaggeration}` : 'true scale · 1 unit = 1 km';
+    const land = SM.landingRadiusKm(W.t);
+    $('chx-stage-kv').innerHTML = [
+        ['Asteroid', W.t <= 0 ? `${fx(st.altitudeKm, 0)} km up · ${fx(Math.hypot(st.east, st.north), 0)} km away along the ground` : st.remaining > 0 ? `${Math.round((1 - st.remaining) * 100)} % consumed` : 'gone — vapour and melt'],
+        ['Hole', W.t <= 0 ? '—' : `${fx(2 * SM.craterRadiusKm(TL, W.t), 0)} km across · centre ${fx(SM.surfaceHeightKm(TL, 0, W.t), 1)} km`],
+        ['Debris landing', land > 0 ? `out to ${fx(land, 0)} km${cu.visible ? '' : ' (beyond this view)'}` : '—'],
+    ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+function setStageTime(t, { fromSlider = false } = {}) {
+    W.t = Math.max(-SM.APPROACH_S, Math.min(SM.END_S, t));
+    if (!fromSlider) $('chx-time').value = SM.timeToSlider(W.t);
+    W.stage?.setTime(W.t);
+    renderStageText();
+}
+function setPlaying(on) {
+    W.playing = on; W.last = 0;
+    $('chx-play').textContent = on ? 'Pause' : 'Play'; $('chx-play').setAttribute('aria-pressed', String(on));
+    if (on) requestAnimationFrame(playTick);
+}
+function playTick(now) {
+    if (!W.playing) return;
+    const dt = W.last ? Math.min(0.1, (now - W.last) / 1000) : 0; W.last = now;
+    const s = Number($('chx-time').value) + dt / W.loopS;      // the slider's own (stretched) clock
+    if (s >= 1) { setStageTime(SM.END_S); setPlaying(false); return; }
+    $('chx-time').value = s; setStageTime(SM.sliderToTime(s), { fromSlider: true });
+    requestAnimationFrame(playTick);
+}
+$('chx-time').addEventListener('input', (e) => { if (W.playing) setPlaying(false); setStageTime(SM.sliderToTime(Number(e.target.value)), { fromSlider: true }); });
+$('chx-play').addEventListener('click', () => {
+    if (!W.playing && Number($('chx-time').value) >= 0.999) setStageTime(-SM.APPROACH_S);
+    setPlaying(!W.playing);
+});
+segmented('chx-view', (v) => W.stage?.fly(v));
+segmented('chx-exag', (v) => { W.stage?.setExaggeration(Number(v)); renderStageText(); });
+async function bootStage() {
+    try {
+        const { createStage } = await import('./chicxulub/stage.js');
+        W.stage = createStage($('chx-stage'), TL);
+        W.stage.setTime(W.t);
+    } catch (err) {
+        console.warn('[chicxulub] 3-D stage unavailable:', err?.message ?? err);
+        $('chx-stage').hidden = true; $('chx-stage').style.display = 'none'; $('chx-stage-fail').hidden = false;
+    }
+    renderStageText();
+    window.__chicxulub.stage = W.stage; window.__chicxulub.stageReady = true;
+}
+
 // ── evidence ────────────────────────────────────────────────────────────────
 const GROUPS = { crater: 'The crater', age: 'When', target: 'What it hit', iridium: 'The iridium layer', density: 'The body', type: 'What kind of body', trajectory: 'Trajectory', published: 'Published impactors', energy: 'Energy', ejecta: 'Debris', tsunami: 'The sea', volatiles: 'Into the air', climate: 'Climate-model results', extinction: 'Life' };
 const LABEL = { centre: 'Crater centre', rimDiameterKm: 'Outer rim', innerRimDiameterKm: 'Inner (topographic) rim', peakRingDiameterKm: 'Peak ring', transientCavityDiameterKm: 'Transient cavity', mohoUpliftKm: 'Mantle uplift', burialDepthKm: 'Buried under', ma: 'Age', season: 'Season', sedimentThicknessKm: 'Sediment cover', lithology: 'Rock', crustDensity: 'Crust density', waterDepthKm: 'Water depth', fluenceNgCm2: 'Global iridium', fluenceLowNgCm2: 'Global iridium (lower estimate)', nearCraterNgCm2: 'Iridium near the crater', abundanceNgG: 'Iridium in chondrites', density: 'Bulk density', angleDeg: 'Angle to the ground', fromAzimuthDeg: 'Came from', evidence: 'Asymmetry', joules: 'Impact energy', seismicMw: 'Earthquake magnitude', distal: 'Global layer', earlyWave: 'First wave', ringWave: 'Ring wave', gulfOpenOceanM: 'Gulf of Mexico', farCoastsM: 'Distant coasts', energyVs2004: 'Tsunami energy vs 2004', sulfurGt: 'Sulfur', co2Gt: 'Carbon dioxide', sootTg: 'Soot', fineDustTg: 'Fine dust', extinction: 'Species lost' };
@@ -397,4 +455,6 @@ T.v = Math.round(base.speedKms.med * 2) / 2; $('chx-v').value = T.v;
     T.hr = HOURS.bestHour; $('chx-hr').value = T.hr;
 }
 renderTrajectory();
-window.__chicxulub = { O, M, R, base, FWD, state: { S, T }, HOURS };
+window.__chicxulub = { O, M, R, SM, base, FWD, TL, state: { S, T, W }, HOURS, setStageTime, stage: null, stageReady: false };
+setStageTime(-SM.APPROACH_S);
+bootStage();

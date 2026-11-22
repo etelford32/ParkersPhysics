@@ -71,3 +71,67 @@ test('distance slider reorders the timeline; phone width does not overflow', asy
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('3-D stage: the asteroid comes down the reconstructed path and the hole opens', async ({ page }) => {
+    test.setTimeout(120000);
+    const errors = await boot(page);
+    await page.waitForFunction(() => window.__chicxulub.stageReady, null, { timeout: 60000 });
+    await expect(page.locator('#chx-stage-fail')).toBeHidden();
+    const at = (t) => page.evaluate((tt) => {
+        const c = window.__chicxulub; c.setStageTime(tt); c.stage.renderNow();
+        const st = c.SM.impactorState(c.TL, tt);
+        return { p: c.stage.probe(), st, hole: c.SM.surfaceHeightKm(c.TL, 0, tt), clock: document.getElementById('chx-stage-clock').textContent,
+                 phase: document.querySelector('#chx-stage-phase b').textContent };
+    }, t);
+    // before impact: the drawn rock is where the kernel says (east → x, up → y, north → −z), at true radius
+    const a = await at(-8);
+    expect(a.p.rock.visible).toBe(true);
+    expect(a.p.rock.x).toBeCloseTo(a.st.east, 6); expect(a.p.rock.y).toBeCloseTo(a.st.up, 6); expect(a.p.rock.z).toBeCloseTo(-a.st.north, 6);
+    expect(a.p.rock.radius).toBeCloseTo(a.st.radiusKm, 6);
+    expect(a.p.rock.x).toBeGreaterThan(0); expect(a.p.rock.z).toBeLessThan(0);          // north-east
+    expect(a.p.centreY).toBeCloseTo(0, 6); expect(a.p.fireball.visible).toBe(false);
+    expect(a.clock).toBe('T−8.0 s');
+    // after: the rock is gone, the ground at the centre is the kernel's depth, fire and curtain are up
+    const b = await at(40);
+    expect(b.p.rock.visible).toBe(false);
+    expect(b.p.centreY).toBeCloseTo(b.hole, 4); expect(b.hole).toBeLessThan(-15);
+    expect(b.p.fireball.visible).toBe(true); expect(b.p.curtain.visible).toBe(true);
+    expect(b.phase).toBe('The hole opens');
+    // relief ×5 scales the ground only
+    await page.locator('#chx-exag button[data-v="5"]').click();
+    const c = await at(40);
+    expect(c.p.centreY).toBeCloseTo(5 * b.hole, 3);
+    await expect(page.locator('#chx-stage-note')).toContainText('×5');
+    await page.locator('#chx-exag button[data-v="1"]').click();
+    // the canvas is actually lit (not a black or blown-out frame)
+    const lum = await page.evaluate(() => {
+        const c = window.__chicxulub; c.stage.fly('crater', { instant: true }); c.setStageTime(230); c.stage.renderNow();
+        const gl = c.stage.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * 4);
+        gl.readPixels(0, Math.floor(h / 2), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        let s = 0, white = 0; for (let i = 0; i < w; i++) { const l = (px[4 * i] + px[4 * i + 1] + px[4 * i + 2]) / 3; s += l; if (l > 250) white++; }
+        return { mean: s / w, white: white / w };
+    });
+    expect(lum.mean).toBeGreaterThan(12); expect(lum.white).toBeLessThan(0.2);
+    // a preset is a one-shot flight; camera.up never moves
+    await page.locator('#chx-view button[data-v="region"]').click();
+    await page.waitForFunction(() => !window.__chicxulub.stage.state.flying, null, { timeout: 30000 });
+    const p = await page.evaluate(() => window.__chicxulub.stage.probe());
+    expect(p.up).toEqual([0, 1, 0]); expect(p.camera[1]).toBeGreaterThan(400);
+    expect(errors).toEqual([]);
+});
+
+test('3-D stage: play runs the clock forward and the slider takes it back', async ({ page }) => {
+    test.setTimeout(120000);
+    await boot(page);
+    await page.waitForFunction(() => window.__chicxulub.stageReady, null, { timeout: 60000 });
+    const t0 = await page.evaluate(() => window.__chicxulub.state.W.t);
+    expect(t0).toBe(-20);
+    await page.locator('#chx-play').click();
+    await page.waitForFunction((t) => window.__chicxulub.state.W.t > t + 2, t0, { timeout: 60000 });
+    await page.locator('#chx-play').click();
+    await expect(page.locator('#chx-play')).toHaveText('Play');
+    await page.locator('#chx-time').fill('1');
+    expect(await page.evaluate(() => window.__chicxulub.state.W.t)).toBeCloseTo(900, 6);
+    await expect(page.locator('#chx-stage-phase b')).toHaveText('The crater');
+    await expect(page.locator('#chx-stage-kv')).toContainText('gone');
+});
