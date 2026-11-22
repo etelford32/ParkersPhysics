@@ -1,0 +1,49 @@
+# Sea Floor (sea-floor.html): the PURE kernels under js/seafloor/ and the baked data they read.
+#
+#   seafloor-kernels.mjs   equation of state vs python-seawater's output (and TEOS-10, loosely);
+#                          the sounder vs closed forms; the beam vs a V-trench; the bathymetry
+#                          grids vs their index; the adiabat vs REAL withheld casts with two
+#                          controls that must lose; the page model; "no physics in the renderer".
+#
+# The browser gate (tests/sea-floor.spec.js) reads only baked files and is run locally.
+# The bakes (scripts/build-seafloor-*.py) need the network and are run by hand.
+name: seafloor-kernels
+
+on:
+  push:
+    paths:
+      - 'js/seafloor/**'
+      - 'data/seafloor/**'
+      - 'tests/seafloor-kernels.mjs'
+      - 'tests/fixtures/seafloor/**'
+      - 'sea-floor.html'
+      - '.github/workflows/seafloor-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/seafloor/**'
+      - 'data/seafloor/**'
+      - 'tests/seafloor-kernels.mjs'
+      - 'tests/fixtures/seafloor/**'
+      - 'sea-floor.html'
+      - '.github/workflows/seafloor-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seafloor-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Sea-floor kernels + baked data (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: kernels + data
+        run: node tests/seafloor-kernels.mjs

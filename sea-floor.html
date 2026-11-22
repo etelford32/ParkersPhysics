@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sea Floor · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/sea-floor.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/sea-floor.html">
+<meta property="og:title" content="Sea Floor — how deep, and how cold, are the ocean's trenches?">
+<meta property="og:description" content="Twenty-eight trenches, deeps and abyssal plains in 3D, with the deepest real temperature casts ever lowered into them and an echo sounder you can fire yourself.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sea Floor — the ocean's trenches, sounded">
+<meta name="twitter:description" content="Depth from a global bathymetry grid, temperature from NOAA World Ocean Database casts, and the physics of measuring both.">
+<meta name="description" content="Sea Floor maps 28 ocean trenches, fracture-zone deeps, isolated basins and abyssal plains in 3D, shows the deepest real temperature profiles measured in each from the NOAA World Ocean Database, continues them to the floor along the seawater adiabat, and simulates how an echo sounder, a beam and a pressure gauge each measure depth.">
+
+<script type="importmap">
+{"imports":{"three":"./js/vendor/three-0.160.0/three.module.js","three/addons/":"./js/vendor/three-0.160.0/jsm/"}}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+:root {
+    --sf-surface:#0b1120; --sf-panel:rgba(11,17,32,.88); --sf-line:rgba(140,190,255,.14);
+    --sf-ink:#e3eaf6; --sf-ink-2:#aab6cc; --sf-ink-3:#7e8ba3; --sf-accent:#8fd3ff;
+    --sf-s1:#3987e5; --sf-s2:#d95926; --sf-s3:#199e70; --sf-s4:#c98500;   /* dataviz reference dark slots 1–4, validated on #0b1120 */
+    --sf-grid:rgba(140,190,255,.10);
+}
+body { width:100%; min-height:100vh; overflow-x:clip; background:#04070f; color:var(--sf-ink); font-family:'Segoe UI', system-ui, sans-serif; }
+#sf-app { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; padding:14px; align-content:start; }
+@media (max-width: 980px) { #sf-app { grid-template-columns:minmax(0, 1fr); } }
+@media (max-width: 768px) { #sf-app { padding:10px; gap:10px; } }
+.sf-panel { background:var(--sf-panel); border:1px solid var(--sf-line); border-radius:12px; padding:14px; min-width:0; }
+.sf-span { grid-column:1 / -1; }
+h1 { font-size:1.45rem; font-weight:700; }
+h2 { font-size:.92rem; font-weight:650; margin-bottom:8px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+h2 small { font-weight:400; color:var(--sf-ink-3); font-size:.72rem; }
+#sf-hero-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+#sf-hero p { color:var(--sf-ink-2); font-size:.82rem; margin-top:6px; max-width:1020px; line-height:1.5; }
+.sf-chip { display:inline-flex; align-items:center; gap:6px; font-size:.72rem; color:var(--sf-ink-2); border:1px solid var(--sf-line); border-radius:999px; padding:3px 10px; white-space:nowrap; }
+.sf-chip::before { content:''; width:7px; height:7px; border-radius:50%; background:#5d6a82; }
+.sf-chip[data-state="ok"]::before { background:#3fbf7f; }
+.sf-chip[data-state="down"]::before { background:#e05a5a; }
+.sf-note { font-size:.72rem; color:var(--sf-ink-3); line-height:1.5; margin-top:8px; }
+.sf-note b { color:var(--sf-ink-2); font-weight:600; }
+.sf-empty { color:var(--sf-ink-3); font-size:.8rem; padding:18px 0; }
+/* world map */
+#sf-map-wrap { position:relative; width:100%; aspect-ratio:2.25 / 1; background:#060b16; border-radius:8px; overflow:hidden; }
+#sf-map { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:pointer; }
+#sf-map-tip, #sf-chart-tip { position:fixed; pointer-events:none; z-index:40; background:rgba(4,8,16,.96); border:1px solid var(--sf-line); border-radius:6px; padding:6px 9px; font-size:.74rem; color:var(--sf-ink); max-width:300px; line-height:1.45; }
+#sf-map-tip[hidden], #sf-chart-tip[hidden] { display:none; }
+#sf-map-tip small, #sf-chart-tip small { color:var(--sf-ink-3); }
+.sf-keys { display:flex; gap:6px 14px; flex-wrap:wrap; font-size:.72rem; color:var(--sf-ink-2); margin-top:8px; align-items:center; }
+.sf-keys svg { vertical-align:-2px; margin-right:4px; }
+.sf-ramp { display:inline-flex; align-items:center; gap:6px; }
+.sf-ramp canvas { width:140px; height:8px; border-radius:2px; }
+/* table */
+.sf-tablewrap { overflow-x:auto; max-height:420px; overflow-y:auto; }
+#sf-table { width:100%; border-collapse:collapse; font-size:.76rem; }
+#sf-table th { position:sticky; top:0; background:#0c1424; text-align:left; font-weight:600; color:var(--sf-ink-3); padding:5px 8px; border-bottom:1px solid var(--sf-line); white-space:nowrap; cursor:pointer; user-select:none; }
+#sf-table th[aria-sort="ascending"]::after { content:' ▲'; } #sf-table th[aria-sort="descending"]::after { content:' ▼'; }
+#sf-table td { padding:6px 8px; border-bottom:1px solid rgba(140,190,255,.06); white-space:nowrap; }
+#sf-table td.n, #sf-table th.n { text-align:right; font-variant-numeric:tabular-nums; }
+#sf-table tr { cursor:pointer; } #sf-table tbody tr:hover { background:rgba(60,100,160,.18); }
+#sf-table tr[aria-selected="true"] { background:rgba(40,70,110,.55); }
+#sf-table small { color:var(--sf-ink-3); }
+.sf-badge { font-size:.64rem; border:1px solid var(--sf-line); border-radius:4px; padding:0 4px; color:var(--sf-ink-2); margin-left:4px; }
+.sf-badge[data-kind="model"] { border-style:dashed; }
+/* stage */
+#sf-stage { position:relative; width:100%; height:clamp(380px, 62vh, 720px); background:#050912; border-radius:8px; overflow:hidden; }
+#sf-stage-host { position:absolute; inset:0; }
+.sf-ov { position:absolute; z-index:2; background:rgba(6,10,20,.82); border:1px solid var(--sf-line); border-radius:8px; padding:6px 8px; font-size:.72rem; color:var(--sf-ink-2); }
+#sf-stage-tools { top:8px; left:8px; right:8px; display:flex; gap:6px 10px; flex-wrap:wrap; align-items:center; }
+#sf-stage-tools button, #sf-stage-tools select, .sf-btn { font:inherit; font-size:.74rem; color:var(--sf-ink); background:rgba(30,45,75,.8); border:1px solid var(--sf-line); border-radius:6px; padding:5px 9px; min-height:30px; cursor:pointer; }
+#sf-stage-tools button:hover, .sf-btn:hover { border-color:rgba(143,211,255,.5); }
+#sf-ping { background:rgba(40,90,140,.9); font-weight:600; }
+#sf-stage-tools label { display:inline-flex; gap:6px; align-items:center; }
+#sf-stage-readout { left:8px; bottom:8px; max-width:min(520px, calc(100% - 16px)); line-height:1.5; color:var(--sf-ink); }
+#sf-stage-readout small { color:var(--sf-ink-3); }
+#sf-stage-fallback { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--sf-ink-3); font-size:.82rem; padding:20px; text-align:center; }
+#sf-stage-fallback[hidden] { display:none; }
+/* charts */
+.sf-chart svg { display:block; width:100%; height:auto; overflow:visible; }
+.sf-chart text { font-size:10px; fill:#8f98ad; }
+.sf-chart .t-strong { fill:#e3eaf6; font-size:10.5px; }
+.sf-read { font-size:.76rem; color:var(--sf-ink); min-height:1.3em; margin-bottom:4px; }
+.sf-read small { color:var(--sf-ink-3); }
+dl.sf-dl { display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:.8rem; margin:6px 0; }
+dl.sf-dl dt { color:var(--sf-ink-3); } dl.sf-dl dd { margin:0; font-variant-numeric:tabular-nums; } dl.sf-dl small { color:var(--sf-ink-3); }
+.sf-inst { border:1px solid var(--sf-line); border-radius:10px; padding:10px 12px; background:rgba(8,13,26,.6); }
+.sf-inst + .sf-inst { margin-top:10px; }
+.sf-inst h3 { font-size:.8rem; font-weight:650; margin-bottom:2px; }
+.sf-inst h3 small { font-weight:400; color:var(--sf-ink-3); }
+.sf-big { font-size:1.25rem; font-weight:700; font-variant-numeric:tabular-nums; }
+.sf-row { display:flex; gap:8px 12px; flex-wrap:wrap; align-items:center; font-size:.76rem; color:var(--sf-ink-2); margin-bottom:8px; }
+.sf-row select { font:inherit; font-size:.74rem; color:var(--sf-ink); background:rgba(30,45,75,.8); border:1px solid var(--sf-line); border-radius:6px; padding:4px 8px; min-height:30px; max-width:100%; }
+details.sf-table summary { cursor:pointer; font-size:.72rem; color:var(--sf-ink-3); margin-top:8px; }
+details.sf-table table { width:100%; border-collapse:collapse; font-size:.7rem; margin-top:4px; }
+details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; border-bottom:1px solid rgba(140,190,255,.07); color:var(--sf-ink-2); font-variant-numeric:tabular-nums; }
+.sf-method { font-size:.74rem; color:var(--sf-ink-2); line-height:1.6; }
+.sf-method p + p { margin-top:6px; } .sf-method b { color:var(--sf-ink); } .sf-method a { color:var(--sf-accent); }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("sea-floor");</script>
+
+<div id="sf-app">
+
+  <section id="sf-hero" class="sf-panel sf-span">
+    <div id="sf-hero-row">
+      <h1>Sea Floor</h1>
+      <span class="sf-chip" id="sf-chip-bathy" data-state="loading">Bathymetry: loading…</span>
+      <span class="sf-chip" id="sf-chip-casts" data-state="loading">Temperature casts: loading…</span>
+    </div>
+    <p>How deep are the ocean's trenches, and how cold is the water at the bottom? Depth here comes from a global bathymetry grid;
+      temperature comes from the deepest real casts ever archived near each site in NOAA's World Ocean Database. Where no instrument reached
+      the floor, the profile is continued by physics and marked as modelled. One result surprises most people: below about four kilometres
+      the water gets <em>warmer</em> with depth, because it is squeezed. Pick a site, then fire the echo sounder to see why measuring depth is harder than it sounds.</p>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-map-panel">
+    <h2>The deep places <small id="sf-map-sub">select a site on the map or in the table</small></h2>
+    <div id="sf-map-wrap"><canvas id="sf-map" aria-label="World map of ocean depth with the sea-floor sites"></canvas></div>
+    <div class="sf-keys" id="sf-map-keys"></div>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-table-panel">
+    <h2>Depth and bottom temperature, site by site <small>click a column to sort</small></h2>
+    <div class="sf-tablewrap"><table id="sf-table"><thead></thead><tbody></tbody></table></div>
+    <div class="sf-note" id="sf-table-note"></div>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-stage-panel">
+    <h2><span id="sf-site-title">Sea floor</span> <small id="sf-site-sub"></small></h2>
+    <div id="sf-stage">
+      <div id="sf-stage-host"></div>
+      <div id="sf-stage-fallback" hidden>This browser could not start WebGL, so the 3D block is unavailable. The cross-section, profiles and sounding below still work.</div>
+      <div class="sf-ov" id="sf-stage-tools">
+        <button id="sf-ping" title="Fire the echo sounder at the selected point">Ping ▼</button>
+        <label title="Vertical exaggeration">↕ <input id="sf-exag" type="range" min="1" max="12" step="1" value="5" aria-label="Vertical exaggeration"><span id="sf-exag-val">5×</span></label>
+        <button data-view="oblique" title="Oblique view">⟲</button>
+        <button data-view="top" title="Look straight down">⊤</button>
+        <button data-view="section" title="Look along the sea surface">⊢</button>
+        <button id="sf-reset-point" title="Return the sounding point to the site's deepest point">Deepest point</button>
+      </div>
+      <div class="sf-ov" id="sf-stage-readout" aria-live="polite"></div>
+    </div>
+    <div class="sf-note" id="sf-stage-note"></div>
+  </section>
+
+  <section class="sf-panel" id="sf-section-panel">
+    <h2>Cross-section <small id="sf-section-sub"></small></h2>
+    <div class="sf-read" id="sf-section-read"></div>
+    <div class="sf-chart" id="sf-section-chart"></div>
+    <div class="sf-note" id="sf-section-note"></div>
+  </section>
+
+  <section class="sf-panel" id="sf-sound-panel">
+    <h2>Measuring the depth here <small id="sf-sound-sub"></small></h2>
+    <div class="sf-row">
+      <label>Beam <select id="sf-beam" aria-label="Echo sounder beam width"></select></label>
+      <label>Assumed sound speed <select id="sf-nominal" aria-label="Nominal sound speed">
+        <option value="1500">1500 m/s</option><option value="1463.04">800 fathoms/s (1463 m/s)</option></select></label>
+    </div>
+    <div id="sf-sound-body"><div class="sf-empty">Loading…</div></div>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-column-panel">
+    <h2>The water column <small id="sf-column-sub"></small></h2>
+    <div class="sf-row"><label>Cast <select id="sf-cast" aria-label="Which measured cast"></select></label><span id="sf-cast-meta"></span></div>
+    <div class="sf-keys" id="sf-column-keys"></div>
+    <div class="sf-read" id="sf-column-read"></div>
+    <div class="sf-chart" id="sf-column-chart"></div>
+    <div class="sf-note" id="sf-column-note"></div>
+    <details class="sf-table"><summary>Show the column as a table</summary><div id="sf-column-table"></div></details>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-compare-panel">
+    <h2>Deeper is not colder <small>bottom temperature against depth, every site</small></h2>
+    <div class="sf-keys" id="sf-compare-keys"></div>
+    <div class="sf-chart" id="sf-compare-chart"></div>
+    <div class="sf-note" id="sf-compare-note"></div>
+  </section>
+
+  <section class="sf-panel sf-span sf-method" id="sf-method">
+    <h2>Where every number comes from</h2>
+    <p><b>Depth: a grid, not a survey.</b> The sea floor is the ocean part of the public AWS Terrain Tiles: NOAA ETOPO1 (one arc-minute) with GEBCO 2014.
+      Most of the deep ocean in it is depth <i>predicted</i> from satellite gravity and tied to sparse ship tracks, on cells about 1.8 km across. A trench's
+      deepest grid cell therefore differs from the best ship or lander sounding by tens to a few hundred metres. The table shows the grid's value and, beside it,
+      the commonly quoted figure. Those quoted figures were written from memory and have not been checked against their sources. The bake date is <span id="sf-baked">—</span>.</p>
+    <p><b>Temperature: measured where an instrument went.</b> Casts are from the NOAA NCEI World Ocean Database (CTD rosettes, bottle casts and, from 2014, profiling floats),
+      read from NOAA's public archive. For each site the eight deepest casts within 150 km are kept. Levels that the database's own quality control flagged are dropped, not repaired.
+      Profiles are thinned for download size, never averaged. A cast is a snapshot on its own date; the deep sea changes slowly, but it does change.</p>
+    <p><b>Below the deepest level: modelled.</b> Where the cast stops short of the floor, the last measured water is carried down adiabatically (no heat exchanged, salinity held),
+      which is how well-mixed trench water behaves. This uses the UNESCO 1983 seawater algorithms (Bryden's adiabatic gradient). It ignores geothermal heating and is wrong
+      if different water lies below. Where the deepest cast extends far enough, the page tests the model on it by hiding its lower part and predicting it, and prints the error.</p>
+    <p><b>Sound speed and soundings.</b> Sound speed is Chen &amp; Millero (UNESCO 1983) from temperature, salinity and pressure. It differs from the newer TEOS-10 standard by up to
+      about 2 m/s at trench pressure, which is roughly 15 m of echo depth at 11 km, and soundings here carry that uncertainty. The echo is timed straight down;
+      the beam test uses straight rays on the 1.8 km grid, so a real narrow beam would resolve walls this grid cannot. Depth from pressure is the UNESCO standard-ocean formula.</p>
+    <p><b>Not to scale:</b> the 3D block's vertical exaggeration, printed on it and adjustable down to 1×. The ping's flight is shown on a compressed clock; the real time is printed.</p>
+  </section>
+
+</div>
+<div id="sf-map-tip" hidden></div>
+<div id="sf-chart-tip" hidden></div>
+
+<script type="module" src="js/seafloor/page.js"></script>
+</body>
+</html>
