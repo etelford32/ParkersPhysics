@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T22:21:38.410Z",
+  "generatedAt": "2026-11-22T23:45:29.534Z",
   "slides": [
     {
       "id": "earth",
@@ -51,11 +51,11 @@
       "width": 1222,
       "height": 1020,
       "source": "/upper-atmosphere.html",
-      "capturedAt": "2026-11-09T17:41:45.900Z",
+      "capturedAt": "2026-11-22T23:43:31.094Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 183653,
-        "clip": 349532
+        "poster": 144047,
+        "clip": 783463
       }
     },
     {
@@ -65,11 +65,11 @@
       "width": 1532,
       "height": 888,
       "source": "/ring-current.html",
-      "capturedAt": "2026-11-09T17:42:45.497Z",
+      "capturedAt": "2026-11-22T23:44:28.907Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 68644,
-        "clip": 306750
+        "poster": 98635,
+        "clip": 452083
       }
     },
     {
@@ -112,6 +112,20 @@
       "bytes": {
         "poster": 104910,
         "clip": 205465
+      }
+    },
+    {
+      "id": "climalytix",
+      "poster": "assets/home/showcase/climalytix.jpg",
+      "clip": "assets/home/showcase/climalytix.webm",
+      "width": 1588,
+      "height": 720,
+      "source": "/climalytix.html",
+      "capturedAt": "2026-11-22T23:44:56.096Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 183127,
+        "clip": 593559
       }
     },
     {
@@ -205,11 +219,11 @@
       "width": 1446,
       "height": 880,
       "source": "/neo-watch.html",
-      "capturedAt": "2026-11-09T17:37:32.212Z",
+      "capturedAt": "2026-11-22T23:45:29.511Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 45746,
-        "clip": 37742
+        "poster": 77668,
+        "clip": 216803
       }
     },
     {

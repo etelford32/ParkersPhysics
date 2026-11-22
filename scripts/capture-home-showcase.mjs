@@ -137,6 +137,11 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
         try { localStorage.setItem('pp_consent_v1', JSON.stringify({ strict: true, functional: false, analytics: false, ts: Date.now(), version: 1 })); } catch {}
         window.addEventListener('message', (e) => { if (e.data?.type === 'preview-ready') window.__previewReady = true; });
     });
+    // A recipe's `storage` is localStorage the page reads at boot (e.g. the
+    // current-view location, `ppx_user_location`) — set before any page script.
+    if (c.storage) await page.addInitScript((kv) => {
+        for (const [k, v] of Object.entries(kv)) { try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch {} }
+    }, c.storage);
     // EarthView (and every page sharing js/earth-skin.js) loads its NASA
     // surface maps from unpkg. Where that CDN is unreachable the globe renders
     // BLACK — so the CDN is probed ONCE per run (CDN_OK) and, when it is down,

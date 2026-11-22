@@ -160,6 +160,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             crop: '#ua-globe',
             ready: '!!window.__ua',
             hide: ['nav'],
+            shots: [{ wheel: 240, n: 5 }, { drag: [0.5, 0.5, 0.42, 0.56], wait: 600 }],
             settleMs: 14000,
             clipMs: 7000,
         },
@@ -181,6 +182,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // The ENA imager panel is an in-scene mesh, not DOM — switch the
             // layer off so the ring itself is the picture.
             prep: 'document.querySelector(".rc-ena-toggle.rc-on")?.click()',
+            shots: [{ wheel: -240, n: 4 }, { drag: [0.5, 0.5, 0.5, 0.42], wait: 600 }],
             settleMs: 9000,
             clipMs: 7000,
         },
@@ -237,6 +239,36 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             hide: ['nav', '#gw-stage .gw-ov'],
             shots: [{ wheel: -240, n: 2 }, { drag: [0.5, 0.5, 0.58, 0.42], wait: 600 }],
             settleMs: 10000,
+            clipMs: 7000,
+        },
+    },
+    {
+        id: 'climalytix',
+        does: 'Put one place under every dataset at once.',
+        claim: 'Our own GFS archive brought down to the real ground: a lapse rate fitted from each run, each slope’s sunlight and shadow, night cold-air pooling — on one clock with the record and the terrain.',
+        model: 'GFS 0.25° · fitted lapse rate · terrain sun & shade',
+        data: 'NOAA GFS · AWS Terrain Tiles · NASA Blue Marble',
+        scale: '30 m terrain → 25 km model',
+        verb: 'Analyse a site',
+        accent: '#5fd8ff',
+        capture: {
+            // NEEDS THE GFS ARCHIVE. /api/climalytix/nwp(-field) read R2; with
+            // the R2_* variables unset the map has no temperature or wind and
+            // the still would be a bare basemap. On a machine without the
+            // production secrets: run `python3 scripts/climalytix_ingest/gfs.py
+            // --max-lead 48 --out <dir>` (a real run, ~700 MB), then
+            // `node scripts/serve-local-r2.mjs <dir>` and start the dev server
+            // with the R2_* values that script prints. The frame is that run's
+            // forecast for the capture instant — the card's date says which.
+            url: '/climalytix.html',
+            storage: { ppx_user_location: { lat: 39.74, lon: -105.6, city: 'Front Range, Colorado', displayName: 'Front Range, Colorado' } },
+            crop: '#cx-map-stage',
+            ready: '/GFS run/.test(document.getElementById("cx-heat-status")?.textContent || "") && /GFS 10 m wind/.test(document.getElementById("cx-flow-status")?.textContent || "")',
+            // The on-map key is dropped because the 16:9 thumbnail crop cuts it in
+            // half; the card's own caption says what is drawn (2 m temperature + 10 m wind).
+            hide: ['nav', '#cx-map-ctl', '#cx-map-attr', '#cx-map-tip', '#cx-map-key', '#cx-map-scale'],
+            shots: [{ wheel: -240, n: 1, wait: 2500 }],
+            settleMs: 9000,
             clipMs: 7000,
         },
     },
@@ -370,6 +402,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             crop: '#nw-canvas',
             ready: '!!window.__neoWatch',
             hide: ['nav'],
+            shots: [{ wheel: -240, n: 5 }, { drag: [0.5, 0.5, 0.56, 0.72], wait: 600 }],
             settleMs: 12000,
             clipMs: 7000,
         },
