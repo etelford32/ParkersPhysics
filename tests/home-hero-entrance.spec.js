@@ -48,16 +48,13 @@ test.describe('home hero entrance', () => {
         });
         await page.goto(URL, { waitUntil: 'domcontentloaded' });
 
-        // (1) + (4, at load): reticle up, no embed has a src yet. ONE deferred
-        // embed remains (the flux-rope attract frame) — the EarthView iframe
-        // became the Simulation Showcase on 2026-11-09.
+        // (1) reticle up. The deferred demo embed (4) stayed on index.html when
+        // this hero moved to live-sky.html on 2026-11-22; it is gated there by
+        // tests/home-launchpad.spec.js.
         const early = await page.evaluate(() => ({
             booting: document.getElementById('hero').classList.contains('hero-booting'),
-            srcs: [...document.querySelectorAll('iframe[data-src]')].map((f) => f.getAttribute('src')),
         }));
         expect(early.booting).toBe(true);
-        expect(early.srcs.length).toBe(1);
-        expect(early.srcs.every((s) => s === null)).toBe(true);
 
         await page.waitForFunction(() => {
             const c = document.getElementById('hero-canvas');
@@ -113,14 +110,6 @@ test.describe('home hero entrance', () => {
             return { aspect: window.__ppHero._camera.aspect, css: c.clientWidth / c.clientHeight };
         });
         expect(Math.abs(geo.aspect - geo.css)).toBeLessThan(0.005);
-
-        // (4) The gate is open (entrance done) but the one remaining live
-        // embed (the flux-rope attract frame; the EarthView iframe became the
-        // Simulation Showcase on 2026-11-09) sits far below the fold, so it
-        // waits until it comes within the IO margin.
-        expect(await page.evaluate(() => document.querySelector('iframe.sw-attract-frame').getAttribute('src'))).toBeNull();
-        await page.evaluate(() => document.querySelector('.sw-attract-section').scrollIntoView());
-        await page.waitForFunction(() => /preview=1/.test(document.querySelector('iframe.sw-attract-frame').getAttribute('src') || ''), null, { timeout: 20_000 });
     });
 
     test('maps blocked: a featureless globe, still live', async ({ page }) => {

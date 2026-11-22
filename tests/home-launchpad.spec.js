@@ -186,6 +186,20 @@ test.describe('homepage launchpad', () => {
         expect(light.sim).toBe('rgb(255, 255, 255)');     // type on a slide stays white: it sits on a dark photograph
     });
 
+    test('the live demo embed carries no src at load and gets one only when scrolled near', async ({ page }) => {
+        // Moved here from tests/home-hero-entrance.spec.js with the hero's move:
+        // the flux-rope attract frame is a full WebGL app and must not boot
+        // against the first screen.
+        await offline(page);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await boot(page);
+        const srcs = await page.evaluate(() => [...document.querySelectorAll('iframe[data-src]')].map((f) => f.getAttribute('src')));
+        expect(srcs).toEqual([null]);
+        await page.waitForFunction(() => !document.getElementById('showcase-host')?.hasAttribute('aria-busy'));
+        await page.evaluate(() => document.querySelector('.sw-attract-section').scrollIntoView({ behavior: 'instant' }));
+        await page.waitForFunction(() => /preview=1/.test(document.querySelector('iframe.sw-attract-frame').getAttribute('src') || ''), null, { timeout: 20_000 });
+    });
+
     test('the first screen opens no WebGL context and loads no three.js', async ({ page }) => {
         await offline(page);
         await page.addInitScript(() => {
