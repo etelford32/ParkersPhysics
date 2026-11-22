@@ -1248,6 +1248,56 @@ owner.*
     responds to some parameter had been passing for the "both ribbons hook"
     row only because the then-zero creep was probed at an absurd value. It
     now also probes each parameter switched off.
+- **2026-11-22 (third) — the disc no longer goes dark in a close-up, and the
+  two halves of the disc match (owner: "fix items 1 and 2", the first two
+  findings of the visual review).**
+  - **Item 1 was not the flare.** The review saw the 304 Å disc fall from 109
+    to 19–25 display levels in the flare frames. Measured with no flare on
+    the page: the exposure controller meters the frame's mean, the mean rises
+    2.5–4.5 EV between the hero frame (mostly black sky) and a close-up (all
+    disc), and the controller held every close-up at its −2 EV floor for as
+    long as the camera stayed. The flare shot is simply the close-up most
+    visitors see.
+  - **The fix.** A surface's radiance does not depend on the camera's
+    distance, so a brighter frame is not a brighter Sun. The controller now
+    accommodates a brighter frame — at once while the page reports the
+    framing as changing (camera, lens, channel, a frame that just loaded),
+    over 6 s while it is still, so a flash still stops the exposure down and
+    it then recovers. The dark side (flying inside the corona) is unchanged.
+    The calibration now locks only on a still view with the whole disc in
+    frame. Browser gate: close-up frame 4.6 EV brighter than the hero frame,
+    exposure −0.02 EV; the old law on the same close-up, −2.00 EV.
+  - **Every earlier flare capture was under-exposed.** They were taken after
+    the controller had stopped down 1.4–2 EV. The flare look gate was not
+    affected (it had been running at 0 EV all along) and passes unchanged:
+    clipped-white share of the hot arcade 2.7 %.
+  - **Item 2 had four causes, all on the same edge.** Camera 90° off the
+    Sun–Earth line, real HMI frame: texture 22.6 vs 4.5 display levels and
+    the model half 10 % dimmer. (1) The model's granulation is a display
+    pattern — 15 Mm cells at ±34 % — beside a frame whose quiet disc is
+    smooth to 2 %. (2) Its display-level lifts and Ca/EUV-bright plage. (3)
+    The transition-region shell's EUV moss, drawn on the model half only.
+    (4) The observed half itself was drawn up to 40 % too dark away from disc
+    centre: the shader formed its brightness ratio from a chroma-divided
+    pixel while the calibration fitted the plain luminance, which on NASA's
+    gold-coloured frame weighted the blue channel sixteen-fold. The model's
+    over-dark granulation had been hiding that at the terminator.
+  - **The rule.** While a calibrated white-light frame is drawn, the
+    unobserved half is the model as that instrument would record it: quiet
+    texture at the contrast the frame was measured to have, on the same
+    smooth photosphere, no EUV-only features; below the frame's resolution
+    both halves get the same synthesised granulation. The MODEL view, the
+    EUV views and an uncalibrated frame are untouched. Gate on the real
+    frame: texture ratio 1.1 and level within 1 %, against 5× and 10 % for
+    the control; the synthetic seam gate's asymmetry fell from 0.045 to
+    0.039.
+  - **A side effect to know about.** The observed disc at the default view is
+    brighter toward the limb than it was (0.9 R☉: 176 display levels, was
+    156), because it is no longer limb-darkened twice. The white-light hero
+    is, if anything, flatter for it — review item 3 is still open.
+  - **Not verified.** A GPU; the EUV views when orbited (the rule is
+    white-light only); a frame with a large spot group on it (the robust
+    contrast measure is gated on a synthetic one).
 ---
 
 ## 1. Scope & locked decisions

@@ -14,6 +14,7 @@ import {
     greyTemperature, limbDarkeningEB, limbChroma, limbLuminanceNL, decodePick,
     GRANULE_MM, GRANULE_RSUN, GRANULE_FREQ, GRANULE_CONTRAST, RSUN_MM,
     detailWeight, screenScaleAt, frameScale, DISC_GLSL,
+    MODEL_TEXTURE_SIGMA, MODEL_TEXTURE_MEAN, FAR_TEXTURE_MIN, FACULA_CONTINUUM_LIMB, farTextureGain,
 } from '../js/sun-disc.js';
 
 let passed = 0;
@@ -120,6 +121,51 @@ ok('the GLSL is generated from these constants and sunFS uses it at BOTH places 
     assert.ok(/return discDecode\(/.test(src), 'the palette is decoded');
     // The luminance law in sunFS is still the polynomial this file mirrors.
     for (const c of ['0.36459', '1.06147', '1.01793', '1.01203', '0.70623', '0.25007']) assert.ok(src.includes(c), `Neckel & Labs coefficient ${c}`);
+});
+
+ok('the unobserved half takes the FRAME\'s contrast: gain = sigmaQuiet / the model texture\'s own, 1 with no measurement', () => {
+    // The real HMI frame measures 0.0209 and the page matched at a gain of ~0.09 (kernel table).
+    assert.ok(Math.abs(farTextureGain(0.0209) - 0.0209 / MODEL_TEXTURE_SIGMA) < 1e-12);
+    assert.ok(farTextureGain(0.0209) > 0.07 && farTextureGain(0.0209) < 0.12, `real frame → ${farTextureGain(0.0209)}`);
+    // Monotone, floored (a perfectly smooth synthetic frame keeps a trace), capped at the model's own look.
+    assert.equal(farTextureGain(0), FAR_TEXTURE_MIN);
+    assert.equal(farTextureGain(10), 1);
+    let prev = 0;
+    for (let sg = 0; sg <= 0.4; sg += 0.01) { const g = farTextureGain(sg); assert.ok(g >= prev); prev = g; }
+    // No measurement (−1 is what sun-observed.js writes for an uncalibrated frame) ⇒ the model's look, untouched.
+    for (const bad of [-1, NaN, undefined, null, Infinity]) assert.equal(farTextureGain(bad), 1, `farTextureGain(${bad})`);
+});
+
+ok('sun.html draws the unobserved half through the same instrument — and only beside a calibrated white-light frame', () => {
+    const num = (x) => { const t = String(x); return /[.e]/.test(t) ? t : t + '.0'; };
+    assert.ok(DISC_GLSL.includes(`DISC_FACULA_LIMB = ${num(FACULA_CONTINUUM_LIMB)}`));
+    const html = readFileSync(new URL('../sun.html', import.meta.url), 'utf8');
+    const sun = html.slice(html.indexOf('const sunFS = /* glsl */'), html.indexOf('sunLOD.addLevel'));
+    // The switch: off unless a frame is on, calibrated, and the view is white light.
+    assert.ok(/float farFuse = \(u_obsOn > 0\.5 && u_obsFuse > 0\.5 && u_viewMode < 0\.5\) \? u_farFuse : 0\.0;/.test(sun), 'farFuse is gated on the frame, its calibration and the view');
+    assert.ok(/float texKeep = mix\(1\.0, u_farTex, farFuse\);/.test(sun), 'texKeep is exactly 1 in MODEL mode');
+    // The quiet texture is scaled about baseCol — the level the observed half is drawn on.
+    assert.ok(/vec3 col = mix\(quietTex, baseCol \* \(1\.0 - u_farTex \* u_farMean\) \+ quietTex \* u_farTex, farFuse\);/.test(sun), 'the quiet texture is scaled about its own mean, on the smooth photosphere; MODEL mode is quietTex exactly');
+    assert.ok(html.includes('u_farMean:           { value: MODEL_TEXTURE_MEAN }'), 'the mean is the kernel\'s');
+    assert.ok(MODEL_TEXTURE_MEAN > 0.4 && MODEL_TEXTURE_MEAN < 0.9);
+    // The model's display-level lifts do not reach that half.
+    assert.ok(/u_f107_norm \* 0\.30 \* \(1\.0 - farFuse\)/.test(sun), 'the F10.7 level lift stands down');
+    assert.ok(/pmode \* 0\.025 \* \(1\.0 - farFuse\)/.test(sun), 'the p-mode pulse stands down');
+    assert.ok(/wlFac = mix\(1\.0, DISC_FACULA_LIMB \* \(1\.0 - mu\), farFuse\)/.test(sun), 'plage is scaled to its continuum contrast');
+    // obsRel is formed from the luminance calibrateDisk fitted — never from a chroma-divided pixel again.
+    assert.ok(/float L\s+= dot\(obsRGB, vec3\(0\.2126, 0\.7152, 0\.0722\)\);/.test(sun), 'obsRel uses the calibrated luminance');
+    assert.ok(!/obsRGB\s*\/\s*max\(u_obsChroma/.test(sun), 'the chroma division is gone (it limb-darkened the observed disc twice)');
+    // Below the frame's resolution both halves get the one synthesis.
+    assert.ok(/float quiet\s+= mix\(quietFar, quietObs, obsW\);/.test(sun), 'the granulation synthesis covers both halves');
+    // The shells' EUV / H-alpha on-disc terms stand down on that half too.
+    for (const [name, from, to] of [['chromoFS', 'const chromoFS', 'const trFS'], ['trFS', 'const trFS', 'fragmentShader: trFS']]) {
+        const src = html.slice(html.indexOf(from), html.indexOf(to));
+        assert.ok(/u_obsFuse > 0\.5 && u_viewMode < 0\.5 && u_(chromo|tr)Iso < 0\.5\) obsNear = max\(obsNear, u_farFuse\);/.test(src), `${name} stands down beside a continuum frame`);
+        for (const u of ['u_obsFuse', 'u_farFuse', 'u_viewMode']) assert.ok(src.includes(`uniform float ${u};`), `${name} declares ${u}`);
+    }
+    // The page sets the gain from the frame's measurement, and offers the A/B.
+    assert.ok(html.includes('uniforms.u_farTex.value = farTextureGain(uniforms.u_obsQuiet.value);'));
+    assert.ok(/get\('farfuse'\) === '0'\) uniforms\.u_farFuse\.value = 0;/.test(html), '?farfuse=0 is the A/B');
 });
 
 console.log(`${passed} checks passed (sun-disc)`);

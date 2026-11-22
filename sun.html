@@ -1876,7 +1876,7 @@ import {
 // rings, the arcade — reads the same accumulator through it. See the
 // FLARE SITE section below and tests/sun-flare-geometry.spec.js.
 import { LIMB_GLSL, CHROMO_MESH_R, TR_MESH_R } from './js/sun-limb.js';
-import { DISC_GLSL, detailWeight, screenScaleAt, frameScale } from './js/sun-disc.js';   // the limb's colour, the palette decode, sub-frame granulation (PURE)   // the analytic limb — ONE copy for the chromosphere + TR shells
+import { DISC_GLSL, detailWeight, screenScaleAt, frameScale, farTextureGain, MODEL_TEXTURE_MEAN } from './js/sun-disc.js';   // the limb's colour, the palette decode, sub-frame granulation (PURE)   // the analytic limb — ONE copy for the chromosphere + TR shells
 import * as CAM from './js/sun-camera.js';                 // framing, one-shot flights, shots (PURE)
 import * as DIRECTOR from './js/sun-flare-director.js';   // ONE flare event from any feed, and where it is in its life (PURE)
 import * as FG from './js/flare-geometry.js';
@@ -2452,6 +2452,16 @@ const uniforms = {
     // by tests/sun-visual.spec.js's terminator-continuity gate.
     u_obsLevel:          { value: 1.0 },
     u_obsDetail:         { value: 0.0 },   // synthesised sub-frame granulation weight — set per frame, 0 unless the view magnifies the frame
+    // THE UNOBSERVED HEMISPHERE THROUGH THE SAME INSTRUMENT (js/sun-disc.js
+    // section 4). u_farFuse 1 = while a calibrated frame is drawn, the model
+    // half carries the frame's own measured contrast instead of the model's
+    // display granulation (0 = the look shipped until 2026-11-22: the gate's
+    // negative control and ?farfuse=0). u_farTex is that contrast ratio, set
+    // per frame from the frame's measured sigma (farTextureGain).
+    u_farFuse:           { value: 1.0 },
+    u_farTex:            { value: 1.0 },
+    u_farMean:           { value: MODEL_TEXTURE_MEAN },
+    u_obsQuiet:          { value: -1.0 },  // the frame's robust quiet-disc contrast (calibrateDisk sigmaQuiet); −1 = no measurement. JS-side only.
     u_obsGrid:           { value: 1.0 },   // faint 15° graticule on the UNOBSERVED hemisphere
     u_kcorona:           { value: 1.0 },   // Phase 3 — white-light Thomson K + dust F corona (coronaFS); 0 disables
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
@@ -2731,6 +2741,7 @@ let _occlRelax = 0;     // set by the coronagraph layer's drawn weight
  * gains "+ synthesised granulation" while it is drawn. `?detail=0` turns it off.
  */
 const _obsDetailOn = new URLSearchParams(location.search).get('detail') !== '0';
+if (new URLSearchParams(location.search).get('farfuse') === '0') uniforms.u_farFuse.value = 0;   // A/B: the model half keeps its own display granulation beside a frame
 let _obsDetailShown = false;
 function _tickObsDetail() {
     let w = 0;
@@ -2739,6 +2750,8 @@ function _tickObsDetail() {
         w = detailWeight(screenScaleAt(camera.position.length(), camera.fov, canvasWrap.clientHeight || 720), frame);
     }
     uniforms.u_obsDetail.value = w;
+    // The unobserved half's quiet texture, at the contrast THIS frame was measured to have (sun-disc.js section 4).
+    uniforms.u_farTex.value = farTextureGain(uniforms.u_obsQuiet.value);
     const shown = w > 0.05;
     if (shown !== _obsDetailShown) { _obsDetailShown = shown; _renderProvChip(); }
 }
@@ -2793,6 +2806,38 @@ function _tickCoronagraph() {
         const k = THREE.MathUtils.smoothstep(d, 1.8, 3.2);
         sunPost.exposure.p.evMax = THREE.MathUtils.lerp(4.0, EV_MAX_WHOLE_SUN, k);
     }
+}
+// ── EXPOSURE: A BRIGHTER FRAME IS NOT A BRIGHTER SUN (js/sun-post.js header) ──
+// The exposure controller meters the frame MEAN, and the mean rises ~2.5 EV
+// between the hero frame (mostly black sky) and a close-up (all disc) with
+// nothing on the Sun having changed. Until 2026-11-22 that pinned every
+// close-up at the −2 EV floor, and the flare shot — the close-up most
+// visitors see — played out over a disc at a quarter of its exposure. The
+// controller now accommodates a brighter frame; what it needs from the page
+// is to be told when the FRAMING changed, so it can tell a camera move from
+// a flash: the camera's pose or lens, the channel, an observed frame that has
+// just loaded. Motion is held for a short tail after it stops (the controls'
+// damping, and the corona's re-accumulation, keep changing the image).
+const EXPO_MOTION_TAIL_S = 0.6;
+const _expoPos = new THREE.Vector3(), _expoQuat = new THREE.Quaternion();
+let _expoFov = 0, _expoMoveUntil = 0;
+/** The framing is changing for a reason the page knows about (not the Sun): accommodate at once for `seconds`. */
+function _expoNoteFraming(seconds = 1.0) { _expoMoveUntil = Math.max(_expoMoveUntil, performance.now() + seconds * 1000); }
+function _tickExposureFraming() {
+    if (!sunPost?.exposure) return;
+    const d = camera.position.length();
+    const moved = _expoPos.distanceTo(camera.position) > 1e-4 * Math.max(d, 1)
+               || _expoQuat.angleTo(camera.quaternion) > 1e-4
+               || Math.abs(_expoFov - camera.fov) > 1e-3;
+    if (moved) {
+        _expoPos.copy(camera.position); _expoQuat.copy(camera.quaternion); _expoFov = camera.fov;
+        _expoNoteFraming(EXPO_MOTION_TAIL_S);
+    }
+    // Sticky until the pass's next luminance readback consumes it (it reads every few frames).
+    if (performance.now() < _expoMoveUntil) sunPost.framingMoved = true;
+    // The calibration is "the whole Sun in view" — the same distance at which
+    // the coronagraph rule above treats the disc as fully in frame.
+    sunPost.calibrateOK = d >= 3.2;
 }
 const _occlV = new THREE.Vector3();
 /** Per frame: where the Sun is on screen, and how big (the space-occlusion pass's zones ride it). */
@@ -2934,6 +2979,9 @@ const sunFS = /* glsl */`
     uniform float     u_obsFuse;     // 1 = photometric fusion, 0 = legacy tint
     uniform float     u_obsLevel;    // model↔observation level trim (1.0 = matched)
     uniform float     u_obsDetail;   // 0..1 — synthesised sub-frame granulation (js/sun-disc.js detailWeight)
+    uniform float     u_farFuse;     // 1 = the unobserved hemisphere is drawn as the observing instrument would record it
+    uniform float     u_farTex;      // the frame's measured contrast / the model texture's own (js/sun-disc.js farTextureGain)
+    uniform float     u_farMean;     // the model texture's mean level, as a fraction of baseCol (js/sun-disc.js MODEL_TEXTURE_MEAN)
 
     // Below this Earth-μ the browse frame's own limb law is too steep to
     // divide by (2-term laws fall to a few % and the JPEG floor takes over),
@@ -3264,10 +3312,25 @@ const sunFS = /* glsl */`
                 float stretch = clamp(abs(mu - q.z) * 2.0, 0.0, 1.0);
                 obsW   = smoothstep(0.01, mix(0.14, 0.55, stretch), q.z);
                 if (u_obsFuse > 0.5) {
-                    // Strip the browse LUT, then normalise by the measured
-                    // envelope at THIS fragment's Earth-μ.
-                    vec3  lin = obsRGB / max(u_obsChroma, vec3(1e-3));
-                    float L   = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+                    // Normalise by the measured envelope at THIS fragment's
+                    // Earth-μ. L MUST BE THE LUMINANCE calibrateDisk FITTED —
+                    // the plain Rec.709 luminance of the linear pixel — or the
+                    // quotient is not 1 on the quiet disc. Until 2026-11-22 the
+                    // pixel was first divided by the frame's mean chroma ("strip
+                    // the browse LUT"), which is not a no-op for a scalar: it
+                    // re-weights the channels, and a browse LUT's hue changes
+                    // with level. On the real gold HMIIC frame red is clipped
+                    // disc-wide, green carries the limb darkening and blue
+                    // falls 21 → 1 code values centre to limb, with a mean
+                    // chroma of (2.16, 0.75, 0.0045): the division weighted
+                    // BLUE sixteen-fold and obsRel read 0.89 at μ = 0.95, 0.71
+                    // at 0.6, 0.59 at 0.31 (measured on the fixture) — the
+                    // observed disc was drawn up to 40 % too dark away from
+                    // its centre, i.e. limb-darkened twice. The model's
+                    // over-dark display granulation happened to hide that at
+                    // the terminator. The palette is applied once regardless:
+                    // obsRel is a scalar on the model's own colour.
+                    float L   = dot(obsRGB, vec3(0.2126, 0.7152, 0.0722));
                     float xE  = 1.0 - clamp(max(obsMuE, OBS_MU_FLOOR), 0.0, 1.0);
                     float ldE = max(0.02, 1.0 - u_obsCal.y * xE - u_obsCal.z * xE * xE);
                     obsRel    = clamp(L / max(u_obsCal.x * ldE, 1e-4), 0.0, 6.0);
@@ -3672,11 +3735,36 @@ const sunFS = /* glsl */`
         // interiors read whiter and lanes redder.
         vec3 granCol = blackbody(u_teff + (laneD - 0.5) * 500.0);
 
+        // ── THE UNOBSERVED HEMISPHERE THROUGH THE SAME INSTRUMENT ─────────────
+        // The model's granulation is a DISPLAY pattern: cells 15 Mm across
+        // (vPosition * 46 — ten times a granule) at +/-34 % contrast, tuned as
+        // the look of the model Sun. Beside an observed frame it is a claim the
+        // instrument contradicts: at HMI browse resolution (2.6 Mm a pixel) the
+        // quiet disc is smooth to a few per cent, so orbiting showed a hard
+        // seam between a smooth half and a speckled one (measured 2026-11-21:
+        // pixel-to-pixel texture 23 on the model half against 5 on the
+        // observed). While a calibrated frame is drawn, the model half's
+        // quiet-Sun texture is therefore scaled to the contrast the frame was
+        // MEASURED to have (u_farTex), about its smooth photosphere — which is
+        // baseCol, the very level the observed half is drawn on (obsPhoto
+        // below), so the two levels now agree by construction as well. Spots,
+        // plage, faculae and flares are added on top at full strength, as
+        // before. In MODEL mode (no frame) texKeep is exactly 1.
+        float farFuse = (u_obsOn > 0.5 && u_obsFuse > 0.5 && u_viewMode < 0.5) ? u_farFuse : 0.0;
+        float texKeep = mix(1.0, u_farTex, farFuse);
+
         // ── Compose surface brightness ────────────────────────────────────────
-        vec3 col = granCol * granLight + baseCol * (fineTurb + superGran);
+        // Scaled about the pattern's own MEAN (u_farMean x baseCol), not about
+        // baseCol with the pattern left un-centred: the display pattern's mean
+        // is well below baseCol (dark lanes and filaments outweigh the bright
+        // cells), so an un-centred mix dimmed the half by ~28 % x the gain —
+        // 2 % on the real frame, 8 % on a rougher one, and the seam was back
+        // in level. Centred, the half sits on baseCol at every gain.
+        vec3 quietTex = granCol * granLight + baseCol * (fineTurb + superGran);
+        vec3 col = mix(quietTex, baseCol * (1.0 - u_farTex * u_farMean) + quietTex * u_farTex, farFuse);
 
         // Magnetic bright points — intensely white
-        col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
+        col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots * texKeep;
 
         // NANOFLARES ARE NOT DRAWN IN WHITE LIGHT, ON PURPOSE. They used to be
         // (a hot white-yellow pop added right here) and that was wrong: a
@@ -3703,10 +3791,17 @@ const sunFS = /* glsl */`
         vec3 plageColor = mix(baseCol * 1.25, vec3(1.12, 1.00, 0.82), 0.60);
         float arPulse = 0.70 + 0.30 * sin(u_time * 2.3 + plage * 8.0)
                       + 0.14 * sin(u_time * 5.7 + plage * 3.0);
-        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots;
+        // (Beside an observed CONTINUUM frame this is the wrong picture: bright
+        // pulsing plage is the Ca / EUV look, and in the continuum faculae are
+        // invisible at disc centre and reach only ~10 % near the limb. On the
+        // unobserved half of a fused disc the term is therefore scaled to that
+        // — DISC_FACULA_LIMB x (1 - mu) — or the model half is strewn with
+        // bright dots the instrument beside it would not record.)
+        float wlFac = mix(1.0, DISC_FACULA_LIMB * (1.0 - mu), farFuse);
+        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots * wlFac;
         // Hot EUV core glow at the brightest plage (the active-region cores).
         float arCore = smoothstep(0.45, 1.15, plage);
-        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots;
+        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots * wlFac;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -3876,14 +3971,14 @@ const sunFS = /* glsl */`
         float poreNoise = vnoise(vPosition * 80.0 + vec3(u_time * 0.005));
         float pore = smoothstep(0.94, 0.97, poreNoise) * laneMask
                    * (1.0 - umbra) * (1.0 - penumbra) * 0.55;
-        col *= 1.0 - pore * u_showSpots;
+        col *= 1.0 - pore * u_showSpots * texKeep;
 
         // ── 5-minute p-mode oscillations — global photospheric ringing ─────
         // Acoustic standing waves trapped beneath the photosphere modulate
         // brightness at ~5 minutes (~3.5 sim-sec). Very subtle — just enough
         // to make the surface "ring" when zoomed in.
         float pmode = sin(u_time * (6.2832 / 3.5));
-        col *= 1.0 + pmode * 0.025;
+        col *= 1.0 + pmode * 0.025 * (1.0 - farFuse);   // (a whole-disc pulse the observed half does not share)
 
         // ── Limb darkening ─────────────────────────────────────────────────────
         // The limb is REDDER as well as darker (js/sun-disc.js): the measured
@@ -3908,14 +4003,17 @@ const sunFS = /* glsl */`
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
         // Pre-exposure for ACES tonemap below.
-        col *= 1.00 + u_flare_intensity * 0.12;   // only a subtle global lift; the flare
+        // (The global lifts below are the MODEL Sun's display level. Beside an
+        // observed frame the level is the observation's — I0-normalised, drawn
+        // on baseCol — so the unobserved half does not take them: farFuse.)
+        col *= 1.00 + u_flare_intensity * 0.12 * (1.0 - farFuse);   // only a subtle global lift; the flare
                                                   // brightness is localized (kernel/ribbons/arcade)
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
         // Higher radio flux index → more magnetic heating → brighter surface
-        col *= 1.0 + u_f107_norm * 0.30;
+        col *= 1.0 + u_f107_norm * 0.30 * (1.0 - farFuse);
         // Shift slightly toward blue-white at solar maximum (hotter effective temperature)
-        col = mix(col, col * vec3(0.98, 0.99, 1.04), u_f107_norm * 0.18);
+        col = mix(col, col * vec3(0.98, 0.99, 1.04), u_f107_norm * 0.18 * (1.0 - farFuse));
 
         // ── SEP / energetic electron impact — brief UV brightening during radiation storms ──
         // Energetic electrons precipitating along open field lines produce
@@ -3984,24 +4082,29 @@ const sunFS = /* glsl */`
             vec3 obsPhoto = (u_obsFuse > 0.5)
                 ? baseCol * limb * limbChroma(mu, baseCol, u_teff) * obsRel * u_obsLevel
                 : obsRGB * u_obsTint;
+            float quietObs = smoothstep(0.55, 0.85, obsRel);
+            col = mix(col, obsPhoto, obsW);
             // BELOW THE FRAME'S SAMPLE SPACING THE DISC IS SYNTHESISED, AND SAYS
             // SO (js/sun-disc.js section 3; the chip prints it while this is on).
             // A true-scale granulation pattern, SHADING ONLY: it multiplies the
-            // observed radiance by 1 +/- a few per cent, never moves or
-            // recolours a feature, is absent inside sunspots, is damped toward
-            // the limb by foreshortening, and fades in only once the view
-            // magnifies the frame past its own resolution (u_obsDetail) AND a
-            // granule spans a few screen pixels (pxFade).
+            // radiance by 1 +/- a few per cent, never moves or recolours a
+            // feature, is absent inside sunspots, is damped toward the limb by
+            // foreshortening, and fades in only once the view magnifies the
+            // frame past its own resolution (u_obsDetail) AND a granule spans
+            // a few screen pixels (pxFade). It is drawn on BOTH hemispheres
+            // (farFuse): the unobserved half is the same Sun through the same
+            // instrument, so below that instrument's resolution it gets the
+            // same synthesis — one pattern, continuous across the terminator.
             if (u_obsDetail > 0.002 && u_obsFuse > 0.5) {
                 vec3  gp     = obsP0 * DISC_GRAN_FREQ;
                 vec2  vg     = voronoi(gp + vec3(0.0, 0.0, u_time * 0.004));
                 float cell   = smoothstep(0.02, 0.30, vg.y - vg.x);          // bright cell interiors, dark lanes
                 float foot   = fwidth(obsP0.x) + fwidth(obsP0.y) + fwidth(obsP0.z);
                 float pxFade = clamp((1.0 / (DISC_GRAN_FREQ * max(foot, 1e-7)) - 1.0) * 0.5, 0.0, 1.0);
-                float quiet  = smoothstep(0.55, 0.85, obsRel);
-                obsPhoto *= 1.0 + (cell - 0.60) * 2.0 * DISC_GRAN_AMP * u_obsDetail * pxFade * quiet * mu;
+                float quietFar = (1.0 - umbra) * (1.0 - penumbra) * farFuse;
+                float quiet  = mix(quietFar, quietObs, obsW);
+                col *= 1.0 + (cell - 0.60) * 2.0 * DISC_GRAN_AMP * u_obsDetail * pxFade * quiet * mu;
             }
-            col = mix(col, obsPhoto, obsW);
         }
 
         // ── ACES filmic tonemap — Tier-A HDR roll-off ─────────────────────────
@@ -4305,7 +4408,7 @@ function _renderProvChip() {
         THREE, uniforms,
         base: qp.get('aiaBase') || '/api/solar/aia',
         res:  (window.devicePixelRatio || 1) >= 1.5 ? 2048 : 1024,
-        onState: _obsRenderChip,
+        onState: (...a) => { _expoNoteFraming(1.0); return _obsRenderChip(...a); },   // a frame that just loaded is a framing change, not a flare
     });
     // Look from Earth's direction: disk centre sits at heliographic lat B0, so
     // the visible limb and the observed/model terminator coincide on load.
@@ -5327,6 +5430,9 @@ const chromoFS = /* glsl */`
     uniform float u_rotAngle;     // THE rotation accumulator — co-rotates the mottle with the photosphere
     uniform float u_obsOn;        // 1 while the observed disc is drawn
     uniform float u_obsB0;
+    uniform float u_obsFuse;
+    uniform float u_farFuse;
+    uniform float u_viewMode;
     ${LIMB_GLSL}
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
@@ -5388,6 +5494,12 @@ const chromoFS = /* glsl */`
         if (u_obsOn > 0.5 && u_chromoIso < 0.5) {
             obsNear = smoothstep(0.0, 0.18, nS.y * sin(u_obsB0) + nS.z * cos(u_obsB0));
         }
+        // ...and beside an observed CONTINUUM frame they stand down on the
+        // unobserved half as well: that half is drawn as the same instrument
+        // would record it (sunFS, "the unobserved hemisphere through the same
+        // instrument"), and H-alpha network, plage and fibrils are not
+        // continuum features.
+        if (u_obsOn > 0.5 && u_obsFuse > 0.5 && u_viewMode < 0.5 && u_chromoIso < 0.5) obsNear = max(obsNear, u_farFuse);
 
         // ── Heliographic coordinates (used for plage + flare ribbons) ─────────
         float lat_c = asin(clamp(n3d.y, -1.0, 1.0));
@@ -5798,6 +5910,9 @@ const trFS = /* glsl */`
     uniform float u_rotAngle;
     uniform float u_obsOn;
     uniform float u_obsB0;
+    uniform float u_obsFuse;
+    uniform float u_farFuse;
+    uniform float u_viewMode;
     ${LIMB_GLSL}
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
@@ -5948,6 +6063,16 @@ const trFS = /* glsl */`
 
         // On-disk moss + plage contribution (rim-attenuated)
         float diskFactor = pow(1.0 - rim, 2.0);
+        // EUV MOSS IS NOT A CONTINUUM FEATURE. Beside an observed white-light
+        // frame the unobserved half is drawn as that instrument would record
+        // it (sunFS, "the unobserved hemisphere through the same instrument"),
+        // and a continuum imager records no transition-region moss — until
+        // 2026-11-22 this term strewed bright dots over the model half only
+        // (it was already masked on the observed half by obsNear), which was
+        // a third of the terminator seam's texture (measured: 5.2 against 2.3
+        // display levels with it off).
+        // The filament shadows below are EUV absorption and go with it.
+        if (u_obsOn > 0.5 && u_obsFuse > 0.5 && u_viewMode < 0.5 && u_trIso < 0.5) obsNear = max(obsNear, u_farFuse);
         float diskAlpha  = (mossPattern * 0.18 + plageMoss * 0.32 + network * 0.10) * diskFactor
                          * sightDisk * (1.0 - obsNear);
 
@@ -9943,6 +10068,7 @@ function _applyNanoChannel(m) {
 document.getElementById('view-mode')?.addEventListener('change', e => {
     const m = parseFloat(e.target.value) || 0;
     uniforms.u_viewMode.value = m;
+    _expoNoteFraming(2.0);     // another channel is another picture, not a brighter Sun
     _applyNanoChannel(m);
     _refreshNanoflares();      // the readout names the channel the population is drawn in
     sunObserved?.setChannel(VIEW_MODE_CHANNEL[m] || 'white');   // observed frame follows the channel
@@ -10021,6 +10147,7 @@ function animate() {
     uniforms.u_limbObs.value = sunOffLimb ? sunOffLimb.limbWeight : 0.0;   // the model limb fringe yields to the observed one
     _tickObsDetail();
     _tickCoronagraph();
+    _tickExposureFraming();
 
     // Phase 2 prominence bundles — re-classify each frame so EP state machines
     // and class transitions evolve smoothly. Then tick uniforms (time, camera

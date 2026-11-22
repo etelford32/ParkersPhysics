@@ -62,6 +62,32 @@
  * `detailWeight` is the fade; `GRANULE_MM` and `GRANULE_CONTRAST` are the two
  * stated numbers (Bray, Loughhead & Durrant 1984: mean cell ~1.4 Mm; rms
  * continuum contrast at 5000 Å after a 1″ instrument ≈ 5–8 %).
+ *
+ * ── 4. The unobserved hemisphere is seen through the same instrument ──────
+ * (2026-11-22.) The observed and model hemispheres were fused in LEVEL,
+ * palette, limb law and tone curve (tests/sun-fusion.spec.js) but not in
+ * TEXTURE. The model's granulation is a display pattern — cells 15 Mm across
+ * (ten granules) at ±34 % — and it is the model Sun's look. Beside an HMI
+ * browse frame, whose quiet disc is smooth to about a per cent at 2.6 Mm a
+ * pixel, it is a claim the instrument contradicts: orbiting away from the
+ * Sun–Earth line showed a smooth half and a speckled half meeting at a hard
+ * seam (measured on the real frame: pixel-to-pixel texture 23 display levels
+ * on the model half against 5 on the observed, the model half ~10 % dimmer).
+ *
+ * So while a calibrated frame is drawn, the model half's QUIET-SUN texture is
+ * scaled, about its smooth photosphere, to the contrast the frame was
+ * measured to have: `farTextureGain(sigmaQuiet)` = the frame's robust quiet
+ * contrast (sun-observed.js calibrateDisk) ÷ the model texture's own
+ * (`MODEL_TEXTURE_SIGMA`). The smooth photosphere it is scaled about is the
+ * same `baseCol` the observed half is drawn on, so the LEVELS agree by
+ * construction too, and the model's display-level lifts (F10.7, the p-mode
+ * pulse) are not applied to that half. Spots, plage, faculae and flares on
+ * the unobserved half are untouched, and so is the MODEL view (no frame ⇒
+ * gain exactly 1). Below the frame's own resolution both halves get the
+ * section-3 synthesis — one pattern, continuous across the terminator.
+ * What this is NOT: an observation of the far side. It is the model, shown
+ * at the contrast the observing instrument records; the 15° graticule still
+ * marks that half as model.
  */
 
 /** Second radiation constant c₂ = hc/k, m·K (CODATA 2018). */
@@ -145,6 +171,57 @@ export function frameScale(diskFraction, framePx) {
     return 1 / Math.max(diskFraction * framePx, 1);
 }
 
+// ── The unobserved hemisphere through the same instrument (header §4) ──────
+/**
+ * The model texture's own contrast, in the units of calibrateDisk's
+ * `sigmaQuiet`: the frame contrast at which the model half would be drawn
+ * with its texture untouched. MEASURED, not derived — it is the value at
+ * which the model half's rendered pixel-to-pixel texture equals the observed
+ * half's on the real HMI frame (sigmaQuiet 0.0209), camera 90° off the
+ * Sun–Earth line, graticule off, 5×5 high-pass, display levels:
+ *
+ *     gain     1.00   0.60   0.30   0.20   0.14   0.09   0.05   0      observed half
+ *     texture  12.9   7.1    3.4    2.3    1.76   1.26   0.81   0.56   1.28
+ *     level    211    212    212    212    212    212    212    211    209
+ *
+ * The match is at a gain of 0.09, so 0.0209 / 0.09 = 0.23. It is a
+ * calibration on rendered pixels, not the pattern's RMS (the tone curve sits
+ * between the two). tests/sun-fusion.spec.js re-measures the match on the
+ * page — texture ratio 1.0, level within 1 % — and keeps the model's own
+ * granulation as its negative control (5× and 10 %).
+ */
+export const MODEL_TEXTURE_SIGMA = 0.23;
+/**
+ * The model texture's mean level as a fraction of the smooth photosphere it is
+ * drawn on (dark lanes and filaments outweigh the bright cells). The texture
+ * is scaled about THIS, so the unobserved half sits on the smooth photosphere
+ * at every gain — the level row above. MEASURED on the page: scaled about the
+ * smooth photosphere itself (i.e. with this at 1) the half's level fell from
+ * 212 display levels at gain 0 to 201 at 0.3 and 163 at 1, so a frame rougher
+ * than the real one would have brought the seam back in level; at gain 0.3
+ * the level reads 211.8 with 0.60, 208.8 with 0.72, 205.6 with 0.85.
+ */
+export const MODEL_TEXTURE_MEAN = 0.60;
+/** Never draw the model half perfectly flat: a frame that measures ~0 (a smooth synthetic) keeps a trace. */
+export const FAR_TEXTURE_MIN = 0.03;
+
+/**
+ * The gain on the model hemisphere's quiet texture while a calibrated frame is
+ * drawn: the frame's measured quiet contrast over the model texture's own.
+ * 1 (the model's look, untouched) when there is no measurement.
+ */
+export function farTextureGain(sigmaQuiet) {
+    if (!(sigmaQuiet >= 0) || !Number.isFinite(sigmaQuiet)) return 1;
+    return Math.min(1, Math.max(FAR_TEXTURE_MIN, sigmaQuiet / MODEL_TEXTURE_SIGMA));
+}
+
+/**
+ * Continuum contrast of faculae / plage at the extreme limb, as a fraction of
+ * the model's (Ca / EUV-bright) plage term; times (1 − μ), so nothing at disc
+ * centre. White-light faculae are a limb phenomenon of order 10 %.
+ */
+export const FACULA_CONTINUUM_LIMB = 0.15;
+
 const f = (x) => { const s = String(x); return /[.e]/.test(s) ? s : s + '.0'; };
 
 /** GLSL for sunFS. No backticks in here. */
@@ -155,6 +232,7 @@ export const DISC_GLSL = /* glsl */`
     const float DISC_MU_FLOOR = ${f(MU_FLOOR)};
     const float DISC_GRAN_FREQ = ${f(GRANULE_FREQ)};
     const float DISC_GRAN_AMP  = ${f(GRANULE_CONTRAST)};
+    const float DISC_FACULA_LIMB = ${f(FACULA_CONTINUUM_LIMB)};
     // sRGB pick -> linear.
     vec3 discDecode(vec3 c) { return pow(max(c, vec3(0.0)), vec3(${f(PALETTE_DECODE_GAMMA)})); }
     // Eddington-Barbier colour of the limb darkening for base colour 'base':

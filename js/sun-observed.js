@@ -400,6 +400,14 @@ export function resolveDiskGeometry(measured, channel) {
 //           NOT currently used to trim the model's granulation contrast, and
 //           the two are legitimately different anyway (SDO at ~725 km/px
 //           barely resolves a 1 Mm granule; the model draws them fully).
+//   sigmaQuiet  the same, robustly (1.4826 x median |residual|): the QUIET
+//           disc's contrast, which a sunspot group cannot raise. Since
+//           2026-11-22 this one IS used: while a calibrated frame is drawn the
+//           unobserved hemisphere's quiet texture is scaled to it (sun-disc.js
+//           section 4, farTextureGain). The remark above still stands for the
+//           MODEL view — the model's display granulation is its own look —
+//           but beside an observed frame, 15 Mm cells at +/-34 % are a claim
+//           the instrument contradicts, and the seam showed it.
 //   resid   how well the fitted law reproduces the frame's own shell medians.
 //           This is the gate on `ok`: the shader only needs dividing by the
 //           law to flatten the quiet disk to 1, so goodness of fit — never
@@ -561,13 +569,28 @@ export function calibrateDisk(rgba, w, h, geom) {
         for (const L of bins[bi]) { const d = L / model - 1; acc += d * d; n++; }
     }
     const sigma = n ? Math.sqrt(acc / n) : 0;
+    // The QUIET disc's contrast, robustly: 1.4826 x the median |residual|
+    // (the Gaussian-consistent MAD). `sigma` above is an RMS and a sunspot
+    // group or a flare kernel raises it; this one they cannot move, which is
+    // what the page needs when it draws the UNOBSERVED hemisphere's quiet
+    // texture at the contrast this frame was measured to have (sun-disc.js
+    // section 4) — one big spot group must not speckle the far side.
+    const dev = [];
+    for (let bi = 0; bi < MU_BINS; bi++) {
+        const mu = (bi + 0.5) / MU_BINS;
+        if (mu < 0.45 || !bins[bi].length) continue;
+        const model = I0 * limbLaw(mu, u1c, u2c);
+        for (const L of bins[bi]) dev.push(Math.abs(L / model - 1));
+    }
+    dev.sort((p, q) => p - q);
+    const sigmaQuiet = dev.length ? 1.4826 * (dev.length % 2 ? dev[dev.length >> 1] : (dev[(dev.length >> 1) - 1] + dev[dev.length >> 1]) / 2) : 0;
 
     // Colorization, normalised to unit luminance so dividing it out changes
     // hue only and never level.
     const cl = luminance(sumR / nChroma, sumG / nChroma, sumB / nChroma) || 1;
     const chroma = [sumR / nChroma / cl, sumG / nChroma / cl, sumB / nChroma / cl];
 
-    return { I0, u1: u1c, u2: u2c, sigma, chroma, resid, samples, ok: solved && resid < RESID_MAX };
+    return { I0, u1: u1c, u2: u2c, sigma, sigmaQuiet, chroma, resid, samples, ok: solved && resid < RESID_MAX };
 }
 
 // ── Freshness + chip ───────────────────────────────────────────────────────
@@ -782,13 +805,14 @@ export class SunObserved {
         // just renders exactly the way it did before this phase.
         const ph = f.photo || { I0: 1, u1: 0, u2: 0, sigma: 0, chroma: [1, 1, 1], resid: 1, ok: false };
         if (u.u_obsCal)    u.u_obsCal.value.set(ph.I0, ph.u1, ph.u2, ph.sigma);
+        if (u.u_obsQuiet)  u.u_obsQuiet.value = ph.ok ? (ph.sigmaQuiet ?? 0) : -1;   // robust quiet-disc contrast (−1: no measurement)
         if (u.u_obsChroma) u.u_obsChroma.value.set(ph.chroma[0], ph.chroma[1], ph.chroma[2]);
         if (u.u_obsFuse)   u.u_obsFuse.value = ph.ok ? 1.0 : 0.0;
         u.u_obsOn.value   = 1.0;
         this._emit({
             mode: 'observed', reason: null, channel: ch, observedAt: f.observedAt,
             geometry: f.geom.source, b0Deg: eph.b0Deg, pDeg: eph.pDeg, pAngleApplied: false,
-            photometry: { I0: ph.I0, u1: ph.u1, u2: ph.u2, sigma: ph.sigma, chroma: ph.chroma, resid: ph.resid, ok: ph.ok },
+            photometry: { I0: ph.I0, u1: ph.u1, u2: ph.u2, sigma: ph.sigma, sigmaQuiet: ph.sigmaQuiet ?? 0, chroma: ph.chroma, resid: ph.resid, ok: ph.ok },
         });
         // Dispose the frame the cross-fade no longer needs, after it ends.
         if (previousFrame && previousFrame.tex && previousFrame.tex !== f.tex) {

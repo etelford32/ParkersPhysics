@@ -347,6 +347,29 @@ ok('sigma reports the frame’s own resolved contrast (a speckled frame reads hi
     assert.ok(cr.sigma > cs.sigma * 2, `rough sigma ${cr.sigma} vs ${cs.sigma}`);
 });
 
+ok('sigmaQuiet is the QUIET disc\'s contrast: a big spot group raises sigma and cannot move it', () => {
+    // Uniform speckle of full width w has an RMS of w/√12 — and for a uniform
+    // distribution 1.4826 × median|d| is 1.4826 × w/4, 28 % above the RMS:
+    // the estimator is Gaussian-consistent, so it is checked against its own
+    // closed form here, not against the RMS.
+    const w = 0.12;
+    const quiet = makeCalFrame({ speckle: w });
+    const cq = calibrateDisk(quiet.rgba, quiet.size, quiet.size, quiet.geom);
+    assert.ok(Math.abs(cq.sigma - w / Math.sqrt(12)) < 0.006, `RMS ${cq.sigma} vs ${w / Math.sqrt(12)}`);
+    assert.ok(Math.abs(cq.sigmaQuiet - 1.4826 * w / 4) < 0.008, `MAD ${cq.sigmaQuiet} vs ${1.4826 * w / 4}`);
+    // The same disc with three large umbrae on it.
+    const spots = [{ x: 96, y: 110, r: 16 }, { x: 150, y: 140, r: 14 }, { x: 120, y: 170, r: 12 }];
+    const spotted = makeCalFrame({ speckle: w, spots });
+    const cs = calibrateDisk(spotted.rgba, spotted.size, spotted.size, spotted.geom);
+    assert.ok(cs.sigma > cq.sigma * 2, `the RMS is carried off by the spots (${cs.sigma} vs ${cq.sigma}) — the negative control`);
+    assert.ok(Math.abs(cs.sigmaQuiet - cq.sigmaQuiet) < cq.sigmaQuiet * 0.15, `the robust one is not (${cs.sigmaQuiet} vs ${cq.sigmaQuiet})`);
+    // A frame that cannot be calibrated reports no contrast, never a number.
+    const black = new Uint8ClampedArray(64 * 64 * 4);
+    const cb = calibrateDisk(black, 64, 64, { cx: 0.5, cy: 0.5, r: 0.45 });
+    assert.equal(cb.ok, false);
+    assert.ok(!(cb.sigmaQuiet > 0));
+});
+
 ok('srgbToLinear / linearToSrgb round-trip within a byte', () => {
     for (const b of [0, 1, 12, 55, 128, 200, 254, 255]) {
         assert.ok(Math.abs(linearToSrgb(srgbToLinear(b)) - b) <= 1, `byte ${b}`);
