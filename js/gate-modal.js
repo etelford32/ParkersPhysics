@@ -261,6 +261,8 @@ const CSS = `
 #${ROOT_ID} .pp-gate-headline{font-family:var(--font-display,'Orbitron',sans-serif);
   font-weight:800;font-size:1.32rem;line-height:1.2;color:var(--fg-1,#f5f0ff);margin-bottom:10px}
 #${ROOT_ID} .pp-gate-body{font-size:.95rem;line-height:1.6;color:var(--fg-3,#9d92c8);margin-bottom:20px}
+#${ROOT_ID} .pp-gate-note{font-size:.84rem;line-height:1.5;color:var(--fg-1,#e9e4ff);margin:-8px 0 18px;
+  padding:9px 12px;border-left:2px solid var(--accent,#ffd700);background:rgba(255,255,255,.04);border-radius:0 8px 8px 0}
 #${ROOT_ID} .pp-gate-oauth{margin-bottom:2px}
 #${ROOT_ID} .pp-gate-or{display:flex;align-items:center;gap:10px;margin:6px 0 12px;
   font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-4,#6f6695)}
@@ -398,6 +400,8 @@ export function closeGate(via = 'programmatic') {
  *   opts.next      {string}  same-origin return path (default: current page)
  *   opts.resume    {string}  token the origin page rehydrates on return
  *   opts.plan      {string}  override the variant's default plan id (paid)
+ *   opts.note      {string}  one extra plain-text line under the body — what THIS
+ *                            visitor stands to keep (e.g. the places they collected)
  *   opts.onUnlock  {fn}      called with the email after a successful free submit
  *                            — the page reveals the reward optimistically
  *   opts.onDismiss {fn}      called with the dismiss reason
@@ -454,6 +458,7 @@ export function openGate(key, opts = {}) {
             ${eyebrow}
             <h2 class="pp-gate-headline" id="pp-gate-headline">${esc(variant.headline)}</h2>
             <p class="pp-gate-body">${esc(variant.body)}</p>
+            ${opts.note ? `<p class="pp-gate-note" data-gate-note>${esc(String(opts.note).slice(0, 240))}</p>` : ''}
             ${actionBlock}
             <button class="pp-gate-secondary" type="button" data-gate-secondary>${esc(variant.secondary.label)}</button>
             ${variant.finePrint ? `<p class="pp-gate-fineprint">${esc(variant.finePrint)}</p>` : ''}

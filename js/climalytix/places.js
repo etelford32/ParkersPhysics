@@ -293,3 +293,69 @@ export function suggest(query, { home = null, doc = null, cities = [], limit = 8
     }
     return out.slice(0, limit);
 }
+
+/**
+ * Which characters of `label` a query matched, for the suggestion list:
+ * [{ text, hit }] in order, covering the label exactly. A hit is the leading
+ * part of a word that some query token begins (the `matchRank` rule), found
+ * through the same folding — so "reyk" lights "Reyk" in "Reykjavík".
+ */
+export function highlightParts(label, query) {
+    const s = String(label ?? '');
+    const tokens = fold(query).split(' ').filter(Boolean).sort((a, b) => b.length - a.length);
+    if (!tokens.length || !s) return s ? [{ text: s, hit: false }] : [];
+    const out = [];
+    const push = (text, hit) => {
+        if (!text) return;
+        const last = out[out.length - 1];
+        if (last && last.hit === hit) last.text += text; else out.push({ text, hit });
+    };
+    let at = 0;
+    for (const m of s.matchAll(/[\p{L}\p{N}\p{M}]+/gu)) {
+        push(s.slice(at, m.index), false);
+        const word = m[0];
+        const t = tokens.find((tok) => fold(word).replace(/ /g, '').startsWith(tok));
+        let cut = 0;
+        if (t) {
+            for (let n = 0; cut < word.length && n < t.length; cut++) n += fold(word[cut]).length;
+            while (cut < word.length && !fold(word[cut]).length && /\p{M}/u.test(word[cut])) cut++;   // keep a combining mark with its letter
+        }
+        push(word.slice(0, cut), true);
+        push(word.slice(cut), false);
+        at = m.index + word.length;
+    }
+    push(s.slice(at), false);
+    return out;
+}
+
+/** Places to offer a first-time reader with nothing of their own: one per climate, from the city list. */
+export const EXAMPLE_CITIES = Object.freeze(['Reykjavík', 'Denver', 'Singapore', 'Nairobi', 'Sydney']);
+export function exampleRows(cities = [], names = EXAMPLE_CITIES) {
+    const out = [];
+    for (const n of names) {
+        const c = cities.find((x) => fold(x.n) === fold(n));
+        const p = c && cleanPlace({ lat: c.lat, lon: c.lon, city: c.n, detail: c.c });
+        if (p) out.push({ kind: 'example', id: p.id, lat: p.lat, lon: p.lon, city: p.city, detail: p.detail });
+    }
+    return out;
+}
+
+// ── "Save this when I'm signed in" ──────────────────────────────────────────
+
+export const SAVE_INTENT_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * A reader pressed Save while signed out and went off to sign in. The intent
+ * is honoured only if it is recent — an hour-old one would save a place they
+ * have long since moved on from, on an account they may not have meant.
+ */
+export function makeSaveIntent(loc, now) {
+    const c = cleanPlace(loc);
+    return c && isNum(now) ? { lat: c.lat, lon: c.lon, city: c.city, ...(c.detail ? { detail: c.detail } : {}), at: ms(now) } : null;
+}
+export function validSaveIntent(raw, now, ttlMs = SAVE_INTENT_TTL_MS) {
+    const c = cleanPlace(raw);
+    const at = ms(raw?.at);
+    if (!c || !at || !isNum(now) || now < at || now - at > ttlMs) return null;
+    return c;
+}

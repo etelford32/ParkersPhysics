@@ -57,10 +57,14 @@ import { orographicPaint, formatW, OROGRAPHIC_FULL_MS } from './orographic.js';
 import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
 import { homeState, visit, sameLocation, cleanLoc } from '../climate-lab/lab-home.js';
 import { geocodeCandidates, reverseGeocode } from '../user-location.js';
-import { suggest, parseCoordinates, formatCoords, savedPlaces, recentPlaces, isSaved, placeId } from './places.js';
+import {
+    suggest, parseCoordinates, formatCoords, savedPlaces, recentPlaces, isSaved, placeId, highlightParts, exampleRows,
+} from './places.js';
 import {
     openPlaces, placesDoc, placesStatus, rememberVisit, savePlace, forget, clearRecent, PLACES_EVENT,
+    dismissPitch, setSaveIntent,
 } from './places-store.js';
+import { pitch, gateNote } from './places-pitch.js';
 import { MAJOR_CITIES } from '../data/major-cities.js';
 
 const WS_KEY = 'pp_climalytix_v1';
@@ -127,7 +131,20 @@ function renderSiteBar() {
     badge.textContent = home ? 'HOME' : 'VISITING';
     badge.dataset.kind = home ? 'home' : 'visit';
     $('#cx-home-btn').hidden = !(S.home && s && !home);
+    renderSiteTime();
     renderPlaces();
+}
+
+/** The site's own clock — from the UTC offset its datasets report, never the reader's zone. */
+function renderSiteTime() {
+    const el = $('#cx-site-time');
+    if (!S.site || !S.offsetKnown) { el.hidden = true; return; }
+    const d = new Date(Date.now() + S.utcOffsetS * 1000);
+    const hh = String(d.getUTCHours()).padStart(2, '0'), mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const off = S.utcOffsetS / 3600;
+    el.hidden = false;
+    el.textContent = `${hh}:${mm} local`;
+    el.title = `Local time at the site (UTC${off >= 0 ? '+' : '−'}${Math.abs(off) % 1 ? Math.abs(off).toFixed(1) : Math.abs(off)})`;
 }
 
 /** The address bar names the site, so a visit can be shared or bookmarked. Home is the bare page. */
@@ -157,6 +174,7 @@ function goTo(loc, via) {
     const c = visit(loc);
     if (!c) return null;
     S.site = c;
+    S.offsetKnown = false;                 // the last site's clock is not this site's
     if (!atHome(c)) rememberVisit({ ...c, detail: loc.detail });
     syncUrl();
     renderSiteBar();
@@ -165,11 +183,21 @@ function goTo(loc, via) {
     return c;
 }
 
+/** A gate's return trip adds ?resume=…; the store has already acted on it, so the address bar is cleaned. */
+function stripResume() {
+    try {
+        const u = new URL(location.href);
+        if (!u.searchParams.has('resume')) return;
+        u.searchParams.delete('resume');
+        history.replaceState(history.state, '', u);
+    } catch {}
+}
+
 // ── Search: suggestions without the network, the geocoder on submit ─────────
 
 const SG = { rows: [], active: -1, alts: [], undoId: null, busy: null };
-const GLYPH = { home: '⌂', saved: '★', recent: '↺', city: '◍', coords: '⌖', match: '◍' };
-const KIND = { home: 'Home', saved: 'Saved', recent: 'Recent', city: 'City', coords: 'Go to', match: 'Match' };
+const GLYPH = { home: '⌂', saved: '★', recent: '↺', city: '◍', coords: '⌖', match: '◍', example: '◍' };
+const KIND = { home: 'Home', saved: 'Saved', recent: 'Recent', city: 'City', coords: 'Go to', match: 'Match', example: 'Try' };
 
 function say(text, kind = 'warn') {
     const msg = $('#cx-search-msg');
@@ -177,25 +205,42 @@ function say(text, kind = 'warn') {
     msg.dataset.kind = kind;
 }
 
+const marked = (label, q) => highlightParts(label, q).map((p) => (p.hit ? `<mark>${esc(p.text)}</mark>` : esc(p.text))).join('');
+
 function renderSuggest({ open = true } = {}) {
     const input = $('#cx-search'), list = $('#cx-suggest');
     const q = input.value.trim();
-    const rows = SG.alts.length ? SG.alts.map((a) => ({ ...a, kind: 'match', id: placeId(a.lat, a.lon) }))
+    let rows = SG.alts.length ? SG.alts.map((a) => ({ ...a, kind: 'match', id: placeId(a.lat, a.lon) }))
         : suggest(q, { home: S.home, doc: placesDoc(), cities: MAJOR_CITIES, limit: 8 });
+    // Nothing of their own yet and nothing typed: show what the box can do.
+    const examples = !q && !SG.alts.length && !rows.some((r) => r.kind !== 'home');
+    if (examples) rows = [...rows, ...exampleRows(MAJOR_CITIES).filter((e) => !rows.some((r) => r.id === e.id))];
     SG.rows = rows;
     if (SG.active >= rows.length) SG.active = -1;
-    const show = open && rows.length > 0 && document.activeElement === input;
+    const show = open && (rows.length > 0 || !!q) && document.activeElement === input;
     list.hidden = !show;
     input.setAttribute('aria-expanded', String(show));
-    input.setAttribute('aria-activedescendant', show && SG.active >= 0 ? `cx-sg-${SG.active}` : '');
+    if (show && SG.active >= 0) input.setAttribute('aria-activedescendant', `cx-sg-${SG.active}`);
+    else input.removeAttribute('aria-activedescendant');
     if (!show) return;
-    const head = SG.alts.length ? 'Other matches' : !q ? 'Your places' : '';
-    list.innerHTML = (head ? `<li class="cx-sg-head" role="presentation">${head}</li>` : '')
-        + rows.map((r, i) => `<li role="option" id="cx-sg-${i}" data-i="${i}" data-kind="${r.kind}" aria-selected="${i === SG.active}">`
+    const head = (t) => `<li class="cx-sg-head" role="presentation">${t}</li>`;
+    let html = SG.alts.length ? head('Other matches') : '';
+    let section = '';
+    rows.forEach((r, i) => {
+        if (!q && !SG.alts.length) {
+            const sec = r.kind === 'example' ? 'Try a place' : 'Your places';
+            if (sec !== section) { section = sec; html += head(sec); }
+        }
+        html += `<li role="option" id="cx-sg-${i}" data-i="${i}" data-kind="${r.kind}" aria-selected="${i === SG.active}">`
             + `<span class="cx-sg-glyph" aria-hidden="true">${GLYPH[r.kind]}</span>`
-            + `<span class="cx-sg-name">${esc(r.city)}${r.detail ? `<small>${esc(r.detail)}</small>` : ''}</span>`
-            + `<span class="cx-sg-kind">${KIND[r.kind]}</span></li>`).join('')
-        + (q && !SG.alts.length ? `<li class="cx-sg-head" role="presentation">Press Enter to search everywhere for “${esc(q)}”</li>` : '');
+            + `<span class="cx-sg-name">${q ? marked(r.city, q) : esc(r.city)}${r.detail ? `<small>${q ? marked(r.detail, q) : esc(r.detail)}</small>` : ''}</span>`
+            + `<span class="cx-sg-kind">${KIND[r.kind]}</span></li>`;
+    });
+    if (q && !SG.alts.length) {
+        html += `<li class="cx-sg-head cx-sg-everywhere" role="presentation">${rows.length ? '' : 'No saved place or major city matches. '}Press <kbd>Enter</kbd> to search everywhere for “${esc(q)}” — any town, zip code or address</li>`;
+    }
+    html += '<li class="cx-sg-foot" role="presentation"><kbd>↑</kbd><kbd>↓</kbd> choose <kbd>Enter</kbd> go <kbd>Esc</kbd> close</li>';
+    list.innerHTML = html;
     if (SG.active >= 0) list.querySelector(`#cx-sg-${SG.active}`)?.scrollIntoView({ block: 'nearest' });
 }
 
@@ -253,6 +298,12 @@ async function onSearch(ev) {
 }
 
 function onSearchKey(ev) {
+    if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && $('#cx-suggest').hidden) {
+        ev.preventDefault();                 // closed (after a pick or Escape) but still focused: the arrows reopen it
+        SG.active = -1;
+        renderSuggest();
+        return;
+    }
     const n = SG.rows.length;
     if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         if (!n) return;
@@ -284,6 +335,16 @@ function locateMe() {
 // ── Saved places + history ──────────────────────────────────────────────────
 
 const RECENT_CHIPS = 6;
+const seenStages = new Set();
+
+function currentPitch() {
+    const doc = placesDoc(), st = placesStatus();
+    return pitch({
+        ...st,
+        saved: savedPlaces(doc).map((p) => p.city),
+        recent: recentPlaces(doc).filter((p) => !atHome(p)).map((p) => p.city),
+    });
+}
 
 function renderPlaces() {
     const doc = placesDoc(), st = placesStatus();
@@ -296,54 +357,81 @@ function renderPlaces() {
     save.title = saved ? 'Remove from your saved places' : st.scope === 'account' ? 'Keep this place in your account' : 'Keep this place — free account';
 
     const here = s ? placeId(s.lat, s.lon) : '';
+    const tip = (p) => esc(p.detail ? [p.city, p.detail].join(' — ') : p.city);
     const chip = (p, kind) => `<span class="cx-place" data-kind="${kind}" data-id="${p.id}"${p.id === here ? ' data-here="1"' : ''}>`
-        + `<button type="button" class="cx-pl-go" title="${esc(p.detail ? `${p.city} — ${p.detail}` : p.city)}">${esc(p.city)}</button>`
+        + `<button type="button" class="cx-pl-go" title="${tip(p)}">${esc(p.city)}</button>`
         + `<button type="button" class="cx-pl-x" aria-label="${kind === 'saved' ? 'Remove from saved' : 'Remove from history'}: ${esc(p.city)}">×</button></span>`;
     const pins = savedPlaces(doc);
     const recent = recentPlaces(doc).filter((p) => !atHome(p)).slice(0, RECENT_CHIPS);
+    // Signed out, the Saved row is shown EMPTY: the feature is visible before it is asked for.
+    const ghost = st.scope === 'session' && !pins.length && recent.length > 0
+        ? '<button type="button" class="cx-place-ghost" data-gate="ghost">☆ Save places with a free account</button>' : '';
     const host = $('#cx-places');
     host.hidden = !pins.length && !recent.length;
-    host.innerHTML = (pins.length ? `<span class="cx-pl-h">Saved</span>${pins.map((p) => chip(p, 'saved')).join('')}` : '')
+    host.innerHTML = (pins.length || ghost ? `<span class="cx-pl-h">Saved</span>${pins.map((p) => chip(p, 'saved')).join('')}${ghost}` : '')
         + (recent.length ? `<span class="cx-pl-h">Recent</span>${recent.map((p) => chip(p, 'recent')).join('')}`
             + '<button type="button" id="cx-places-clear">Clear history</button>' : '');
+    renderPitch();
+}
 
-    const gate = $('#cx-places-gate');
-    const n = pins.length + recentPlaces(doc).length;
-    gate.hidden = false;
-    gate.dataset.kept = st.kept;
-    if (st.scope === 'session') {
-        gate.innerHTML = (n ? `${n} place${n > 1 ? 's' : ''} kept for this session only. ` : 'Climalytix can remember the places you analyse. ')
-            + '<button type="button" data-gate="signup">Sign up free</button> to save places and keep your history on every device'
-            + ' — or <a href="signin.html?next=%2Fclimalytix.html">sign in</a>.';
-    } else if (st.scope === 'pending') {
-        gate.textContent = 'Check your inbox to finish signing up — your places are kept on this device and move into your account when you sign in.';
-    } else if (st.kept === 'account') {
-        gate.textContent = st.adopted
-            ? `Saved places and history are kept in your account — ${st.adopted} place${st.adopted > 1 ? 's' : ''} from before you signed in ${st.adopted > 1 ? 'were' : 'was'} added.`
-            : 'Saved places and history are kept in your account.';
-        gate.hidden = !n && !st.adopted;
-    } else {
-        gate.textContent = st.syncState === 'error' || st.syncState === 'migration-pending' || (st.syncState || '').startsWith('off')
-            ? 'Saved places and history are kept on this device — account sync is unavailable right now.'
-            : 'Saved places and history are kept on this device; syncing to your account…';
-        gate.hidden = !n;
+/** Draws exactly what places-pitch.js `pitch()` returns — no copy or thresholds live here. */
+function renderPitch() {
+    const p = currentPitch();
+    const el = $('#cx-places-gate');
+    el.hidden = p.kind === 'none';
+    el.dataset.stage = p.stage;
+    el.dataset.kind = p.kind;
+    el.dataset.tone = p.tone;
+    el.dataset.kept = placesStatus().kept;
+    const next = encodeURIComponent(location.pathname + location.search);
+    const signin = p.signin ? ` <a class="cx-pitch-signin" href="signin.html?next=${next}">Sign in</a>` : '';
+    if (p.kind === 'card') {
+        el.setAttribute('role', 'region');
+        el.setAttribute('aria-label', p.label);
+        el.innerHTML = `<div class="cx-pitch-mark" aria-hidden="true">${p.tone === 'good' ? '✓' : '★'}</div>`
+            + `<div class="cx-pitch-text"><strong>${esc(p.headline)}</strong><span>${esc(p.body)}</span></div>`
+            + '<div class="cx-pitch-acts">'
+            + (p.cta ? `<button type="button" class="cx-pitch-cta" data-gate="card">${esc(p.cta.label)}</button>` : '')
+            + (p.dismiss ? `<button type="button" class="cx-pitch-no" data-pitch-dismiss="${p.dismiss.step}">${esc(p.dismiss.label)}</button>` : '')
+            + (p.signin ? `<span class="cx-pitch-alt">Have an account?${signin}</span>` : '')
+            + '</div>';
+    } else if (p.kind === 'line') {
+        el.removeAttribute('role');
+        el.removeAttribute('aria-label');
+        el.innerHTML = `<span>${esc(p.body)}</span>`
+            + (p.cta ? ` <button type="button" class="cx-pitch-link" data-gate="line">${esc(p.cta.label)}</button>` : '')
+            + (p.signin ? `<span class="cx-pitch-alt"> · ${signin.trim()}</span>` : '');
+    } else el.innerHTML = '';
+    if (p.kind !== 'none' && !seenStages.has(p.stage)) {
+        seenStages.add(p.stage);
+        note('pitch_view', { stage: p.stage, count: p.count });
     }
 }
 
 async function openPlacesGate(reason) {
-    note('gate', { reason });
+    const p = currentPitch();
+    const saving = reason === 'save' && S.site ? S.site : null;
+    note('gate', { reason, stage: p.stage, count: p.count });
+    // If they leave to sign in (Google, or the dialog's own link) the Save they pressed is remembered.
+    setSaveIntent(saving);
+    const back = document.activeElement;
     try {
         const { openGate } = await import('../gate-modal.js');
         const opened = openGate('save-places', {
-            next: '/climalytix.html',
+            next: location.pathname + location.search,       // come back to THIS place
+            resume: saving ? 'save' : 'places',
+            note: gateNote(p.names, { saving: saving?.city }),
             onUnlock() {
                 openPlaces();                                   // → the "pending" store, which survives the magic-link hop
-                if (reason === 'save' && S.site) savePlace(S.site, true);
+                if (saving) savePlace(saving, true);
+                setSaveIntent(null);
+                note('gate_unlocked', { reason });
             },
+            onDismiss() { setSaveIntent(null); try { back?.focus?.(); } catch {} },
         });
         if (opened) return;
     } catch {}
-    location.href = 'signup.html?next=%2Fclimalytix.html';     // the gate failed open: the plain sign-up page still works
+    location.href = `signup.html?next=${encodeURIComponent(location.pathname + location.search)}`;   // the gate failed open: the plain sign-up page still works
 }
 
 function toggleSave() {
@@ -351,11 +439,23 @@ function toggleSave() {
     const saved = isSaved(placesDoc(), S.site);
     if (!saved && placesStatus().scope === 'session') { openPlacesGate('save'); return; }
     savePlace(S.site, !saved);
-    note(saved ? 'unsave' : 'save');
+    if (saved) note('unsave'); else note('save');
+}
+
+function onPitchClick(ev) {
+    const t = ev.target.closest('button');
+    if (!t) return;
+    if (t.dataset.gate) { note('pitch_cta', { via: t.dataset.gate }); openPlacesGate(t.dataset.gate); return; }
+    if (t.dataset.pitchDismiss != null) {
+        const welcome = $('#cx-places-gate').dataset.stage === 'welcome';
+        note('pitch_dismiss', { stage: welcome ? 'welcome' : 'ownership' });
+        dismissPitch(welcome ? { welcome: true } : { step: Number(t.dataset.pitchDismiss) });
+    }
 }
 
 function onPlacesClick(ev) {
     if (ev.target.id === 'cx-places-clear') { clearRecent(); note('clear'); return; }
+    if (ev.target.dataset.gate) { note('pitch_cta', { via: 'ghost' }); openPlacesGate('ghost'); return; }
     const el = ev.target.closest('.cx-place');
     if (!el) return;
     const p = placesDoc().places.find((x) => x.id === el.dataset.id);
@@ -392,7 +492,11 @@ function loadAll({ only = null } = {}) {
             if (signal.aborted || S.site !== site) return;
             S.loading.delete(id);
             S.results.set(id, r);
-            if ((id === 'era5' || id === 'station') && Number.isFinite(r.utcOffsetS)) S.utcOffsetS = r.utcOffsetS;
+            if ((id === 'era5' || id === 'station') && Number.isFinite(r.utcOffsetS)) {
+                S.utcOffsetS = r.utcOffsetS;
+                S.offsetKnown = true;
+                renderSiteTime();
+            }
             if (id === 'gfs') renderRose();
             renderCatalog();
             renderPanels();
@@ -1547,6 +1651,7 @@ function wireControls() {
     const search = $('#cx-search');
     search.addEventListener('input', () => { SG.alts = []; SG.active = -1; say(''); renderSuggest(); });
     search.addEventListener('focus', () => renderSuggest());
+    search.addEventListener('click', () => { if ($('#cx-suggest').hidden) renderSuggest(); });
     search.addEventListener('blur', () => closeSuggest());
     search.addEventListener('keydown', onSearchKey);
     // pointerdown, not click: the list closes on blur, and preventDefault keeps the focus in the box.
@@ -1558,7 +1663,8 @@ function wireControls() {
     $('#cx-locate').addEventListener('click', locateMe);
     $('#cx-save-btn').addEventListener('click', toggleSave);
     $('#cx-places').addEventListener('click', onPlacesClick);
-    $('#cx-places-gate').addEventListener('click', (ev) => { if (ev.target.dataset.gate) openPlacesGate('line'); });
+    $('#cx-places-gate').addEventListener('click', onPitchClick);
+    setInterval(renderSiteTime, 30_000);
     window.addEventListener(PLACES_EVENT, () => { renderPlaces(); if (!$('#cx-suggest').hidden) renderSuggest(); });
     window.addEventListener('auth-changed', () => { openPlaces(); S.home = homeState({ auth: null }).home; renderSiteBar(); });
     document.addEventListener('keydown', (ev) => {
@@ -1635,7 +1741,9 @@ export function boot() {
     const r = resolveSite();
     S.site = r.site;
     S.home = r.home;
+    stripResume();
     openPlaces();
+    { const st = placesStatus(); if (st.adopted || st.resumed) note('adopted', { adopted: st.adopted, resumed: !!st.resumed }); }
     if (r.fromUrl && r.site && !atHome(r.site)) rememberVisit(r.site);   // a shared link is a visit too
     wireControls();
     renderControls();
@@ -1649,6 +1757,7 @@ export function boot() {
         get state() {
             return {
                 site: S.site,
+                pitch: currentPitch(),
                 places: { ...placesStatus(), saved: savedPlaces(placesDoc()).map((p) => p.city), recent: recentPlaces(placesDoc()).map((p) => p.city) },
                 utcOffsetS: S.utcOffsetS,
                 workspace: S.ws,

@@ -209,8 +209,8 @@ test('SIGNED IN: the account row is merged with this device and with pre-sign-up
     expect(p.saved).toEqual(['Paris']);
     expect(p.recent).toEqual(['Tokyo', 'London']);
     expect(p.adopted).toBe(1);
-    await expect(page.locator('#cx-places-gate')).toContainText('kept in your account');
-    await expect(page.locator('#cx-places-gate')).toContainText('1 place from before you signed in');
+    await expect(page.locator('#cx-places-gate')).toHaveAttribute('data-stage', 'welcome');
+    await expect(page.locator('#cx-places-gate')).toContainText('1 place from before you signed in is now in your account');
     await expect(page.locator('.cx-place[data-kind="saved"]')).toHaveCount(1);
     // The merge was pushed: the row now holds the pre-sign-up Tokyo too.
     await expect.poll(() => pushes.length).toBeGreaterThan(0);

@@ -32,7 +32,7 @@
 
 import {
     emptyPlaces, normalizePlaces, mergePlaces, samePlaces,
-    recordVisit, setSaved, forgetPlace, clearHistory,
+    recordVisit, setSaved, forgetPlace, clearHistory, makeSaveIntent, validSaveIntent,
 } from './places.js';
 
 export const PLACES_KEY = 'pp_climalytix_places_v1';
@@ -40,6 +40,8 @@ export const PLACES_PENDING_KEY = `${PLACES_KEY}.pending`;
 export const PLACES_EVENT = 'climalytix-places';        // anything changed → re-render
 const SAVE_EVENT = 'climalytix-places-save';            // a LOCAL change → push
 const SYNC_PAGE = 'climalytix-places';
+const INTENT_KEY = 'pp_climalytix_save_intent';       // sessionStorage: "save this once I'm signed in"
+const PITCH_KEY = 'pp_climalytix_pitch';              // sessionStorage: { dismissedAt, welcomeSeen }
 const REQUIRE_PAID_SYNC = false;
 
 const read = (store, key) => { try { return JSON.parse(store.getItem(key) || 'null'); } catch { return null; } };
@@ -107,10 +109,20 @@ export function openPlaces() {
         write(localStorage, PLACES_PENDING_KEY, null);
         write(localStorage, `${PLACES_KEY}.${T.userId}`, T.doc);
         T.adopted = adopted ? carried.places.length : 0;
+        // The reader pressed Save, was sent to sign in, and is back: do what they asked.
+        const want = validSaveIntent(read(sessionStorage, INTENT_KEY), Date.now());
+        write(sessionStorage, INTENT_KEY, null);
+        T.resumed = null;
+        if (want) {
+            T.doc = setSaved(recordVisit(T.doc, want, Date.now()), want, true, Date.now());
+            write(localStorage, `${PLACES_KEY}.${T.userId}`, T.doc);
+            T.resumed = want.city;
+        }
         startSync();
     } else {
         T.doc = carried;
         T.adopted = 0;
+        T.resumed = null;
         if (scope === 'pending') { write(sessionStorage, PLACES_KEY, null); write(localStorage, PLACES_PENDING_KEY, T.doc); }
     }
     try { window.dispatchEvent(new CustomEvent(PLACES_EVENT)); } catch {}
@@ -149,7 +161,25 @@ export const placesDoc = () => T.doc;
 export function placesStatus() {
     const kept = T.scope === 'account' ? (T.sync?.state === 'synced' ? 'account' : 'device')
         : T.scope === 'pending' ? 'device' : 'session';
-    return { scope: T.scope, kept, adopted: T.adopted || 0, syncState: T.sync?.state ?? null };
+    const ui = read(sessionStorage, PITCH_KEY) || {};
+    return {
+        scope: T.scope, kept, adopted: T.adopted || 0, resumed: T.resumed || null, syncState: T.sync?.state ?? null,
+        dismissedAt: Number(ui.dismissedAt) || 0, welcomeSeen: ui.welcomeSeen === true,
+    };
+}
+
+/** "Not now" on the ownership card (the step it was showing at), or "Got it" on the welcome. */
+export function dismissPitch({ step = 0, welcome = false } = {}) {
+    const ui = read(sessionStorage, PITCH_KEY) || {};
+    if (welcome) ui.welcomeSeen = true;
+    else ui.dismissedAt = Math.max(Number(ui.dismissedAt) || 0, Number(step) || 0);
+    write(sessionStorage, PITCH_KEY, ui);
+    try { window.dispatchEvent(new CustomEvent(PLACES_EVENT)); } catch {}
+}
+
+/** Remember (or drop) the place a signed-out reader asked to save, across the trip to sign in. */
+export function setSaveIntent(loc) {
+    write(sessionStorage, INTENT_KEY, loc ? makeSaveIntent(loc, Date.now()) : null);
 }
 
 export const rememberVisit = (loc, now = Date.now()) => land(recordVisit(T.doc, loc, now));

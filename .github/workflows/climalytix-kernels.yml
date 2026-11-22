@@ -65,6 +65,12 @@
 #                            unstamped delete and last-write-wins are the
 #                            NEGATIVE CONTROLS), typed coordinates, network-free
 #                            suggestions, geocoder on submit only (source-gated)
+#   climalytix-pitch.mjs     the sign-up ladder as a pure rule book: the card is
+#                            earned at 3 places, "Not now" holds until the next
+#                            step (never-dismissable is the NEGATIVE CONTROL),
+#                            "in your account" only after a sync lands; match
+#                            highlighting, the 30-minute save-intent; source
+#                            rules (no copy in the page, no query in telemetry)
 #   climalytix-layer-state.mjs  what the Temperature controls may claim: archive
 #                            down ⇒ ticked but sub-toggles / slider / key off,
 #                            a notice + Retry; off is never a failure
@@ -91,6 +97,7 @@ on:
       - 'js/temp-ramp.js'
       - 'js/user-location.js'
       - 'js/data/major-cities.js'
+      - 'js/gate-modal.js'
       - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
@@ -109,6 +116,7 @@ on:
       - 'js/temp-ramp.js'
       - 'js/user-location.js'
       - 'js/data/major-cities.js'
+      - 'js/gate-modal.js'
       - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
@@ -140,6 +148,8 @@ jobs:
           node-version: '22'
       - name: location search — places document, merge, suggestions
         run: node tests/climalytix-places.mjs
+      - name: location search — the sign-up pitch rules
+        run: node tests/climalytix-pitch.mjs
       - name: SiteSeries store + resampler
         run: node tests/climalytix-series.mjs
       - name: catalogue + adapters + workspace

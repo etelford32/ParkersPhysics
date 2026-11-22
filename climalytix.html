@@ -246,7 +246,8 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
     fill:none; stroke:var(--cx-muted); stroke-width:2; stroke-linecap:round; pointer-events:none; }
 #cx-search { width:100%; box-sizing:border-box; background:#050a14; border:1px solid rgba(0,198,255,.35); color:var(--cx-ink);
     border-radius:10px; padding:11px 40px 11px 38px; font-size:1rem; min-height:44px; }
-#cx-search::placeholder { color:var(--cx-muted); }
+#cx-search::placeholder { color:var(--cx-muted); text-overflow:ellipsis; }
+#cx-search { text-overflow:ellipsis; }
 #cx-search:focus { outline:none; border-color:var(--cx-accent); box-shadow:0 0 0 3px rgba(0,198,255,.18); }
 #cx-search::-webkit-search-cancel-button { display:none; }
 #cx-search-key { position:absolute; right:10px; top:50%; transform:translateY(-50%); font:600 .7rem ui-monospace, Menlo, Consolas, monospace;
@@ -273,7 +274,7 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
 #cx-search-msg[data-kind="info"] { color:var(--cx-muted); }
 #cx-search-msg:empty { display:none; }
 .cx-btn-primary { background:rgba(0,198,255,.24); border-color:var(--cx-accent); font-weight:700; min-height:44px; padding:6px 16px; }
-#cx-locate { min-height:44px; }
+#cx-search-form .cx-btn { min-height:44px; }
 #cx-where { flex:1 1 100%; }
 #cx-save-btn[aria-pressed="true"] { color:var(--cx-caution); border-color:var(--cx-caution); background:rgba(255,190,80,.1); }
 #cx-places { flex:1 1 100%; display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; }
@@ -289,9 +290,54 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
 .cx-place button:hover { background:rgba(0,198,255,.14); }
 .cx-place .cx-pl-x:hover { color:var(--cx-ink); }
 #cx-places-clear { background:none; border:0; color:var(--cx-muted); font-size:.72rem; cursor:pointer; text-decoration:underline; padding:4px; }
-#cx-places-gate { flex:1 1 100%; margin:0; font-size:.76rem; color:var(--cx-muted); }
-#cx-places-gate button { background:none; border:0; padding:0; color:var(--cx-accent); font:inherit; font-weight:700; cursor:pointer; text-decoration:underline; }
+#cx-site-name { font-size:1.4rem; letter-spacing:-.01em; }
+#cx-site-time { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:.78rem; color:var(--cx-muted);
+    border:1px solid var(--cx-line); border-radius:999px; padding:1px 9px; }
+#cx-site-time[hidden] { display:none; }
+#cx-suggest mark { background:none; color:var(--cx-accent); font-weight:700; }
+#cx-suggest .cx-sg-everywhere { text-transform:none; letter-spacing:0; font-size:.76rem; color:var(--cx-muted); white-space:normal; }
+#cx-suggest kbd, #cx-suggest .cx-sg-foot kbd { font:600 .66rem ui-monospace, Menlo, Consolas, monospace; color:var(--cx-ink);
+    border:1px solid var(--cx-line); border-radius:4px; padding:0 5px; margin:0 2px; text-transform:none; }
+#cx-suggest .cx-sg-foot { display:block; min-height:0; padding:7px 9px 4px; margin-top:4px; border-top:1px solid var(--cx-line); border-radius:0;
+    cursor:default; font-size:.66rem; color:var(--cx-faint); }
+#cx-suggest .cx-sg-foot:hover { background:none; }
+@media (hover:none) { #cx-suggest .cx-sg-foot { display:none; } }
+.cx-place-ghost { background:none; border:1px dashed rgba(250,178,25,.55); color:var(--cx-caution); border-radius:999px;
+    font-size:.76rem; padding:5px 12px; min-height:30px; cursor:pointer; }
+.cx-place-ghost:hover { background:rgba(250,178,25,.1); }
+
+/* The pitch: one line while there is little to lose, a card once the reader has built something. */
+#cx-places-gate { flex:1 1 100%; margin:0; font-size:.78rem; color:var(--cx-muted); }
 #cx-places-gate a { color:var(--cx-accent); }
+#cx-places-gate[data-tone="warn"] { color:var(--cx-caution); }
+.cx-pitch-link { background:none; border:0; padding:0; color:var(--cx-caution); font:inherit; font-weight:700; cursor:pointer;
+    text-decoration:underline; text-underline-offset:2px; }
+.cx-pitch-alt { color:var(--cx-faint); }
+#cx-places-gate[data-kind="card"] { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:12px 16px; align-items:center;
+    padding:14px 16px; border-radius:12px; color:var(--cx-ink);
+    border:1px solid rgba(250,178,25,.45);
+    background:linear-gradient(100deg, rgba(250,178,25,.13), rgba(0,198,255,.07) 70%); }
+#cx-places-gate[data-kind="card"][data-tone="good"] { border-color:rgba(95,255,208,.45);
+    background:linear-gradient(100deg, rgba(95,255,208,.12), rgba(0,198,255,.06) 70%); }
+#cx-places-gate[data-kind="card"][hidden] { display:none; }
+.cx-pitch-mark { width:38px; height:38px; border-radius:50%; display:grid; place-items:center; font-size:1.1rem;
+    color:#201400; background:var(--cx-caution); }
+[data-tone="good"] > .cx-pitch-mark, [data-tone="info"] > .cx-pitch-mark { background:var(--cx-home); color:#04211a; }
+.cx-pitch-text { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.cx-pitch-text strong { font-size:1rem; }
+.cx-pitch-text > span { font-size:.82rem; color:var(--cx-muted); line-height:1.45; }
+.cx-pitch-acts { display:flex; flex-direction:column; gap:6px; align-items:stretch; text-align:center; }
+.cx-pitch-cta { background:var(--cx-caution); color:#201400; border:0; border-radius:10px; font-weight:800; font-size:.86rem;
+    padding:0 18px; min-height:44px; cursor:pointer; white-space:nowrap; }
+.cx-pitch-cta:hover { filter:brightness(1.08); }
+.cx-pitch-cta:focus-visible, .cx-pitch-no:focus-visible, .cx-place-ghost:focus-visible, .cx-pitch-link:focus-visible { outline:2px solid var(--cx-accent); outline-offset:2px; }
+.cx-pitch-no { background:none; border:1px solid var(--cx-line); color:var(--cx-muted); border-radius:10px; font-size:.78rem; min-height:34px; padding:0 14px; cursor:pointer; }
+.cx-pitch-no:hover { color:var(--cx-ink); }
+.cx-pitch-acts .cx-pitch-alt { font-size:.7rem; }
+@media (max-width: 768px) {
+    #cx-places-gate[data-kind="card"] { grid-template-columns:auto minmax(0, 1fr); }
+    .cx-pitch-acts { grid-column:1 / -1; }
+}
 @media (max-width: 768px) {
     #cx-search-form { flex-basis:100%; }
     #cx-search-box { flex-basis:100%; }
@@ -408,11 +454,12 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
       <span id="cx-site-badge" hidden></span>
       <span id="cx-site-name">Locating…</span>
       <span id="cx-site-coords"></span>
+      <span id="cx-site-time" hidden></span>
       <button type="button" id="cx-save-btn" class="cx-btn" aria-pressed="false" hidden>☆ Save place</button>
       <button type="button" id="cx-home-btn" class="cx-btn" hidden>Return home</button>
     </div>
     <div id="cx-places" aria-label="Your places" hidden></div>
-    <p id="cx-places-gate" hidden></p>
+    <div id="cx-places-gate" hidden></div>
   </section>
 
   <section id="cx-map" class="cx-card" aria-label="Location map">
