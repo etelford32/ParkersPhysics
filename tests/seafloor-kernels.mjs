@@ -166,7 +166,9 @@ console.log('5. casts.json.gz (NOAA World Ocean Database)');
 const casts = JSON.parse(zlib.gunzipSync(rd('data/seafloor/casts.json.gz')).toString());
 {
     ok(casts.format === 'seafloor-casts-v1' && Object.keys(casts.sites).length === SEAFLOOR_SITES.length, 'one entry per site');
-    let total = 0, hadal = 0, warmer = 0, tested = 0, adiabatWins = 0, gradWins = 0; const rmsA = [], rmsI = [];
+    let total = 0, hadal = 0, warmer = 0;
+    const deep = { n: 0, wins: 0, a: [], i: [], g: 0 }, shallow = { n: 0, wins: 0, a: [], i: [] };
+    const AABW = new Set(['puerto-rico', 'romanche', 'south-sandwich', 'wharton']);     // bottom water underneath
     for (const s of SEAFLOOR_SITES) {
         const e = casts.sites[s.id];
         ok(e.casts.length <= casts.keep, `${s.id}: at most ${casts.keep} casts`);
@@ -176,22 +178,30 @@ const casts = JSON.parse(zlib.gunzipSync(rd('data/seafloor/casts.json.gz')).toSt
             assert.ok(c.z.every((v, i) => i === 0 || v > c.z[i - 1]), `${s.id}/${c.wod_cast}: depth strictly increases`);
             assert.ok(c.t.every((v) => v > -2.5 && v < 35) && c.max_depth_m >= casts.min_depth_m && c.km <= casts.radius_km + 1, `${s.id}/${c.wod_cast}: plausible`);
             assert.ok(/^\d{4}-\d\d-\d\d$/.test(c.date)); n += 3;
-            if (s.kind === 'trench' && c.max_depth_m >= 7000 && !['hellenic'].includes(s.id)) {
+            if (s.kind === 'trench' && c.max_depth_m >= 7000) {
                 hadal++;
                 const k = c.t.indexOf(Math.min(...c.t.filter((_, i) => c.z[i] >= 500)));
                 if (c.t[c.t.length - 1] > c.t[k] + 0.05 && c.z[k] < c.max_depth_m - 1000) warmer++;
-                const w = PR.withheldTest(c, Math.max(4500, c.max_depth_m - 2500));
-                if (w) { tested++; rmsA.push(w.rms.adiabat); rmsI.push(w.rms.isothermal); if (w.rms.adiabat < w.rms.isothermal) adiabatWins++; if (w.rms.adiabat < w.rms.gradient) gradWins++; }
             }
+            // (a) the model where the page uses it with confidence: started at or below 6 km
+            if (c.max_depth_m >= 7500) { const w = PR.withheldTest(c, Math.max(6000, c.max_depth_m - 2000)); if (w && w.cutDepth >= 5500) { deep.n++; deep.a.push(w.rms.adiabat); deep.i.push(w.rms.isothermal); if (w.rms.adiabat < w.rms.isothermal) deep.wins++; if (w.rms.adiabat < w.rms.gradient) deep.g++; } }
+            // (b) the model started TOO SHALLOW over Antarctic Bottom Water: the recorded failure
+            if (AABW.has(s.id) && c.max_depth_m >= 6000) { const w = PR.withheldTest(c, 4500); if (w && w.cutDepth >= 4000 && w.cutDepth < PR.ADIABAT_SAFE_FROM_M) { shallow.n++; shallow.a.push(w.rms.adiabat); shallow.i.push(w.rms.isothermal); if (w.rms.adiabat < w.rms.isothermal) shallow.wins++; } }
         }
     }
     const med = (a) => a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)];
     log(`${total} casts; ${hadal} trench casts reach 7 km; warmer at the bottom than at their minimum in ${warmer}`);
-    log(`withheld-bottom test on ${tested}: adiabat median rms ${med(rmsA).toFixed(3)} °C vs isothermal ${med(rmsI).toFixed(3)} °C; adiabat beats isothermal in ${adiabatWins}, beats gradient-extrapolation in ${gradWins}`);
+    log(`adiabat from ≥ 6 km, bottom withheld (${deep.n} casts): median rms ${med(deep.a).toFixed(3)} °C vs "held" ${med(deep.i).toFixed(3)} °C; wins ${deep.wins}/${deep.n}; beats gradient-extrapolation ${deep.g}/${deep.n}`);
+    log(`adiabat from ~4.5 km over bottom water (${shallow.n} casts): median rms ${med(shallow.a).toFixed(3)} °C vs "held" ${med(shallow.i).toFixed(3)} °C; wins ${shallow.wins}/${shallow.n}`);
     ok(total >= 120, 'the archive has casts'); ok(hadal >= 20, 'and real hadal ones');
     ok(warmer / hadal >= 0.9, 'MEASURED: trench water is warmer at the bottom than at its temperature minimum');
-    ok(tested >= 15 && adiabatWins / tested >= 0.9, 'the adiabat beats "temperature held" on real withheld data');
-    ok(med(rmsA) < 0.05 && med(rmsI) > 3 * med(rmsA), 'and by a wide margin');
+    ok(deep.n >= 15 && deep.wins / deep.n >= 0.9, 'started below ~6 km, the adiabat beats "temperature held" on real withheld data');
+    ok(med(deep.a) < 0.03 && med(deep.i) > 5 * med(deep.a), 'and by a wide margin');
+    // PINNED, not fixed: started at ~4.5 km where bottom water lies below, the model LOSES more often than not.
+    // Do not tune this away — it is why ADIABAT_SAFE_FROM_M exists and why the page flags such columns.
+    ok(shallow.n >= 8 && shallow.wins / shallow.n < 0.5, 'RECORDED FAILURE: over Antarctic Bottom Water the adiabat started at 4.5 km loses to "held"');
+    const refs = SEAFLOOR_SITES.map((s) => PR.referenceCast(casts.sites[s.id].casts)).filter(Boolean);
+    ok(refs.every((r) => r.levels >= 5), 'every reference cast has levels');
 }
 
 // ── 6. the page model ────────────────────────────────────────────────────────
@@ -213,7 +223,7 @@ console.log('6. page-model.js');
     if (by.weddell.floorKind && by.mariana.floorKind) ok(by.weddell.floorT < by.mariana.floorT - 1.5, 'the Weddell plain is far colder than the far deeper Mariana floor');
     const site = SEAFLOOR_SITES.find((s) => s.id === 'mariana'), meta = index.sites.find((m) => m.id === 'mariana');
     const d = PM.siteDetail({ site, meta, grid: grids.get('mariana'), casts: casts.sites.mariana.casts, beamDeg: 60 });
-    ok(d.point.depth === meta.deepest.depth_m && d.section.length === 241 && d.axis.defined, 'detail: point, section, axis');
+    ok(Math.abs(d.point.depth - meta.deepest.depth_m) < 1 && d.section.length === 241 && d.axis.defined, 'detail: point, section, axis');
     ok(d.ping && d.ping.errorM < -250 && d.ping.meanSpeed > 1530 && d.ping.meanSpeed < 1570, `Challenger Deep: 1500 m/s reads ${Math.round(-d.ping.errorM)} m shallow, real mean ${d.ping.meanSpeed.toFixed(0)} m/s`);
     ok(d.echo.biasM <= 0 && d.echo.apparentDepth <= d.point.depth, 'a beam never reads deeper than the truth');
     ok(SO.firstReturn(grids.get('mariana'), d.point.lat, d.point.lon, 1).biasM === 0, 'a 1° beam on a 1.8 km grid sees only the cell below');

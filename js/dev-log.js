@@ -130,6 +130,19 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'sea-floor', date: '2026-11-22', pr: null,
+      title: 'Sea Floor: the ocean\'s trenches in 3D, with the deepest real temperature casts', kind: 'simulation',
+      section: 'earth-orbit', icon: 'fluid',
+      summary: 'A new page maps 28 trenches, fracture-zone deeps, isolated basins and abyssal plains, shows the deepest '
+             + 'temperature profiles ever archived near each one, and lets you fire an echo sounder to see how depth is actually measured.',
+      highlights: [
+          'Temperature is from 221 real casts in NOAA\'s World Ocean Database, including a 1992 cast to 10,861 m in the Mariana Trench. Where a cast stops short of the floor the rest is modelled and drawn dashed.',
+          'The water at the bottom of Challenger Deep is 2.46 °C, a full degree warmer than the coldest water 6 km above it. Compression alone does that, and the page shows it on the measured profile.',
+          'Fire the sounder: an echo from 10.8 km takes 13.9 seconds, and at the 1500 m/s a sounder assumes it reads about 370 m too shallow. A wide beam reads shallower still, from an echo off the trench wall.',
+          'The model for the unmeasured water is tested on the casts themselves. Started below 6 km it is right to about 0.01 °C; started at 4.5 km in the Atlantic it is wrong, because colder Antarctic water lies underneath, and the page says so.',
+          'Depth is a global grid with cells about 1.8 km across, mostly predicted from satellite gravity. It can differ from a ship\'s sounding by a few hundred metres, and both figures are shown.',
+      ],
+      links: [{ href: 'sea-floor.html' }] },
     { id: 'bz-column', date: '2026-11-20', pr: 1085,
       title: 'Bz Column: the Sun\'s north–south field followed from L1 to the ground', kind: 'simulation',
       section: 'space-weather', icon: 'magnet',

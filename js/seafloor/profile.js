@@ -14,7 +14,8 @@
  * is what `withheldTest` MEASURES on real casts — the adiabat against two controls (temperature
  * held constant; the last 500 m's gradient extrapolated). It ignores geothermal heating
  * (~mK over the bottom hundreds of metres) and is wrong across a water-mass boundary, which is why
- * a column whose model gap exceeds `MODEL_GAP_WARN_M` is flagged on the page.
+ * a column whose model gap exceeds `MODEL_GAP_WARN_M`, or whose model part starts above
+ * `ADIABAT_SAFE_FROM_M`, is flagged on the page.
  */
 import { soundSpeed, potentialTemperature, pressureFromDepth, inFittedRange } from './seawater.js';
 
@@ -74,6 +75,7 @@ export function buildColumn({ z, t, s = null, lat, floorDepthM }) {
     const gapM = floor - measuredTo;
     const flags = [];
     if (gapM > MODEL_GAP_WARN_M) flags.push('long-model-gap');
+    if (gapM > 200 && measuredTo < ADIABAT_SAFE_FROM_M) flags.push('model-from-shallow');
     if (levels.some((l) => !inFittedRange(l.s, l.t, l.p))) flags.push('outside-fitted-range');
     if (fin(floorDepthM) && measuredTo > floorDepthM + 1) flags.push('cast-deeper-than-grid');
     return {
@@ -152,8 +154,25 @@ export function withheldTest({ z, t, s = null, lat }, cutDepthM, { fitM = 500, m
     return { cutDepth: z[k], toDepth: z[z.length - 1], n, rms, endError: end, observedRise: t[z.length - 1] - t[k] };
 }
 
-/** The reference cast for a site: the deepest; ties to the most recent. */
+/**
+ * The reference cast for a site: the deepest — but a cast that reaches within `REFERENCE_TIE_M` of
+ * the deepest with MORE levels is preferred (a 9 000-level CTD over a 9-bottle cast to nearly the
+ * same depth). Remaining ties go to the most recent.
+ */
+export const REFERENCE_TIE_M = 300;
 export function referenceCast(casts) {
     if (!casts || !casts.length) return null;
-    return casts.slice().sort((a, b) => (b.max_depth_m - a.max_depth_m) || (a.date < b.date ? 1 : -1))[0];
+    const max = Math.max(...casts.map((c) => c.max_depth_m));
+    return casts.filter((c) => c.max_depth_m >= max - REFERENCE_TIE_M)
+        .sort((a, b) => ((b.levels || 0) - (a.levels || 0)) || (b.max_depth_m - a.max_depth_m) || (a.date < b.date ? 1 : -1))[0];
 }
+
+/**
+ * WHERE THE ADIABAT MAY BE STARTED. MEASURED on the real casts (tests/seafloor-kernels.mjs §5):
+ * continued from below ~6 km it predicts withheld hadal water to a median 0.01 °C; started at
+ * 4–5 km in the Atlantic or the eastern Indian Ocean it LOSES to "temperature held", because
+ * colder Antarctic Bottom Water lies underneath and the model cannot know. A column whose model
+ * part starts above this depth is flagged `model-from-shallow` and the page says the modelled
+ * floor is probably too WARM.
+ */
+export const ADIABAT_SAFE_FROM_M = 5500;

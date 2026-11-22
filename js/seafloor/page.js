@@ -359,7 +359,8 @@ function renderColumn() {
     $('sf-column-keys').innerHTML = ln('var(--sf-s1)', 0, 'Temperature, measured') + (d.floor.kind === 'model' ? ln('var(--sf-s1)', 1, 'Temperature, modelled (adiabat)') : '') + ln('var(--sf-s3)', 0, 'Potential temperature (compression removed)') + ln('#8f98ad', 0, 'Sea floor');
     const notes = [];
     notes.push(`The blue line is what a thermometer reads. The green line removes the heating from compression: where it runs straight down, the water is one mass and the blue line's warming with depth is pressure alone.`);
-    if (d.withheld) { const w = d.withheld; notes.push(`<b>Model check on this cast:</b> hiding everything below ${fmt.m(w.cutDepth)} and predicting it, the adiabat is off by ${w.rms.adiabat.toFixed(3)} °C (rms over ${w.n} levels); holding temperature constant is off by ${w.rms.isothermal.toFixed(3)} °C, and extending the gradient above the cut by ${w.rms.gradient.toFixed(3)} °C.`); }
+    if (d.withheld) { const w = d.withheld; notes.push(`<b>Model check on this cast:</b> hiding everything below ${fmt.m(w.cutDepth)} and predicting it, the adiabat is off by ${w.rms.adiabat.toFixed(3)} °C (rms over ${w.n} levels); holding temperature constant is off by ${w.rms.isothermal.toFixed(3)} °C, and extending the gradient above the cut by ${w.rms.gradient.toFixed(3)} °C.` + (w.rms.adiabat > w.rms.isothermal ? ` <b>Here the model loses:</b> the water below the cut is a different, colder mass, which the adiabat cannot know about.` : '')); }
+    if (col.flags.includes('model-from-shallow')) notes.push(`<b>Caution:</b> this cast stops at ${fmt.m(col.measuredTo)}, above where deep water is reliably one mass. On real casts the model started this shallow is often too warm, because colder bottom water can lie underneath.`);
     if (col.flags.includes('long-model-gap')) notes.push(`<b>Caution:</b> more than ${fmt.m(MODEL_GAP_WARN_M)} of this column is modelled. Different water may lie below the cast.`);
     if (col.flags.includes('cast-deeper-than-grid')) notes.push(`This cast went deeper than the grid's floor here. The cast is the finer measurement; the grid cell is an average over about 1.8 km.`);
     if (col.flags.includes('outside-fitted-range')) notes.push(`Part of this column lies outside the range the seawater formulas were fitted on (0–40 °C, to 10,000 dbar); values there are a small extrapolation.`);
@@ -384,16 +385,17 @@ function renderCompare() {
     for (const v of ticks(lo, hi, 5)) { svg.appendChild(el('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: 'var(--sf-grid)' })); svg.appendChild(el('text', { x: m.l - 6, y: y(v) + 3, 'text-anchor': 'end' }, `${v} °C`)); }
     for (let v = 4000; v <= 11000; v += 1000) svg.appendChild(el('text', { x: x(v), y: H - m.b + 14, 'text-anchor': 'middle' }, `${v / 1000} km`));
     svg.appendChild(el('text', { x: W - m.r, y: H - 4, 'text-anchor': 'end' }, 'depth of the floor'));
-    const labelled = new Set(['mariana', 'tonga', 'puerto-rico', 'south-sandwich', 'weddell', 'banda', 'molloy', 'kuril']);
+    const labelled = new Set(W < 560 ? ['mariana', 'south-sandwich', 'weddell', 'cayman'] : ['mariana', 'tonga', 'puerto-rico', 'south-sandwich', 'weddell', 'banda', 'cayman']);
     const warm = rows.filter((r) => r.floorT >= hi);
+    let offN = 0;
     for (const r of rows) {
-        const off = r.floorT >= hi, cx = x(Math.max(4000, r.gridDepth)), cy = off ? m.t + 4 : y(r.floorT), st = KIND_STYLE[r.kind];
+        const off = r.floorT >= hi, cx = x(Math.max(4000, r.gridDepth)), cy = off ? m.t + 4 + 16 * offN++ : y(r.floorT), st = KIND_STYLE[r.kind];
         const mk = shape(r.kind, cx, cy, 5.5, r.floorKind === 'model' ? { fill: '#0b1120', stroke: st.color, 'stroke-width': 2 } : {});
         const t = el('title', {}, `${r.name}: ${fmt.t(r.floorT)} ${fmt.kind(r.floorKind)} at ${fmt.m(r.gridDepth)}`); mk.appendChild(t);
         mk.style.cursor = 'pointer'; mk.addEventListener('click', () => { select(r.id); $('sf-stage-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
         mk.addEventListener('pointermove', (e) => tip($('sf-chart-tip'), mapTip(r), e)); mk.addEventListener('pointerleave', () => { $('sf-chart-tip').hidden = true; });
         svg.appendChild(mk);
-        if (labelled.has(r.id) || off) svg.appendChild(el('text', { x: cx + 9, y: cy + (off ? 12 : 3), class: 't-strong' }, (r.deep || r.name).replace(' Abyssal Plain', ' plain') + (off ? ` ${r.floorT.toFixed(1)} °C ↑` : '')));
+        if (labelled.has(r.id) || off) svg.appendChild(el('text', { x: cx + (cx > W - 120 ? -9 : 9), y: cy + (cx > W - 120 ? -7 : 3), 'text-anchor': cx > W - 120 ? 'end' : 'start', class: 't-strong' }, (r.deep || r.name).replace(' Abyssal Plain', ' plain') + (off ? ` ${r.floorT.toFixed(1)} °C ↑` : '')));
     }
     host.appendChild(svg);
     $('sf-compare-note').innerHTML = `Open-ocean trenches climb to the right: their floors are warmer than the abyssal plains above them, by compression alone. `

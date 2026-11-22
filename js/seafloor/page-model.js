@@ -90,7 +90,7 @@ export function siteDetail({ site, meta, grid, casts, at = null, beamDeg = BEAMS
     const ping = column ? sounding(column, reach, { nominal }) : null;
     const echo = depthHere > 0 ? firstReturn(grid, point.lat, point.lon, beamDeg) : null;
     let withheld = null;
-    if (ref && ref.max_depth_m >= 5000) withheld = withheldTest({ z: ref.z, t: ref.t, s: ref.s, lat: ref.lat }, Math.max(4000, ref.max_depth_m - 2000));
+    if (ref && ref.max_depth_m >= 6000) withheld = withheldTest({ z: ref.z, t: ref.t, s: ref.s, lat: ref.lat }, Math.max(4500, ref.max_depth_m - 2000));
     return {
         point: { lat: point.lat, lon: point.lon, depth: depthHere, custom: !!at },
         floorDepth, column, cast: ref, casts: list, reach,

