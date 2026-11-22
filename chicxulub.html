@@ -109,6 +109,26 @@ table.chx-t tr.grp td { color:#7fb0ff; font-size:.64rem; letter-spacing:.12em; t
 .chx-play { background:#1c3a6b; color:#fff; border:1px solid rgba(160,190,255,.35); border-radius:8px; font:inherit; font-size:.78rem; padding:6px 14px; min-height:34px; min-width:74px; cursor:pointer; }
 .chx-play:focus-visible { outline:2px solid #7fb0ff; outline-offset:1px; }
 #chx-time { flex:1 1 220px; min-width:160px; width:auto; }
+
+/* constraint lab */
+.chx-lab { display:grid; grid-template-columns:minmax(0, 1.05fr) minmax(0, 1fr); gap:18px; margin-top:10px; }
+@media (max-width: 1050px) { .chx-lab { grid-template-columns:minmax(0, 1fr); } }
+.chx-lab h3 { font-size:.8rem; color:#f3f5ff; font-weight:700; margin:14px 0 2px; }
+.chx-lab h3:first-child { margin-top:0; }
+.chx-lab h3 small { display:block; font-weight:500; color:#8a93ad; font-size:.72rem; line-height:1.45; margin-top:2px; }
+.chx-vars { display:grid; grid-template-columns:auto minmax(90px, 1fr) auto; gap:6px 12px; align-items:center; font-size:.76rem; color:#aab3cb; margin-top:8px; }
+.chx-vars input[type=range] { width:100%; accent-color:#3987e5; }
+.chx-vars output { color:#f3f5ff; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+.chx-vars i { font-style:normal; color:#8a93ad; font-size:.68rem; grid-column:1 / -1; margin:-4px 0 2px; }
+.chx-chi { font-size:.82rem; color:#cfd6ea; margin-top:10px; }
+.chx-chi b { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+table.chx-t td.z { white-space:nowrap; font-variant-numeric:tabular-nums; }
+table.chx-t td.z svg { vertical-align:middle; margin-right:6px; }
+table.chx-t td.el { text-align:right; font-variant-numeric:tabular-nums; }
+.chx-modes { list-style:none; margin-top:6px; }
+.chx-modes li { display:grid; grid-template-columns:104px 1fr; gap:10px; font-size:.78rem; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.06); line-height:1.45; color:#b9c2da; }
+.chx-modes li b { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.chx-ctl select { background:#0f1730; color:#e6ebfa; border:1px solid rgba(255,255,255,.18); border-radius:7px; font:inherit; font-size:.76rem; padding:5px 8px; min-height:32px; }
 </style>
 </head>
 <body>
@@ -230,6 +250,48 @@ table.chx-t tr.grp td { color:#7fb0ff; font-size:.64rem; letter-spacing:.12em; t
     <div class="chx-chart" id="chx-climate"></div>
     <div class="chx-legend" id="chx-climate-legend"></div>
     <p class="chx-fine" id="chx-climate-note"></p>
+  </section>
+
+  <section class="chx-panel chx-span" id="chx-test">
+    <div class="chx-step">Step 5 · test it</div>
+    <h2>Does the evidence agree with itself?
+      <small>Five variables describe the impactor. Seven pieces of evidence are fitted; five more are held back and only predicted. Move a variable and watch which rows break.</small></h2>
+    <div class="chx-lab">
+      <div>
+        <h3>The five variables <small>Drag any of them, or return to the best fit.</small></h3>
+        <div class="chx-vars" id="chx-vars"></div>
+        <div class="chx-ctl" style="margin:8px 0 0">
+          <button type="button" class="chx-play" id="chx-fit">Best fit</button>
+          <span class="chx-chi" id="chx-chi"></span>
+        </div>
+        <h3>Scorecard <small>How far the model lands from each row, in units of that row's uncertainty (σ). Within ±1 is a match; beyond ±2 is a miss.</small></h3>
+        <div class="chx-tablewrap"><table class="chx-t" id="chx-score">
+          <thead><tr><th>Evidence</th><th class="num">Observed</th><th class="num">Model</th><th>Distance</th></tr></thead><tbody></tbody>
+        </table></div>
+        <h3>Take one away <small>Each fitted row is removed in turn and the model refitted without it. Can the rest predict it?</small></h3>
+        <div class="chx-tablewrap"><table class="chx-t" id="chx-loo">
+          <thead><tr><th>Removed</th><th>Predicted from the rest</th><th>What it alone holds</th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+      <div>
+        <h3>How two variables trade off <small>Darker blue fits better. The outline is where the fit is as good as the best (Δχ² ≤ 1). The other variables stay where the sliders are, except the iridium share, which re-adjusts at every point.</small></h3>
+        <div class="chx-ctl" style="margin:6px 0">
+          <label>Across <select id="chx-px"></select></label>
+          <label>Up <select id="chx-py"></select></label>
+        </div>
+        <div class="chx-chart"><canvas id="chx-pair" width="700" height="430" aria-label="Fit quality over two variables"></canvas></div>
+        <h3>What moves what <small>If a variable grows by 1 %, each quantity changes by this many per cent. Zero means the evidence cannot see that variable through that quantity.</small></h3>
+        <div class="chx-tablewrap"><table class="chx-t" id="chx-el"><thead></thead><tbody></tbody></table></div>
+        <h3>What the evidence pins down <small>Combinations of variables, tightest first. "Free by ×1.04" means that combination can change by 4 % before the fit gets noticeably worse.</small></h3>
+        <ul class="chx-modes" id="chx-modes"></ul>
+        <h3>How far each variable can go <small>One variable is walked across its range while the other four re-adjust.</small></h3>
+        <dl class="chx-kv" id="chx-profiles"></dl>
+      </div>
+    </div>
+    <p class="chx-fine">Every row goes through the same scaling laws, whose coefficients were written from memory and are not yet checked.
+      A good fit here means the evidence is consistent <b>under those laws</b>; it does not test the laws. The fit's single best point
+      (a slower, larger body) and the headline ranges at the top of the page (the middle of the same valley) are two summaries of one
+      surface — the long, loose direction below is why they differ.</p>
   </section>
 
   <section class="chx-panel chx-span">

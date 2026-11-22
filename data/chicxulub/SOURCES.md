@@ -67,3 +67,19 @@ with K–Pg distances · GCM land/ocean splits · the gravity and magnetic grids
 One networked session reading the six open-access papers settles most of the
 recalled rows: flip each flag as it is checked, and correct the value if the
 paper disagrees — the gate does not pin recalled values.
+
+## Which rows the model is fitted to
+
+`js/chicxulub/constraints.js` splits the evidence into rows the model is
+FITTED to and rows that are HELD OUT and only predicted.
+
+| Fitted | Held out |
+|---|---|
+| inner rim 155 km | peak ring 85 km (through a recalled "half the rim" rule) |
+| El Mimbral 50 cm, Raton 1.5 cm (blanket law) | outer ring 190 km, as if it were the rim |
+| global iridium 55 ng/cm² | Beloc 46 cm (distance at the time unknown) |
+| trajectory angle 45–60° | published energy 1–4×10²³ J |
+| priors: asteroid speed, CM density | published magnitude 10–11 |
+
+Checking a recalled row changes what it can be used for: Raton's 1.5 cm and
+the peak-ring ratio are the two recalled values the result leans on most.

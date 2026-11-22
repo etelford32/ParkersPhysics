@@ -7,6 +7,7 @@
 import * as O from '../js/chicxulub/observations.js';
 import * as M from '../js/chicxulub/impact-model.js';
 import * as R from '../js/chicxulub/reconstruct.js';
+import * as C from '../js/chicxulub/constraints.js';
 
 const f = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : x.toFixed(d));
 const e = (x) => (x == null ? '—' : x.toExponential(2));
@@ -73,3 +74,12 @@ for (const c of O.CLIMATE_TARGETS) {
 }
 const co2 = M.co2Forcing(O.VOLATILES.co2Gt.value);
 console.log(`  CO₂: +${f(co2.addedPpm, 0)} ppm on ${co2.backgroundPpm} → +${f(co2.forcingWm2, 2)} W/m² → +${f(co2.forcingWm2 / 1.2, 2)} K afterwards`);
+
+console.log('\n══ 5. Constraints ══');
+const fitC = C.fit();
+console.log(`  best fit: ${C.PARAMS.map((p) => `${p.label} ${fitC.vars[p.key].toFixed(p.digits)} ${p.unit}`).join(' · ')}   χ² ${f(fitC.chi2, 2)} on ${fitC.dof} dof`);
+for (const r of fitC.rows) { const row = C.ROWS.find((q) => q.id === r.id), k = row.scale ?? 1; console.log(`  ${r.group.padEnd(6)} ${row.label.padEnd(36)} model ${Number(r.model * k).toPrecision(3).padStart(9)}  observed ${row.obs == null ? '   prior' : Number(row.obs * k).toPrecision(3).padStart(8)} ${row.unit.padEnd(7)} z ${r.z >= 0 ? '+' : ''}${f(r.z, 2)}`); }
+console.log('  what the evidence pins down (stiff → loose):');
+for (const m of C.stiffness(fitC.vars).modes) console.log(`    free by ×${Math.exp(m.freedom).toFixed(2).padStart(5)}: ` + C.PARAMS.filter((p) => Math.abs(m.weights[p.key]) > 0.2).map((p) => `${m.weights[p.key] > 0 ? '+' : '−'}${Math.abs(m.weights[p.key]).toFixed(2)} ${p.label}`).join('  '));
+for (const k of C.PARAM_KEYS) { const pr = C.profile(k), p = C.PARAMS.find((q) => q.key === k); console.log(`  ${p.label.padEnd(22)} ${pr.lo.toFixed(p.digits)}–${pr.hi.toFixed(p.digits)} ${p.unit} (Δχ² ≤ 1, others re-fitted)`); }
+for (const l of C.leaveOneOut(fitC)) console.log(`  without ${l.id.padEnd(8)} → that row predicted at ${l.predictedZ >= 0 ? '+' : ''}${f(l.predictedZ, 1)}σ${l.loosens ? `; leaves ${l.loosens} loose` : ''}`);

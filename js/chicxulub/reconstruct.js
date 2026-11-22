@@ -44,9 +44,21 @@
  */
 
 import {
-    transientDiameter, finalDiameter, impactorMass, kineticEnergy, iridiumFluence,
+    transientDiameter, finalDiameter, impactorMass, kineticEnergy, iridiumFluence, ejectaThickness, greatCircle,
     R_EARTH, MU_EARTH, V_ESC,
 } from './impact-model.js';
+import { CRATER, EJECTA_SITES } from './observations.js';
+
+/**
+ * The ejecta sections the reconstruction is FITTED to (`fit: true` in the
+ * evidence table), with their present-day distance from the crater. The
+ * blanket law goes as D_tc⁴, so a thickness is an independent measure of the
+ * transient crater — it does not care which ring is called the rim.
+ */
+export const EJECTA_FIT = Object.freeze(EJECTA_SITES.filter((s) => s.fit).map((s) => Object.freeze({
+    name: s.name, thicknessM: s.thicknessM, logSigma: s.logSigma,
+    distanceKm: greatCircle(CRATER.centre.latDeg, CRATER.centre.lonDeg, s.latDeg, s.lonDeg) / 1000,
+})));
 
 const RAD = Math.PI / 180;
 
@@ -120,7 +132,7 @@ function quantiles(samples, weights, qs) {
  *   scenario 'crater-only'  the crater and the angle alone (the degeneracy).
  * `useAngle: false` drops the published trajectory and keeps the sin 2θ prior.
  */
-export function reconstructImpactor({ scenario = 'asteroid', useAngle = true, ...over } = {}) {
+export function reconstructImpactor({ scenario = 'asteroid', useAngle = true, useEjecta = true, ...over } = {}) {
     const o = { ...DEFAULTS, ...over };
     const Ls = axis(o.grid.diameterKm, true), vs = axis(o.grid.speedKms, true);
     const ths = axis(o.grid.angleDeg), rhos = axis(o.grid.density);
@@ -133,12 +145,17 @@ export function reconstructImpactor({ scenario = 'asteroid', useAngle = true, ..
     for (let i = 0; i < Ls.length; i++) for (let j = 0; j < vs.length; j++) {
         for (let a = 0; a < ths.length; a++) for (let b = 0; b < rhos.length; b++, k++) {
             const L = Ls[i], v = vs[j], th = ths[a], rho = rhos[b];
-            const Dfr = finalDiameter(transientDiameter({ diameterM: L * 1000, speed: v * 1000, angleDeg: th, density: rho, targetDensity: o.targetDensity })) / 1000;
+            const DtcM = transientDiameter({ diameterM: L * 1000, speed: v * 1000, angleDeg: th, density: rho, targetDensity: o.targetDensity });
+            const Dfr = finalDiameter(DtcM) / 1000;
             const mass = impactorMass(L * 1000, rho);
             const fullIr = iridiumFluence({ massKg: mass, abundanceNgG: o.abundanceNgG, fDep: 1 });
             // log-uniform grid in L and v ⇒ multiply by L·v for a flat prior in each
             let w = L * v * gauss(Math.log(Dfr), Math.log(o.craterKm), o.craterLogSigma) * angleDensity(th);
             if (useAngle) w *= plateau(th, o.angleLo, o.angleHi, o.angleSigma);
+            if (useEjecta) for (const e of EJECTA_FIT) {
+                const t = ejectaThickness(DtcM, e.distanceKm * 1000);
+                w *= t == null ? 0 : gauss(Math.log(t / e.thicknessM), 0, e.logSigma);
+            }
             const irSigma = Math.hypot(o.fluenceSigma / o.fluence, o.fluenceModelLogSigma);
             let fDep = Math.min(1, o.fluence / fullIr);
             if (scenario === 'asteroid') {
@@ -158,7 +175,7 @@ export function reconstructImpactor({ scenario = 'asteroid', useAngle = true, ..
     const q = (arr) => { const [lo, med, hi] = quantiles(arr, S.w, [0.16, 0.5, 0.84]); return { lo, med, hi }; };
     let peak = 0; for (const x of LvMap) if (x > peak) peak = x;
     return {
-        scenario, useAngle, options: o,
+        scenario, useAngle, useEjecta, options: o,
         diameterKm: q(S.L), speedKms: q(S.v), angleDeg: q(S.th), density: q(S.rho),
         massKg: q(S.mass), energyJ: q(S.energy), fDep: q(S.fDep), craterKm: q(S.crater),
         best: { diameterKm: S.L[bestK], speedKms: S.v[bestK], angleDeg: S.th[bestK], density: S.rho[bestK], fDep: S.fDep[bestK] },

@@ -26,6 +26,7 @@ import * as M from '../js/chicxulub/impact-model.js';
 import * as R from '../js/chicxulub/reconstruct.js';
 import * as SM from '../js/chicxulub/scene-model.js';
 import fs from 'node:fs';
+import * as C from '../js/chicxulub/constraints.js';
 import { impactEnergy } from '../js/neo-space.js';
 import { EBM_HEAT_CAPACITY, EBM_FEEDBACK } from '../js/volcano-engine.js';
 
@@ -331,6 +332,97 @@ section('9. the 3-D scene kernel');
     const src = fs.readFileSync(new URL('../js/chicxulub/stage.js', import.meta.url), 'utf8');
     ok(!/impact-model|reconstruct\.js|Math\.sqrt|Math\.pow|\*\* ?0\.\d/.test(src), 'stage.js imports no physics kernel and has no power law of its own');
     ok(/camera\.up/.test(src) === false || !/camera\.up\.set/.test(src), 'stage.js never moves camera.up');
+}
+
+// ── 10 ──────────────────────────────────────────────────────────────────────
+section('10. constraints: fit, tests, and the system of variables');
+{
+    ok(R.EJECTA_FIT.length === 2 && R.EJECTA_FIT.every((e) => e.distanceKm > 500 && e.logSigma > 0.5), 'two ejecta sections are fitted, each with a stated factor-of-two-or-more width');
+    ok(!R.EJECTA_FIT.some((e) => e.name.startsWith('Beloc')), 'Beloc (distance at the time unknown) is NOT fitted');
+    const withE = R.reconstructImpactor({ scenario: 'asteroid' }), noE = R.reconstructImpactor({ scenario: 'asteroid', useEjecta: false });
+    ok(withE.diameterKm.hi - withE.diameterKm.lo < noE.diameterKm.hi - noE.diameterKm.lo, `the ejecta narrow the diameter (${(withE.diameterKm.hi - withE.diameterKm.lo).toFixed(1)} vs ${(noE.diameterKm.hi - noE.diameterKm.lo).toFixed(1)} km wide)`);
+
+    const f = C.fit(), f2 = C.fit();
+    ok(Object.is(f.chi2, f2.chi2) && C.PARAM_KEYS.every((k) => Object.is(f.vars[k], f2.vars[k])), 'the fit is deterministic');
+    ok(f.dof === C.FITTED.length - C.PARAMS.length && f.dof === 2, `${C.FITTED.length} fitted rows, ${C.PARAMS.length} variables, ${f.dof} degrees of freedom`);
+    ok(f.chi2 < 2 * f.dof + 2, `best fit χ² = ${f.chi2.toFixed(2)} on ${f.dof} dof — the fitted evidence is mutually consistent`);
+    ok(f.rows.filter((r) => r.group === 'fitted').every((r) => Math.abs(r.z) < 1.5), 'no fitted row is more than 1.5σ off');
+    ok(C.PARAMS.every((p) => f.vars[p.key] > p.lo * 1.001 && f.vars[p.key] < p.hi * 0.999), 'the best fit is inside every bound');
+    // it is a minimum: every single-variable nudge raises χ²
+    let isMin = true; for (const p of C.PARAMS) for (const k of [0.97, 1.03]) if (C.evaluate({ ...f.vars, [p.key]: f.vars[p.key] * k }).chi2 < f.chi2 - 1e-9) isMin = false;
+    ok(isMin, 'no ±3 % step in any variable lowers χ²');
+    // the grid posterior and the fit agree
+    // the best-fitting POINT sits at the slow, large end of a skewed valley; the grid posterior's median is further along it.
+    // They are two summaries of one surface: the fit must lie inside the posterior's size range and at its slow edge.
+    ok(f.vars.diameterKm > withE.diameterKm.lo && f.vars.diameterKm < withE.diameterKm.hi && f.vars.speedKms > 0.9 * withE.speedKms.lo && f.vars.speedKms < withE.speedKms.med,
+        `fit (${f.vars.diameterKm.toFixed(1)} km, ${f.vars.speedKms.toFixed(1)} km/s) vs grid posterior (${withE.diameterKm.med.toFixed(1)} km, ${withE.speedKms.med.toFixed(1)} km/s): same valley`);
+    const ev = C.evaluate(f.vars);
+    ok(near(ev.chi2, f.chi2, 1e-12) && near(ev.chi2, ev.rows.filter((r) => r.group === 'fitted').reduce((s, r) => s + r.z * r.z, 0), 1e-12), 'χ² is the sum of the fitted rows\' z²');
+    ok(C.evaluate(f.vars, { use: ['rim'] }).chi2 < ev.chi2 + 1e-12, 'a subset of rows gives a smaller χ²');
+
+    // held-out rows are predictions, and they are reported as they fall
+    const held = Object.fromEntries(f.rows.filter((r) => r.group === 'held').map((r) => [r.id, r.z]));
+    ok(Object.keys(held).length === 5, 'five held-out rows');
+    ok(held.outerRing < -2, `the outer ring as the rim is ${held.outerRing.toFixed(1)}σ off — the law describes the inner rim (pinned as measured)`);
+    ok(Math.abs(held.peakRing) < 2 && Math.abs(held.quake) < 2 && Math.abs(held.energy) < 2, `peak ring ${held.peakRing.toFixed(1)}σ, quake ${held.quake.toFixed(1)}σ, energy ${held.energy.toFixed(1)}σ — predicted within 2σ`);
+    ok(held.beloc < -1, `Beloc is under-predicted (${held.beloc.toFixed(1)}σ) at today's distance — it was closer then`);
+    // NEGATIVE CONTROL: fitting the outer ring instead breaks the ejecta rows
+    const outer = M.forward({ diameterKm: f.vars.diameterKm * (190 / f.pred.finalKm) ** (1 / (M.SCALING.finalExp * M.SCALING.expL)), speedKms: f.vars.speedKms, angleDeg: f.vars.angleDeg, density: f.vars.density });
+    const eOuter = C.evaluate({ ...f.vars, diameterKm: outer.input.diameterKm });
+    ok(near(eOuter.pred.finalKm, 190, 0.5) && eOuter.rows.find((r) => r.id === 'ejecta1').z > 1.5 && eOuter.chi2 > f.chi2 + 4, `scaled to a 190 km rim, the Raton layer is ${eOuter.rows.find((r) => r.id === 'ejecta1').z.toFixed(1)}σ too thick`);
+
+    // sensitivities against the scaling law's own exponents
+    const el = C.elasticity(f.vars), an = C.analyticExponents(f.vars.angleDeg);
+    let worst = 0; for (const r of el) for (const k of C.PARAM_KEYS) worst = Math.max(worst, Math.abs(r.d[k] - an[r.key][k]));
+    ok(worst < 1e-5, `numerical sensitivities match the analytic exponents (worst ${worst.toExponential(1)})`);
+    ok(near(el.find((r) => r.key === 'ejecta0').d.diameterKm, 4 * 0.78, 1e-5) && near(el.find((r) => r.key === 'finalKm').d.speedKms, 1.13 * 0.44, 1e-5), 'debris ∝ L^3.12, crater ∝ v^0.50');
+
+    // the eigen-solver, then the stiff and sloppy directions
+    const eg = C.symmetricEigen([[2, 1, 0], [1, 2, 0], [0, 0, 5]]);
+    ok(near(eg[0].value, 5, 1e-12) && near(eg[1].value, 3, 1e-12) && near(eg[2].value, 1, 1e-12) && near(Math.abs(eg[1].vector[0]), Math.SQRT1_2, 1e-9), 'Jacobi eigen-solver on a known matrix');
+    const st = C.stiffness(f.vars);
+    ok(st.modes.length === 5 && st.modes.every((m, i) => i === 0 || m.value <= st.modes[i - 1].value) && st.modes.every((m) => near(Object.values(m.weights).reduce((s, x) => s + x * x, 0), 1, 1e-9)), 'five orthonormal directions, stiffest first');
+    ok(near(st.modes.reduce((s, m) => s + m.value, 0), st.fisher.reduce((s, r, i) => s + r[i], 0), 1e-6 * st.fisher[0][0]), 'eigenvalues sum to the trace');
+    ok(Math.abs(st.modes[0].weights.diameterKm) > 0.8 && st.modes[0].freedom < 0.06, `stiffest direction is the size (±${(st.modes[0].freedom * 100).toFixed(0)} %)`);
+    const soft = st.modes.at(-1);
+    ok(Math.abs(soft.weights.fDep) > 0.7 && soft.freedom > 1, `sloppiest direction is the iridium share traded against size and speed (free by a factor ${Math.exp(soft.freedom).toFixed(1)})`);
+    ok(st.modes[0].value / soft.value > 500, 'three orders of magnitude between stiff and sloppy');
+    // the sloppy direction really is cheap to move along, the stiff one is not
+    const step = (m, a) => Object.fromEntries(C.PARAMS.map((p) => [p.key, f.vars[p.key] * Math.exp(a * m.weights[p.key])]));
+    const dSoft = [0.3, -0.3].map((a) => C.evaluate(step(soft, a)).chi2 - f.chi2), dStiff = [0.3, -0.3].map((a) => C.evaluate(step(st.modes[0], a)).chi2 - f.chi2);
+    ok(dSoft.every((d) => d > -1e-6 && d < 0.5) && dStiff.every((d) => d > 20), `a 0.3 step costs Δχ² ${dSoft.map((d) => d.toFixed(2)).join(' / ')} along the sloppy direction and ${dStiff.map((d) => d.toFixed(0)).join(' / ')} along the stiff one`);
+    // the fit is a minimum along EVERY eigen-direction, not just along the axes (coordinate descent alone stalled here)
+    ok(st.modes.every((m) => [0.05, -0.05, 0.2, -0.2].every((a) => C.evaluate(step(m, a)).chi2 >= f.chi2 - 1e-7)), 'no step along any eigen-direction lowers χ²');
+    // NEGATIVE CONTROL: without the population prior, the size–speed trade-off opens right up
+    const noSpeed = C.stiffness(f.vars, { use: C.FITTED.filter((r) => r.id !== 'speed').map((r) => r.id) });
+    ok(noSpeed.modes.at(-1).freedom > 3 * soft.freedom, `drop the speed prior and the loosest direction is ${(noSpeed.modes.at(-1).freedom / soft.freedom).toFixed(0)}× looser`);
+
+    // profiles: every variable is bounded by the evidence, and contains the fit
+    for (const k of C.PARAM_KEYS) {
+        const pr = C.profile(k, { n: 25 });
+        ok(pr.pinned && pr.lo <= f.vars[k] * 1.08 && pr.hi >= f.vars[k] * 0.92 && near(pr.min, f.chi2, 0.15), `${k}: Δχ² ≤ 1 over ${pr.lo.toPrecision(3)}–${pr.hi.toPrecision(3)}`);
+    }
+    const pm = C.pairMap('diameterKm', 'speedKms', f.vars, { n: 24 });
+    let lowest = Infinity; for (const c of pm.chi2) lowest = Math.min(lowest, c);
+    ok(pm.chi2.length === 576 && lowest >= f.chi2 - 1e-9 && lowest < f.chi2 + 0.6, 'the pair map\'s floor is the fit');
+    // with the iridium share held, the iridium row pins the size and the size–speed trade-off is hidden (the first page draft)
+    const pmHeld = C.pairMap('diameterKm', 'speedKms', f.vars, { n: 24, freeIridium: false });
+    const widthOf = (m) => { const cols = new Set(); for (let i = 0; i < m.n; i++) for (let j = 0; j < m.n; j++) if (m.chi2[i * m.n + j] <= f.chi2 + 1) cols.add(i); return cols.size; };
+    ok(pm.freeIridium && !pmHeld.freeIridium && widthOf(pm) >= 2 * widthOf(pmHeld), `iridium share free: the good region spans ${widthOf(pm)} size columns; held: ${widthOf(pmHeld)}`);
+    ok(!C.pairMap('diameterKm', 'fDep', f.vars, { n: 8 }).freeIridium, 'the share is not re-adjusted when it is one of the axes');
+
+    // leave-one-out and tension
+    const loo = C.leaveOneOut(f);
+    ok(loo.length === C.FITTED.length, 'one refit per fitted row');
+    const by = Object.fromEntries(loo.map((l) => [l.id, l]));
+    ok(Math.abs(by.rim.predictedZ) < 1.5 && Math.abs(by.ejecta0.predictedZ) < 1.5 && Math.abs(by.ejecta1.predictedZ) < 1.5, `rim and both ejecta sections are each predicted by the others (${by.rim.predictedZ.toFixed(1)}, ${by.ejecta0.predictedZ.toFixed(1)}, ${by.ejecta1.predictedZ.toFixed(1)}σ)`);
+    ok(by.iridium.loosens === 'fDep', 'the iridium row is the only thing that fixes the iridium share');
+    ok(Math.abs(by.angle.predictedZ) > 3, `nothing else constrains the angle (${by.angle.predictedZ.toFixed(1)}σ without the published trajectory)`);
+    const tt = C.tensionTable();
+    ok(tt.length === 21 && tt[0].chi2 < 2, `no pair of fitted rows is in conflict (worst pair χ² ${tt[0].chi2.toFixed(2)}: ${tt[0].a} + ${tt[0].b})`);
+    ok(near(C.unitToParam('speedKms', C.paramToUnit('speedKms', 23)), 23, 1e-9), 'variable ↔ slider round trip');
+    // every fitted row responds to at least one variable (no decorative rows)
+    ok(st.J.every((row) => row.some((x) => Math.abs(x) > 1e-3)), 'every fitted row moves with at least one variable');
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

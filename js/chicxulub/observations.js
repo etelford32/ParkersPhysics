@@ -187,9 +187,11 @@ export const EJECTA_SITES = Object.freeze([
           source: 'Kring (LPI): primary deposit ~46 cm; reworked up to 125 cm', verified: 'search', coordsVerified: false }),
     row({ name: 'El Mimbral, NE Mexico', latDeg: 23.2, lonDeg: -98.7, thicknessM: 0.5, loM: 0, hiM: 1.0,
           source: 'NE Mexico spherule beds 0–1.0 m', verified: 'search', coordsVerified: false,
+          fit: true, logSigma: Math.LN2,          // a factor of two: the range is 0–1 m
           note: 'The search confirmed 0–1 m for NE Mexico, not this named section.' }),
     row({ name: 'Raton Basin, USA', latDeg: 37.0, lonDeg: -104.5, thicknessM: 0.015,
-          source: 'Western Interior dual layer, ~1–2 cm', verified: false, coordsVerified: false }),
+          source: 'Western Interior dual layer, ~1–2 cm', verified: false, coordsVerified: false,
+          fit: true, logSigma: Math.log(2.5) }),   // recalled value: a wider factor
     row({ name: 'Tanis, North Dakota', latDeg: 46.0, lonDeg: -103.4, thicknessM: null,
           source: 'DePalma et al. 2019 PNAS — surge deposit with ejecta spherules arriving during the surge',
           verified: 'search', coordsVerified: false }),
@@ -199,6 +201,10 @@ export const DISTAL_LAYER = row({
     source: 'Hildebrand; Morgan et al. 2022 — a ~3 mm global clay with spherules, shocked minerals and the Ir peak',
     verified: 'search',
 });
+
+// Peak-ring basins: ring diameter ≈ half the rim diameter (lunar and terrestrial
+// basins). A recalled rule of thumb — used ONLY as a held-out test.
+export const PEAK_RING_RATIO = row({ value: 0.5, kind: 'inferred', source: 'peak-ring basin morphometry (Pike & Spudis 1987; Baker et al. 2011)', verified: false });
 
 // ── 7. Ocean ────────────────────────────────────────────────────────────────
 export const TSUNAMI = Object.freeze({

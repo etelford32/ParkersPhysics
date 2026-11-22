@@ -10,6 +10,7 @@ import * as O from './chicxulub/observations.js';
 import * as M from './chicxulub/impact-model.js';
 import * as R from './chicxulub/reconstruct.js';
 import * as SM from './chicxulub/scene-model.js';
+import * as C from './chicxulub/constraints.js';
 
 const $ = (id) => document.getElementById(id);
 const INK = '#f3f5ff', INK2 = '#aab3cb', MUTED = '#8a93ad', GRID = 'rgba(255,255,255,.08)', SURFACE = '#0a0e1e';
@@ -411,6 +412,126 @@ async function bootStage() {
     window.__chicxulub.stage = W.stage; window.__chicxulub.stageReady = true;
 }
 
+// ── the constraint lab ──────────────────────────────────────────────────────
+const FIT = C.fit();
+const LAB = { vars: { ...FIT.vars }, px: 'diameterKm', py: 'speedKms' };
+const fmtVar = (p, x) => `${x.toFixed(p.digits)}${p.unit ? ` ${p.unit}` : ''}`;
+const pct = (f) => `${f >= 1.995 ? `×${f.toFixed(1)}` : `${Math.round((f - 1) * 100)} %`}`;
+function zBar(z) {
+    const w = 92, c = w / 2, zz = Math.max(-3, Math.min(3, z)), x = c + zz / 3 * (c - 2), miss = Math.abs(z) > 2;
+    return `<svg width="${w}" height="12" viewBox="0 0 ${w} 12" aria-hidden="true"><rect x="${c - (c - 2) / 3}" y="1" width="${(c - 2) * 2 / 3}" height="10" fill="rgba(255,255,255,.07)"/>` +
+        `<rect x="${Math.min(c, x)}" y="3" width="${Math.max(1.5, Math.abs(x - c))}" height="6" rx="2" fill="${miss ? ORANGE : BLUE}"/><line x1="${c}" x2="${c}" y1="0" y2="12" stroke="${INK2}"/></svg>`;
+}
+function buildLab() {
+    $('chx-vars').innerHTML = C.PARAMS.map((p) => `<label for="chx-var-${p.key}">${p.label}</label>` +
+        `<input type="range" id="chx-var-${p.key}" data-key="${p.key}" min="0" max="1" step="0.001"><output id="chx-var-${p.key}-o"></output>`).join('');
+    for (const el of $('chx-vars').querySelectorAll('input')) el.addEventListener('input', (e) => { LAB.vars[e.target.dataset.key] = C.unitToParam(e.target.dataset.key, Number(e.target.value)); renderLab({ fromSlider: true }); });
+    const opts = C.PARAMS.map((p) => `<option value="${p.key}">${p.label}</option>`).join('');
+    $('chx-px').innerHTML = opts; $('chx-py').innerHTML = opts; $('chx-px').value = LAB.px; $('chx-py').value = LAB.py;
+    $('chx-px').addEventListener('change', (e) => { LAB.px = e.target.value; if (LAB.py === LAB.px) { LAB.py = C.PARAM_KEYS.find((k) => k !== LAB.px); $('chx-py').value = LAB.py; } drawPair(); });
+    $('chx-py').addEventListener('change', (e) => { LAB.py = e.target.value; if (LAB.py === LAB.px) { LAB.px = C.PARAM_KEYS.find((k) => k !== LAB.py); $('chx-px').value = LAB.px; } drawPair(); });
+    $('chx-fit').addEventListener('click', () => { LAB.vars = { ...FIT.vars }; renderLab(); });
+    // fixed analyses of the best fit
+    const loo = C.leaveOneOut(FIT);
+    $('chx-loo').querySelector('tbody').innerHTML = loo.map((l) => {
+        const row = C.ROWS.find((r) => r.id === l.id), own = l.loosens ? C.PARAMS.find((p) => p.key === l.loosens).label.toLowerCase() : null;
+        const verdict = Math.abs(l.predictedZ) <= 1.5 ? 'yes' : own ? 'no — nothing else measures it' : 'only roughly';
+        return `<tr data-row="${l.id}"><td>${esc(row.label)}</td><td class="z">${zBar(l.predictedZ)}${l.predictedZ >= 0 ? '+' : '−'}${Math.abs(l.predictedZ).toFixed(1)}σ · ${verdict}</td><td>${own ? `the ${esc(own)}` : '—'}</td></tr>`;
+    }).join('');
+    const st = C.stiffness(FIT.vars);
+    $('chx-modes').innerHTML = st.modes.map((m) => {
+        const parts = C.PARAMS.filter((p) => Math.abs(m.weights[p.key]) > 0.2).sort((a, b) => Math.abs(m.weights[b.key]) - Math.abs(m.weights[a.key]))
+            .map((p) => `${m.weights[p.key] > 0 ? '↑' : '↓'} ${p.label.toLowerCase()}`).join(', ');
+        return `<li><b>free by ${pct(Math.exp(m.freedom))}</b><span>${esc(parts)}</span></li>`;
+    }).join('');
+    $('chx-profiles').innerHTML = C.PARAMS.map((p) => `<dt>${p.label}</dt><dd id="chx-prof-${p.key}">working…</dd>`).join('');
+    let i = 0;
+    const next = () => {
+        if (i >= C.PARAMS.length) { window.__chicxulub.labReady = true; return; }
+        const p = C.PARAMS[i++], pr = C.profile(p.key, { n: 31 });
+        const edge = pr.lo <= p.lo * 1.0001 ? ' (down to the slowest possible arrival)' : '';
+        $(`chx-prof-${p.key}`).textContent = `${pr.lo.toFixed(p.digits)} – ${pr.hi.toFixed(p.digits)} ${p.unit}${p.key === 'speedKms' ? edge : ''}`;
+        setTimeout(next, 0);
+    };
+    setTimeout(next, 30);
+}
+function renderLab({ fromSlider = false } = {}) {
+    const ev = C.evaluate(LAB.vars);
+    for (const p of C.PARAMS) {
+        if (!fromSlider) $(`chx-var-${p.key}`).value = C.paramToUnit(p.key, LAB.vars[p.key]);
+        $(`chx-var-${p.key}-o`).textContent = p.key === 'fDep' ? `${Math.round(LAB.vars.fDep * 100)} %` : fmtVar(p, LAB.vars[p.key]);
+    }
+    const atFit = C.PARAM_KEYS.every((k) => Math.abs(Math.log(LAB.vars[k] / FIT.vars[k])) < 2e-3);
+    $('chx-chi').innerHTML = `Misfit χ² <b>${ev.chi2.toFixed(1)}</b> over ${C.FITTED.length} fitted rows · best possible <b>${FIT.chi2.toFixed(1)}</b>${atFit ? ' — this is the best fit' : ''}`;
+    $('chx-fit').disabled = atFit;
+    let html = '', last = null;
+    for (const r of ev.rows) {
+        const row = C.ROWS.find((q) => q.id === r.id), k = row.scale ?? 1;
+        if (r.group !== last) { html += `<tr class="grp"><td colspan="4">${r.group === 'fitted' ? 'Fitted' : 'Held back — predicted only'}</td></tr>`; last = r.group; }
+        const num = (x) => (x == null ? '—' : Math.abs(x * k) >= 1e5 ? sci(x * k) : Number((x * k).toPrecision(3)).toString());
+        const obs = row.obs == null ? `~${C.speedPriorMode().toFixed(0)}–30` : num(row.obs);
+        html += `<tr data-row="${r.id}" data-z="${r.z.toFixed(3)}"><td>${esc(row.label)}<div class="chx-fine" style="margin-top:1px">${esc(row.basis)}</div></td>` +
+            `<td class="num">${obs} ${esc(row.unit)}</td><td class="num">${num(r.model)} ${esc(row.unit)}</td>` +
+            `<td class="z">${zBar(r.z)}${r.z >= 0 ? '+' : '−'}${Math.abs(r.z).toFixed(1)}σ${Math.abs(r.z) > 2 ? ' · miss' : ''}</td></tr>`;
+    }
+    $('chx-score').querySelector('tbody').innerHTML = html;
+    const el = C.elasticity(LAB.vars);
+    $('chx-el').querySelector('thead').innerHTML = `<tr><th>1 % more…</th>${C.PARAMS.map((p) => `<th class="num">${p.label === 'Iridium in the layer' ? 'Ir share' : p.label}</th>`).join('')}</tr>`;
+    $('chx-el').querySelector('tbody').innerHTML = el.map((r) => `<tr><td>${esc(r.label)}</td>${C.PARAMS.map((p) => {
+        const d = r.d[p.key], a = Math.min(1, Math.abs(d) / 3.2);
+        return `<td class="el" style="background:rgba(57,135,229,${(a * 0.55).toFixed(2)})">${Math.abs(d) < 0.005 ? '0' : `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}`}</td>`;
+    }).join('')}</tr>`).join('');
+    drawPair();
+}
+function drawPair() {
+    const cv = $('chx-pair'), g = cv.getContext('2d'), W = cv.width, H = cv.height, m = { l: 64, r: 14, t: 12, b: 44 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const pm = C.pairMap(LAB.px, LAB.py, LAB.vars, { n: 56 }), n = pm.n, px = C.PARAMS.find((p) => p.key === LAB.px), py = C.PARAMS.find((p) => p.key === LAB.py);
+    let floor = Infinity; for (const c of pm.chi2) floor = Math.min(floor, c);
+    g.fillStyle = SURFACE; g.fillRect(0, 0, W, H);
+    const cw = pw / n, chh = ph / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const d = pm.chi2[i * n + j] - floor; if (d > 25) continue;
+        g.fillStyle = `rgba(57,135,229,${(0.08 + 0.9 * Math.exp(-d / 4)).toFixed(3)})`;
+        g.fillRect(m.l + i * cw, m.t + ph - (j + 1) * chh, cw + 0.6, chh + 0.6);
+    }
+    // outline of Δχ² ≤ 1: cell edges where membership changes
+    g.strokeStyle = INK; g.lineWidth = 1.6; g.beginPath();
+    const inside = (i, j) => i >= 0 && j >= 0 && i < n && j < n && pm.chi2[i * n + j] - floor <= 1;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        if (!inside(i, j)) continue;
+        const x0 = m.l + i * cw, y0 = m.t + ph - (j + 1) * chh;
+        if (!inside(i - 1, j)) { g.moveTo(x0, y0); g.lineTo(x0, y0 + chh); }
+        if (!inside(i + 1, j)) { g.moveTo(x0 + cw, y0); g.lineTo(x0 + cw, y0 + chh); }
+        if (!inside(i, j + 1)) { g.moveTo(x0, y0); g.lineTo(x0 + cw, y0); }
+        if (!inside(i, j - 1)) { g.moveTo(x0, y0 + chh); g.lineTo(x0 + cw, y0 + chh); }
+    }
+    g.stroke();
+    const X = (v) => m.l + pw * C.paramToUnit(LAB.px, v), Y = (v) => m.t + ph * (1 - C.paramToUnit(LAB.py, v));
+    g.font = '12px Segoe UI, system-ui, sans-serif'; g.fillStyle = MUTED; g.strokeStyle = GRID; g.lineWidth = 1;
+    const ticks = (p) => Array.from({ length: 5 }, (_, i) => C.unitToParam(p.key, i / 4));
+    g.textAlign = 'center';
+    for (const v of ticks(px)) { g.beginPath(); g.moveTo(X(v), m.t); g.lineTo(X(v), m.t + ph); g.stroke(); g.fillText(v.toFixed(px.digits), X(v), H - 26); }
+    g.fillText(`${px.label.toLowerCase()}${px.unit ? `, ${px.unit}` : ''}`, m.l + pw / 2, H - 8);
+    g.textAlign = 'right';
+    for (const v of ticks(py)) { g.beginPath(); g.moveTo(m.l, Y(v)); g.lineTo(m.l + pw, Y(v)); g.stroke(); g.fillText(v.toFixed(py.digits), m.l - 8, Y(v) + 4); }
+    g.save(); g.translate(14, m.t + ph / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center'; g.fillText(`${py.label.toLowerCase()}${py.unit ? `, ${py.unit}` : ''}`, 0, 0); g.restore();
+    const dot = (v, fill, label) => { const x = X(v[LAB.px]), y = Y(v[LAB.py]); g.beginPath(); g.arc(x, y, 7, 0, 7); g.fillStyle = SURFACE; g.fill(); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fillStyle = fill; g.fill(); g.fillStyle = INK2; g.textAlign = 'left'; g.fillText(label, Math.min(x + 10, m.l + pw - 60), Math.max(y - 8, m.t + 12)); };
+    dot(FIT.vars, INK, 'best fit');
+    if (!C.PARAM_KEYS.every((k) => Math.abs(Math.log(LAB.vars[k] / FIT.vars[k])) < 2e-3)) dot(LAB.vars, ORANGE, 'sliders');
+    cv._geo = { m, pw, ph, pm, floor };
+}
+$('chx-pair').addEventListener('pointermove', (e) => {
+    const cv = e.currentTarget, geo = cv._geo; if (!geo) return;
+    const r = cv.getBoundingClientRect(), k = cv.width / r.width, x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
+    const ux = (x - geo.m.l) / geo.pw, uy = 1 - (y - geo.m.t) / geo.ph;
+    if (ux < 0 || ux > 1 || uy < 0 || uy > 1) { tip.hidden = true; return; }
+    const px = C.PARAMS.find((p) => p.key === LAB.px), py = C.PARAMS.find((p) => p.key === LAB.py);
+    const vars = { ...LAB.vars, [LAB.px]: C.unitToParam(LAB.px, ux), [LAB.py]: C.unitToParam(LAB.py, uy) }, ev = C.evaluate(vars);
+    const worst = ev.rows.filter((q) => q.group === 'fitted').sort((a, b) => Math.abs(b.z) - Math.abs(a.z))[0];
+    showTip(`${px.label} ${fmtVar(px, vars[LAB.px])} · ${py.label} ${fmtVar(py, vars[LAB.py])}\nmisfit χ² ${ev.chi2.toFixed(1)}\nfurthest row: ${worst.label} (${worst.z >= 0 ? '+' : '−'}${Math.abs(worst.z).toFixed(1)}σ)`, e.clientX, e.clientY);
+});
+$('chx-pair').addEventListener('pointerleave', () => { tip.hidden = true; });
+
 // ── evidence ────────────────────────────────────────────────────────────────
 const GROUPS = { crater: 'The crater', age: 'When', target: 'What it hit', iridium: 'The iridium layer', density: 'The body', type: 'What kind of body', trajectory: 'Trajectory', published: 'Published impactors', energy: 'Energy', ejecta: 'Debris', tsunami: 'The sea', volatiles: 'Into the air', climate: 'Climate-model results', extinction: 'Life' };
 const LABEL = { centre: 'Crater centre', rimDiameterKm: 'Outer rim', innerRimDiameterKm: 'Inner (topographic) rim', peakRingDiameterKm: 'Peak ring', transientCavityDiameterKm: 'Transient cavity', mohoUpliftKm: 'Mantle uplift', burialDepthKm: 'Buried under', ma: 'Age', season: 'Season', sedimentThicknessKm: 'Sediment cover', lithology: 'Rock', crustDensity: 'Crust density', waterDepthKm: 'Water depth', fluenceNgCm2: 'Global iridium', fluenceLowNgCm2: 'Global iridium (lower estimate)', nearCraterNgCm2: 'Iridium near the crater', abundanceNgG: 'Iridium in chondrites', density: 'Bulk density', angleDeg: 'Angle to the ground', fromAzimuthDeg: 'Came from', evidence: 'Asymmetry', joules: 'Impact energy', seismicMw: 'Earthquake magnitude', distal: 'Global layer', earlyWave: 'First wave', ringWave: 'Ring wave', gulfOpenOceanM: 'Gulf of Mexico', farCoastsM: 'Distant coasts', energyVs2004: 'Tsunami energy vs 2004', sulfurGt: 'Sulfur', co2Gt: 'Carbon dioxide', sootTg: 'Soot', fineDustTg: 'Fine dust', extinction: 'Species lost' };
@@ -458,3 +579,5 @@ renderTrajectory();
 window.__chicxulub = { O, M, R, SM, base, FWD, TL, state: { S, T, W }, HOURS, setStageTime, stage: null, stageReady: false };
 setStageTime(-SM.APPROACH_S);
 bootStage();
+window.__chicxulub.C = C; window.__chicxulub.FIT = FIT; window.__chicxulub.LAB = LAB;
+buildLab(); renderLab();

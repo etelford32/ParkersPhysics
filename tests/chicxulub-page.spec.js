@@ -135,3 +135,37 @@ test('3-D stage: play runs the clock forward and the slider takes it back', asyn
     await expect(page.locator('#chx-stage-phase b')).toHaveText('The crater');
     await expect(page.locator('#chx-stage-kv')).toContainText('gone');
 });
+
+test('constraint lab: scorecard, held-out rows, and sliders that break rows', async ({ page }) => {
+    test.setTimeout(120000);
+    const errors = await boot(page);
+    await page.waitForFunction(() => window.__chicxulub.labReady, null, { timeout: 90000 });
+    const k = await page.evaluate(() => { const c = window.__chicxulub; return { chi2: c.FIT.chi2, d: c.FIT.vars.diameterKm, fitted: c.C.FITTED.length, held: c.C.HELD.length, outer: c.FIT.rows.find((r) => r.id === 'outerRing').z }; });
+    await expect(page.locator('#chx-score tbody tr[data-row]')).toHaveCount(k.fitted + k.held);
+    await expect(page.locator('#chx-chi')).toContainText('this is the best fit');
+    await expect(page.locator('#chx-fit')).toBeDisabled();
+    // the page prints the kernel's own z for a held-out row, and calls the outer ring a miss
+    expect(Number(await page.locator('#chx-score tr[data-row="outerRing"]').getAttribute('data-z'))).toBeCloseTo(k.outer, 2);
+    await expect(page.locator('#chx-score tr[data-row="outerRing"]')).toContainText('miss');
+    await expect(page.locator('#chx-loo tbody tr')).toHaveCount(k.fitted);
+    await expect(page.locator('#chx-loo tr[data-row="iridium"]')).toContainText('nothing else measures it');
+    await expect(page.locator('#chx-modes li')).toHaveCount(5);
+    await expect(page.locator('#chx-el tbody tr')).toHaveCount(5);
+    await expect(page.locator('#chx-prof-diameterKm')).toContainText('km');
+    // halve the diameter: the rim and iridium rows break, χ² rises, and Best fit brings it back
+    await page.locator('#chx-var-diameterKm').fill('0.4');
+    const bad = await page.evaluate(() => window.__chicxulub.C.evaluate(window.__chicxulub.LAB.vars).chi2);
+    expect(bad).toBeGreaterThan(k.chi2 + 20);
+    await expect(page.locator('#chx-score tr[data-row="rim"]')).toContainText('miss');
+    await expect(page.locator('#chx-fit')).toBeEnabled();
+    await page.locator('#chx-fit').click();
+    await expect(page.locator('#chx-chi')).toContainText('this is the best fit');
+    expect(await page.evaluate(() => window.__chicxulub.LAB.vars.diameterKm)).toBeCloseTo(k.d, 6);
+    // the pair map is drawn, and choosing the same variable twice is repaired
+    const lit = await page.evaluate(() => { const c = document.getElementById('chx-pair'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 120 && d[i + 2] > d[i] + 40) n++; return n / (d.length / 4); });
+    expect(lit).toBeGreaterThan(0.01);
+    await page.locator('#chx-px').selectOption('speedKms');
+    expect(await page.locator('#chx-py').inputValue()).not.toBe('speedKms');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+});
