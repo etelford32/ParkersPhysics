@@ -22,6 +22,26 @@
  *      the disk leaves the frame → scene darkens → exposure comes up;
  *      flare → scene brightens → exposure drops and the flash reads as
  *      bloom + a soft roll-off instead of a uniform white-out).
+ *
+ *      A BRIGHTER FRAME IS NOT A BRIGHTER SUN (2026-11-22). A surface's
+ *      radiance does not depend on how far away the camera is, so the
+ *      exposure that is right for the disc at the hero framing is right
+ *      for it in a close-up. The frame MEAN is not invariant, though: the
+ *      hero frame is mostly black sky, a close-up is all disc, and the
+ *      log-mean rises ~2.5 EV between them. Read as "the scene got
+ *      brighter", that pinned every close-up of the disc at the −2 EV
+ *      floor — a quarter of its exposure — for as long as the camera
+ *      stayed there (measured with no flare on the page at all: 304 Å,
+ *      d = 2.16 R☉, L 0.0127 → 0.0721, target −2.5 EV). It read as "the
+ *      disc goes dark during a flare" only because the flare shot is the
+ *      close-up most visitors see. So the controller ACCOMMODATES: the part
+ *      of a brighter-than-calibrated frame that has been there a while is
+ *      the framing's, and only the part that has just appeared is stopped
+ *      down. While the camera moves (the caller says so) it accommodates
+ *      at once; while it is still, over `tauAccommodateStill` — so a flash
+ *      still snaps the iris shut, and then it reopens. The DARK side is
+ *      untouched: a frame darker than calibrated (a flight inside the
+ *      corona) opens up and stays open, as before.
  *   3. COMPOSITE: exposure × (scene + bloom·strength), a soft shoulder above
  *      1.0 (continuous in value AND slope at 1.0), optional LENS effects
  *      (4 mirrored ghosts of the bloom, ≤1.5 px chromatic aberration at the
@@ -65,13 +85,21 @@ export const EXPOSURE_DEFAULTS = Object.freeze({
     tauDarken: 0.5,     // s — a flare snaps the iris shut
     calibFrames: 20,    // frames of the default view averaged into L_calib
     minLum: 1e-5,
+    // Accommodation (see the header): how fast a brighter frame stops
+    // counting as a brighter Sun. `false` is the law shipped until
+    // 2026-11-22 and the gate's negative control.
+    accommodate: true,
+    tauAccommodateMoving: 0.25,   // s — the camera is moving: the change is the framing's
+    tauAccommodateStill: 6.0,     // s — the camera is still: a flash dips, then the iris reopens
 });
 
 /**
  * EV controller. Feed it the scene's mean log-luminance each measurement;
  * it locks a calibration luminance from the first `calibFrames` samples
  * (EV = 0 there), then tracks log2(L_calib / L) with asymmetric first-order
- * time constants. No ambient time — `step` takes dt.
+ * time constants — less, on the bright side, the part of the excess it has
+ * accommodated to (header: a brighter frame is not a brighter Sun). No
+ * ambient time — `step` takes dt.
  */
 export class ExposureController {
     constructor(opts = {}) {
@@ -83,28 +111,57 @@ export class ExposureController {
         this._calibN = 0;
         this.samples = 0;
         this.lastLum = null;
+        /** EV of brighter-than-calibrated frame the controller has accommodated to (≥ 0). */
+        this.accommodated = 0;
+        /** EV by which the frame is brighter (+) or darker (−) than the calibrated view. */
+        this.excess = 0;
     }
 
     /** Re-lock L_calib from the next `calibFrames` samples (e.g. after a scene change). */
-    recalibrate() { this.calibLum = null; this._calibSum = 0; this._calibN = 0; this.ev = 0; this.evTarget = 0; }
+    recalibrate() { this.calibLum = null; this._calibSum = 0; this._calibN = 0; this.ev = 0; this.evTarget = 0; this.accommodated = 0; this.excess = 0; }
 
     /**
      * @param {number} avgLogLum  mean of ln(luminance) over the frame
      * @param {number} dt         seconds since the previous step
+     * @param {object} [ctx]
+     * @param {boolean} [ctx.moving=false]    the FRAMING changed since the last step (camera, lens,
+     *                                        channel, a frame that just loaded): a change in the
+     *                                        mean is the framing's, and is accommodated at once
+     * @param {boolean} [ctx.calibrate=true]  this sample may count toward L_calib (the caller
+     *                                        passes false unless the default subject is in frame)
      * @returns {number} exposure multiplier (2^EV)
      */
-    step(avgLogLum, dt) {
+    step(avgLogLum, dt, { moving = false, calibrate = true } = {}) {
         if (!Number.isFinite(avgLogLum) || !Number.isFinite(dt)) return this.exposure;
         const L = Math.max(Math.exp(avgLogLum), this.p.minLum);
         this.lastLum = L;
         this.samples++;
         if (this.calibLum == null) {
+            // The lock describes ONE framing: samples taken while the camera
+            // moves are a mixture of two (on a slow renderer the 80 frames
+            // this takes span a whole flight, and the lock landed between the
+            // hero frame and a close-up — measured 0.0265 against 0.0127 and
+            // 0.0721), so motion restarts the count.
+            if (this.p.accommodate && moving) { this._calibSum = 0; this._calibN = 0; return this.exposure; }
+            if (!calibrate) return this.exposure;
             this._calibSum += Math.log(L);
             this._calibN++;
             if (this._calibN >= this.p.calibFrames) this.calibLum = Math.exp(this._calibSum / this._calibN);
             return this.exposure;                       // EV stays 0 while calibrating
         }
-        const target = clamp(Math.log2(this.calibLum / L), this.p.evMin, this.p.evMax);
+        const x = Math.log2(L / this.calibLum);         // + : brighter than the calibrated view
+        this.excess = x;
+        let want = -x;
+        if (this.p.accommodate) {
+            if (x <= 0) this.accommodated = 0;
+            else if (x < this.accommodated) this.accommodated = x;      // the excess fell: nothing to recover from
+            else {
+                const tauA = moving ? this.p.tauAccommodateMoving : this.p.tauAccommodateStill;
+                this.accommodated += (x - this.accommodated) * (1 - Math.exp(-Math.max(dt, 0) / tauA));
+            }
+            if (x > 0) want = -(x - this.accommodated);
+        }
+        const target = clamp(want, this.p.evMin, this.p.evMax);
         this.evTarget = target;
         const tau = target > this.ev ? this.p.tauBrighten : this.p.tauDarken;
         const a = 1 - Math.exp(-Math.max(dt, 0) / tau);
@@ -289,6 +346,9 @@ class FullScreenQuad {
     dispose() { this._mesh.geometry.dispose(); }
 }
 
+/** Luminance readbacks a reported framing change is held for (see the readback in `render`). */
+const MOVED_STEPS = 3;
+
 export class SunPostPass {
     /**
      * @param {object} THREE
@@ -321,6 +381,11 @@ export class SunPostPass {
         this.adaptEnabled = opts.adapt !== false;
         this.readbackEvery = opts.readbackEvery ?? 4;
         this.exposure = new ExposureController(opts.exposure);
+        /** Set by the page on any frame the FRAMING changed; consumed (and cleared) by the next exposure step. */
+        this.framingMoved = false;
+        /** May the exposure controller count this view toward its calibration? (the page: the whole disc is in frame) */
+        this.calibrateOK = true;
+        this._movedSteps = 0;
         this._frame = 0;
         this._lastT = null;
         this._strengthNow = this.bloomStrength;
@@ -396,7 +461,14 @@ export class SunPostPass {
                     const dt = this._lastT == null ? 1 / 60 : Math.min(0.5, (t - this._lastT) / 1000);
                     this._lastT = t;
                     this.lastAvgLogLum = this._lumPixel[0];
-                    this.exposure.step(this.lastAvgLogLum, dt);
+                    // A reported framing change covers at least MOVED_STEPS readbacks:
+                    // on a slow renderer the page's wall-clock motion tail can
+                    // expire between two of them, and one step is not enough to
+                    // absorb a jump cut.
+                    if (this.framingMoved) { this._movedSteps = MOVED_STEPS; this.framingMoved = false; }
+                    const moving = this._movedSteps > 0;
+                    if (moving) this._movedSteps--;
+                    this.exposure.step(this.lastAvgLogLum, dt, { moving, calibrate: this.calibrateOK });
                 } catch (_) { /* readback unsupported: exposure stays at its last value */ }
             }
         }
@@ -455,6 +527,7 @@ export class SunPostPass {
         return {
             ev: this.exposure.ev, evTarget: this.exposure.evTarget, exposure: this.exposure.exposure,
             calibrated: this.exposure.calibrated, avgLogLum: this.lastAvgLogLum,
+            excess: this.exposure.excess, accommodated: this.exposure.accommodated,
             bloomStrength: this._strengthNow, flareBoost: this._flareNow ?? 0, mips: this.mips.length, lens: this.lens,
             bloomEnabled: this.bloomEnabled, flareEnabled: this.flareEnabled,
         };

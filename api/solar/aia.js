@@ -43,6 +43,25 @@
  * degrades honestly: no candidate answers ⇒ no SUVI frame ⇒ the off-limb layer
  * stays on SDO and says so. It never invents a corona.
  *
+ * ── SOHO/LASCO channels (`channel=c2`, `channel=c3`) ───────────────────────
+ *
+ * The white-light coronagraphs js/sun-coronagraph.js draws beyond the EUV
+ * annulus (2.2–6 R☉ and 4–27 R☉). Upstream is SOHO's realtime browse frame,
+ * `soho.nascom.nasa.gov/data/realtime/<c2|c3>/<512|1024>/latest.jpg` — the same
+ * files the SDO Live drawer already loads as <img> sources, so the path is
+ * known; js/lasco-sources.js is the one copy of it. Three things differ from
+ * the SDO branch, each on purpose:
+ *   • `X-SOHO-Instrument` names the instrument. The client REQUIRES it: an
+ *     unknown channel on this route has always fallen back to the HMI disc, so
+ *     a deploy that predates c2/c3 would otherwise hand the coronagraph layer a
+ *     photosphere labelled `X-AIA-Channel: c2`.
+ *   • only 512 and 1024 exist; any other `res` is served as 1024.
+ *   • freshness is scored on LASCO's own thresholds (3 h / 24 h) — SOHO is a
+ *     1995 spacecraft on shared DSN time and its realtime frames are routinely
+ *     an hour or two behind; AIA's 30 / 90 min would paint it amber for ever.
+ * A 200 that is not an image is rejected (NASA's error page is HTML). `meta=1`
+ * never 5xxs: a dead upstream is `freshness: 'expired'` + `error`.
+ *
  * `meta=1` answers JSON instead of the image — `{ channel, observed_at,
  * fetched_at, age_seconds, freshness, mode }` from a HEAD against upstream —
  * so the status page can score this route (js/pipeline-registry.js
@@ -56,6 +75,9 @@ import { fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
 // (sun.html being one module) takes the WHOLE PAGE down as a boot timeout.
 // That scar is recorded in SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 3d.
 import { parseSuviChannel, candidateUrls, SUVI_CHANNELS } from '../../js/suvi-geometry.js';
+// Dependency-free on purpose (see its header): the edge bundle learns the
+// LASCO path without pulling in the coronagraph layer's kernel.
+import { parseLascoChannel, lascoUrl, lascoSize, lascoFreshness, LASCO_CACHE_S } from '../../js/lasco-sources.js';
 
 export const config = { runtime: 'edge' };
 
@@ -152,7 +174,83 @@ export default async function handler(req) {
     const wantMeta = url.searchParams.get('meta') === '1';
 
     const suviBand = parseSuviChannel(channel);
-    const upstream = suviBand ? null : upstreamUrl(channel, res);
+    const lasco    = parseLascoChannel(channel);
+    const upstream = (suviBand || lasco) ? null : upstreamUrl(channel, res);
+
+    // ── SOHO/LASCO branch ───────────────────────────────────────────────
+    if (lasco) {
+        const size = lascoSize(resReq);
+        const src  = lascoUrl(lasco, size);
+        const mode = historicalRequested ? 'live-fallback' : 'live';
+        if (wantMeta) {
+            const fetchedAt = Date.now();
+            let observedAt = null, error = null, upstreamStatus = null, type = null;
+            try {
+                const head = await fetchWithTimeout(src, { method: 'HEAD', timeoutMs: 9000 });
+                upstreamStatus = head.status;
+                type = head.headers.get('content-type') || null;
+                if (!head.ok) throw new Error(`upstream HTTP ${head.status}`);
+                if (!/^image\//i.test(type || '')) throw new Error('not_an_image');
+                observedAt = parseHttpDate(head.headers.get('last-modified'));
+            } catch (e) {
+                error = String(e?.message ?? e);
+            }
+            const ageS = observedAt != null ? Math.max(0, Math.round((fetchedAt - observedAt) / 1000)) : null;
+            return new Response(JSON.stringify({
+                source: 'soho-lasco', channel, instrument: lasco, res: size, upstream: src,
+                // Last-Modified is when NASA WROTE the file; the exposure time
+                // is burned into the frame's pixels and is not parsed here.
+                observed_at: observedAt != null ? new Date(observedAt).toISOString() : null,
+                observed_at_basis: 'upstream Last-Modified',
+                fetched_at: new Date(fetchedAt).toISOString(),
+                age_seconds: ageS,
+                // No Last-Modified on a good image answer is "age unknown",
+                // which cannot be called live.
+                freshness: error ? 'expired' : lascoFreshness(ageS ?? NaN),
+                mode,
+                ...(error ? { error: 'lasco_unavailable', detail: error, upstream_status: upstreamStatus, content_type: type } : {}),
+            }), {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': `public, s-maxage=${error ? 30 : 300}, stale-while-revalidate=60`,
+                    ...CORS_HEADERS,
+                },
+            });
+        }
+        try {
+            const up = await fetchWithTimeout(src, { timeoutMs: 9000, headers: { Accept: 'image/jpeg,image/*' } });
+            if (!up.ok) throw new Error(`upstream HTTP ${up.status}`);
+            const type = up.headers.get('content-type') || '';
+            // A 200 that is not an image is an error page, not a frame.
+            if (!/^image\//i.test(type)) throw new Error('not_an_image');
+            const buf = await up.arrayBuffer();
+            const observedAt = parseHttpDate(up.headers.get('last-modified'));
+            return new Response(buf, {
+                status: 200,
+                headers: {
+                    'Content-Type': type,
+                    'Cache-Control': `public, s-maxage=${LASCO_CACHE_S}, stale-while-revalidate=${SWR_S}`,
+                    'X-AIA-Channel': String(channel),
+                    'X-AIA-Mode': mode,
+                    'X-SOHO-Instrument': lasco,
+                    'X-SOHO-Upstream': src,
+                    ...(observedAt != null ? { 'X-SDO-Observed-At': new Date(observedAt).toISOString() } : {}),
+                    'X-SDO-Fetched-At': new Date().toISOString(),
+                    'Access-Control-Expose-Headers':
+                        'X-AIA-Channel, X-AIA-Mode, X-SDO-Observed-At, X-SDO-Fetched-At, X-SOHO-Instrument, X-SOHO-Upstream',
+                    ...CORS_HEADERS,
+                },
+            });
+        } catch (e) {
+            // Same contract as the SDO and SUVI image paths: no placeholder
+            // frame. The coronagraph layer draws nothing and says so.
+            return new Response(JSON.stringify({ error: 'lasco_unavailable', channel, instrument: lasco, detail: String(e?.message ?? e) }), {
+                status: 502,
+                headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=30', ...CORS_HEADERS },
+            });
+        }
+    }
 
     // ── GOES/SUVI branch ────────────────────────────────────────────────
     // `res` is accepted and IGNORED here: SWPC publishes one browse size per
