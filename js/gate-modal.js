@@ -104,6 +104,16 @@ export const GATE_VARIANTS = Object.freeze({
         finePrint:'No credit card. Free forever.',
         success:  "Locked in. Your outlook's ready.",
     },
+    'save-places': {
+        gateType: 'free',
+        eyebrow:  'Free account',
+        headline: 'Keep your places.',
+        body:     'A free account remembers the places you analyse and your search history, on every device you sign in on.',
+        primary:  { label: 'Remember my places — free', plan: 'free' },
+        secondary:{ label: 'Not now', kind: 'dismiss' },
+        finePrint:'No credit card. Free forever.',
+        success:  'Check your inbox to finish — your places are waiting for you.',
+    },
     'save-satellite': {
         gateType: 'free',
         eyebrow:  'Free account',

@@ -10,7 +10,17 @@
  *   · ONE LOCATION STORE. The site is the CURRENT VIEW (`ppx_user_location`,
  *     js/user-location.js); a search is a VISIT through lab-home.js `visit`,
  *     so the dashboard, EarthView and every other card follow the same place
- *     and "Return home" means the account's Home (plan §15.1).
+ *     and "Return home" means the account's Home (plan §15.1). The places a
+ *     reader has BEEN (history, saved) are a different thing — places.js /
+ *     places-store.js remember them and offer them back; they never decide
+ *     what the site is.
+ *   · THE SEARCH BOX ASKS THE NETWORK ONLY ON SUBMIT. Suggestions while
+ *     typing are places.js `suggest` (the reader's own places + the site's
+ *     city list); Nominatim's usage policy forbids type-ahead against it.
+ *   · REMEMBERING IS WHAT AN ACCOUNT IS FOR. Signed out, history lasts the
+ *     session and saving a place opens the sign-up gate; the line under the
+ *     chips says where the places are kept and never claims an account save
+ *     that has not landed (places-store `placesStatus`).
  *   · STABLE CONTROLS. The site search, range buttons and selects are built
  *     once in the HTML; data refreshes re-render the catalogue and panels
  *     only, so a half-typed query is never wiped (the verdict-card lesson).
@@ -46,7 +56,12 @@ import { exposurePaint, EXPOSURE_FULL_LOG2 } from './terrain.js';
 import { orographicPaint, formatW, OROGRAPHIC_FULL_MS } from './orographic.js';
 import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
 import { homeState, visit, sameLocation, cleanLoc } from '../climate-lab/lab-home.js';
-import { geocodeQuery } from '../user-location.js';
+import { geocodeCandidates, reverseGeocode } from '../user-location.js';
+import { suggest, parseCoordinates, formatCoords, savedPlaces, recentPlaces, isSaved, placeId } from './places.js';
+import {
+    openPlaces, placesDoc, placesStatus, rememberVisit, savePlace, forget, clearRecent, PLACES_EVENT,
+} from './places-store.js';
+import { MAJOR_CITIES } from '../data/major-cities.js';
 
 const WS_KEY = 'pp_climalytix_v1';
 const WS_EVENT = 'climalytix-workspace';
@@ -94,48 +109,267 @@ function resolveSite() {
     const lat = Number(p.get('lat')), lon = Number(p.get('lon'));
     if (p.has('lat') && p.has('lon') && Number.isFinite(lat) && Number.isFinite(lon)) {
         const c = visit({ lat, lon, city: p.get('name') || `${lat.toFixed(2)}, ${lon.toFixed(2)}` });
-        if (c) return { site: c, ...homeState({ auth: null }) };
+        if (c) return { site: c, fromUrl: true, ...homeState({ auth: null }) };
     }
     const st = homeState({ auth: null });
     return { site: st.view || st.home || null, ...st };
 }
 
+const atHome = (loc = S.site) => !!(S.home && loc && sameLocation(S.home, loc));
+
 function renderSiteBar() {
     const s = S.site;
     $('#cx-site-name').textContent = s ? (s.city || 'Unnamed site') : 'No site yet';
-    $('#cx-site-coords').textContent = s
-        ? `${Math.abs(s.lat).toFixed(3)}°${s.lat >= 0 ? 'N' : 'S'} ${Math.abs(s.lon).toFixed(3)}°${s.lon >= 0 ? 'E' : 'W'}`
-        : 'Search for a place to analyse';
-    const atHome = !!(S.home && s && sameLocation(S.home, s));
+    $('#cx-site-coords').textContent = s ? formatCoords(s.lat, s.lon) : 'Search for a place to analyse';
+    const home = atHome();
     const badge = $('#cx-site-badge');
     badge.hidden = !s;
-    badge.textContent = atHome ? 'HOME' : 'VISITING';
-    badge.dataset.kind = atHome ? 'home' : 'visit';
-    $('#cx-home-btn').hidden = !(S.home && s && !atHome);
+    badge.textContent = home ? 'HOME' : 'VISITING';
+    badge.dataset.kind = home ? 'home' : 'visit';
+    $('#cx-home-btn').hidden = !(S.home && s && !home);
+    renderPlaces();
+}
+
+/** The address bar names the site, so a visit can be shared or bookmarked. Home is the bare page. */
+function syncUrl() {
+    try {
+        const u = new URL(location.href);
+        for (const k of ['lat', 'lon', 'name']) u.searchParams.delete(k);
+        if (S.site && !atHome()) {
+            u.searchParams.set('lat', S.site.lat.toFixed(4));
+            u.searchParams.set('lon', S.site.lon.toFixed(4));
+            u.searchParams.set('name', S.site.city);
+        }
+        history.replaceState(history.state, '', u);
+    } catch {}
+}
+
+function note(action, meta = {}) {
+    import('../telemetry.js').then((m) => m.telemetry?.recordFeature?.('climalytix_places', action, meta)).catch(() => {});
+}
+
+/**
+ * The ONE way the site changes from this page's own controls.
+ * @param {object} loc   { lat, lon, city, detail? }
+ * @param {string} via   'search' | 'suggest:<kind>' | 'chip' | 'home' | 'locate' — telemetry only (never the query text)
+ */
+function goTo(loc, via) {
+    const c = visit(loc);
+    if (!c) return null;
+    S.site = c;
+    if (!atHome(c)) rememberVisit({ ...c, detail: loc.detail });
+    syncUrl();
+    renderSiteBar();
+    loadAll();
+    note('visit', { via });
+    return c;
+}
+
+// ── Search: suggestions without the network, the geocoder on submit ─────────
+
+const SG = { rows: [], active: -1, alts: [], undoId: null, busy: null };
+const GLYPH = { home: '⌂', saved: '★', recent: '↺', city: '◍', coords: '⌖', match: '◍' };
+const KIND = { home: 'Home', saved: 'Saved', recent: 'Recent', city: 'City', coords: 'Go to', match: 'Match' };
+
+function say(text, kind = 'warn') {
+    const msg = $('#cx-search-msg');
+    msg.textContent = text;
+    msg.dataset.kind = kind;
+}
+
+function renderSuggest({ open = true } = {}) {
+    const input = $('#cx-search'), list = $('#cx-suggest');
+    const q = input.value.trim();
+    const rows = SG.alts.length ? SG.alts.map((a) => ({ ...a, kind: 'match', id: placeId(a.lat, a.lon) }))
+        : suggest(q, { home: S.home, doc: placesDoc(), cities: MAJOR_CITIES, limit: 8 });
+    SG.rows = rows;
+    if (SG.active >= rows.length) SG.active = -1;
+    const show = open && rows.length > 0 && document.activeElement === input;
+    list.hidden = !show;
+    input.setAttribute('aria-expanded', String(show));
+    input.setAttribute('aria-activedescendant', show && SG.active >= 0 ? `cx-sg-${SG.active}` : '');
+    if (!show) return;
+    const head = SG.alts.length ? 'Other matches' : !q ? 'Your places' : '';
+    list.innerHTML = (head ? `<li class="cx-sg-head" role="presentation">${head}</li>` : '')
+        + rows.map((r, i) => `<li role="option" id="cx-sg-${i}" data-i="${i}" data-kind="${r.kind}" aria-selected="${i === SG.active}">`
+            + `<span class="cx-sg-glyph" aria-hidden="true">${GLYPH[r.kind]}</span>`
+            + `<span class="cx-sg-name">${esc(r.city)}${r.detail ? `<small>${esc(r.detail)}</small>` : ''}</span>`
+            + `<span class="cx-sg-kind">${KIND[r.kind]}</span></li>`).join('')
+        + (q && !SG.alts.length ? `<li class="cx-sg-head" role="presentation">Press Enter to search everywhere for “${esc(q)}”</li>` : '');
+    if (SG.active >= 0) list.querySelector(`#cx-sg-${SG.active}`)?.scrollIntoView({ block: 'nearest' });
+}
+
+function closeSuggest() {
+    SG.active = -1;
+    renderSuggest({ open: false });
+}
+
+function choose(i) {
+    const r = SG.rows[i];
+    if (!r) return;
+    // Picking another match of the same query: the first guess was wrong, so it is not history.
+    if (r.kind === 'match' && SG.undoId && SG.undoId !== r.id) forget(SG.undoId);
+    SG.alts = []; SG.undoId = null;
+    $('#cx-search').value = '';
+    say('');
+    closeSuggest();
+    goTo(r, `suggest:${r.kind}`);
 }
 
 async function onSearch(ev) {
     ev.preventDefault();
-    const q = $('#cx-search').value.trim();
+    if (SG.active >= 0 && SG.rows[SG.active]) return choose(SG.active);
+    const input = $('#cx-search');
+    const q = input.value.trim();
     if (!q) return;
-    const msg = $('#cx-search-msg');
-    msg.textContent = 'Searching…';
-    try {
-        const r = await geocodeQuery(q);
-        S.site = visit({ ...r, city: r.city });
-        msg.textContent = '';
-        renderSiteBar();
-        loadAll();
-    } catch (e) {
-        msg.textContent = e?.message || 'Search failed';
+    SG.alts = []; SG.undoId = null;
+    const xy = parseCoordinates(q);
+    if (xy) {
+        input.value = '';
+        say('');
+        closeSuggest();
+        goTo({ ...xy, city: formatCoords(xy.lat, xy.lon) }, 'coords');
+        return;
     }
+    SG.busy?.abort();
+    const busy = SG.busy = new AbortController();
+    say('Searching…', 'info');
+    try {
+        const found = await geocodeCandidates(q, { limit: 5, signal: busy.signal });
+        if (busy.signal.aborted) return;
+        const [best, ...rest] = found;
+        const known = placesDoc().places.some((p) => p.id === placeId(best.lat, best.lon));
+        goTo(best, 'search');
+        input.value = '';
+        SG.alts = rest;
+        SG.undoId = rest.length && !known ? placeId(best.lat, best.lon) : null;
+        input.focus();
+        say(rest.length ? `Showing ${best.city}${best.detail ? `, ${best.detail}` : ''} — ${rest.length} other match${rest.length > 1 ? 'es' : ''} below.` : '', 'info');
+        renderSuggest();
+    } catch (e) {
+        if (busy.signal.aborted) return;
+        say(e?.message || 'Search failed');
+    }
+}
+
+function onSearchKey(ev) {
+    const n = SG.rows.length;
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        if (!n) return;
+        ev.preventDefault();
+        const d = ev.key === 'ArrowDown' ? 1 : -1;
+        // −1 (the typed text) … n−1, cyclic.
+        SG.active = ((SG.active + 1 + d + (n + 1)) % (n + 1)) - 1;
+        renderSuggest();
+    } else if (ev.key === 'Escape') {
+        if (!$('#cx-suggest').hidden) { ev.preventDefault(); SG.alts = []; closeSuggest(); }
+        else ev.target.blur();
+    }
+}
+
+function locateMe() {
+    if (!navigator.geolocation) { say('This browser cannot share a position — search for a place instead.'); return; }
+    say('Asking your browser where you are…', 'info');
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+        let loc = { lat, lon, city: formatCoords(lat, lon) };
+        try { loc = { ...(await reverseGeocode(lat, lon)), lat, lon }; } catch {}
+        say('');
+        goTo(loc, 'locate');
+    }, (err) => {
+        say(err?.code === 1 ? 'Position not shared — search for a place instead.' : 'Could not get a position — search for a place instead.');
+    }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
+}
+
+// ── Saved places + history ──────────────────────────────────────────────────
+
+const RECENT_CHIPS = 6;
+
+function renderPlaces() {
+    const doc = placesDoc(), st = placesStatus();
+    const s = S.site;
+    const save = $('#cx-save-btn');
+    const saved = !!(s && isSaved(doc, s));
+    save.hidden = !s || atHome();
+    save.setAttribute('aria-pressed', String(saved));
+    save.textContent = saved ? '★ Saved' : '☆ Save place';
+    save.title = saved ? 'Remove from your saved places' : st.scope === 'account' ? 'Keep this place in your account' : 'Keep this place — free account';
+
+    const here = s ? placeId(s.lat, s.lon) : '';
+    const chip = (p, kind) => `<span class="cx-place" data-kind="${kind}" data-id="${p.id}"${p.id === here ? ' data-here="1"' : ''}>`
+        + `<button type="button" class="cx-pl-go" title="${esc(p.detail ? `${p.city} — ${p.detail}` : p.city)}">${esc(p.city)}</button>`
+        + `<button type="button" class="cx-pl-x" aria-label="${kind === 'saved' ? 'Remove from saved' : 'Remove from history'}: ${esc(p.city)}">×</button></span>`;
+    const pins = savedPlaces(doc);
+    const recent = recentPlaces(doc).filter((p) => !atHome(p)).slice(0, RECENT_CHIPS);
+    const host = $('#cx-places');
+    host.hidden = !pins.length && !recent.length;
+    host.innerHTML = (pins.length ? `<span class="cx-pl-h">Saved</span>${pins.map((p) => chip(p, 'saved')).join('')}` : '')
+        + (recent.length ? `<span class="cx-pl-h">Recent</span>${recent.map((p) => chip(p, 'recent')).join('')}`
+            + '<button type="button" id="cx-places-clear">Clear history</button>' : '');
+
+    const gate = $('#cx-places-gate');
+    const n = pins.length + recentPlaces(doc).length;
+    gate.hidden = false;
+    gate.dataset.kept = st.kept;
+    if (st.scope === 'session') {
+        gate.innerHTML = (n ? `${n} place${n > 1 ? 's' : ''} kept for this session only. ` : 'Climalytix can remember the places you analyse. ')
+            + '<button type="button" data-gate="signup">Sign up free</button> to save places and keep your history on every device'
+            + ' — or <a href="signin.html?next=%2Fclimalytix.html">sign in</a>.';
+    } else if (st.scope === 'pending') {
+        gate.textContent = 'Check your inbox to finish signing up — your places are kept on this device and move into your account when you sign in.';
+    } else if (st.kept === 'account') {
+        gate.textContent = st.adopted
+            ? `Saved places and history are kept in your account — ${st.adopted} place${st.adopted > 1 ? 's' : ''} from before you signed in ${st.adopted > 1 ? 'were' : 'was'} added.`
+            : 'Saved places and history are kept in your account.';
+        gate.hidden = !n && !st.adopted;
+    } else {
+        gate.textContent = st.syncState === 'error' || st.syncState === 'migration-pending' || (st.syncState || '').startsWith('off')
+            ? 'Saved places and history are kept on this device — account sync is unavailable right now.'
+            : 'Saved places and history are kept on this device; syncing to your account…';
+        gate.hidden = !n;
+    }
+}
+
+async function openPlacesGate(reason) {
+    note('gate', { reason });
+    try {
+        const { openGate } = await import('../gate-modal.js');
+        const opened = openGate('save-places', {
+            next: '/climalytix.html',
+            onUnlock() {
+                openPlaces();                                   // → the "pending" store, which survives the magic-link hop
+                if (reason === 'save' && S.site) savePlace(S.site, true);
+            },
+        });
+        if (opened) return;
+    } catch {}
+    location.href = 'signup.html?next=%2Fclimalytix.html';     // the gate failed open: the plain sign-up page still works
+}
+
+function toggleSave() {
+    if (!S.site) return;
+    const saved = isSaved(placesDoc(), S.site);
+    if (!saved && placesStatus().scope === 'session') { openPlacesGate('save'); return; }
+    savePlace(S.site, !saved);
+    note(saved ? 'unsave' : 'save');
+}
+
+function onPlacesClick(ev) {
+    if (ev.target.id === 'cx-places-clear') { clearRecent(); note('clear'); return; }
+    const el = ev.target.closest('.cx-place');
+    if (!el) return;
+    const p = placesDoc().places.find((x) => x.id === el.dataset.id);
+    if (!p) return;
+    if (ev.target.classList.contains('cx-pl-x')) {
+        if (el.dataset.kind === 'saved') savePlace(p, false); else forget(p.id);
+        return;
+    }
+    goTo(p, 'chip');
 }
 
 function goHome() {
     if (!S.home) return;
-    S.site = visit(S.home);
-    renderSiteBar();
-    loadAll();
+    goTo(S.home, 'home');
 }
 
 // ── Loading ─────────────────────────────────────────────────────────────────
@@ -1188,7 +1422,7 @@ function renderPanels() {
     banner.hidden = !allDown && !!S.site;
     if (!S.site) {
         banner.dataset.kind = 'info';
-        banner.textContent = 'Pick a site to begin — search a city, a zip code or coordinates above. Signed-in users start at their account Home.';
+        banner.textContent = 'Pick a site to begin — search a city, a zip code, an address or coordinates above (press / to jump to the search box). Signed-in users start at their account Home.';
     } else if (allDown) {
         banner.dataset.kind = 'down';
         banner.textContent = 'Every data feed is down right now. Nothing is drawn because there is nothing to draw — this is an outage, not a quiet day.';
@@ -1310,6 +1544,31 @@ function renderControls() {
 function wireControls() {
     $('#cx-search-form').addEventListener('submit', onSearch);
     $('#cx-home-btn').addEventListener('click', goHome);
+    const search = $('#cx-search');
+    search.addEventListener('input', () => { SG.alts = []; SG.active = -1; say(''); renderSuggest(); });
+    search.addEventListener('focus', () => renderSuggest());
+    search.addEventListener('blur', () => closeSuggest());
+    search.addEventListener('keydown', onSearchKey);
+    // pointerdown, not click: the list closes on blur, and preventDefault keeps the focus in the box.
+    $('#cx-suggest').addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        const li = ev.target.closest('li[data-i]');
+        if (li) choose(Number(li.dataset.i));
+    });
+    $('#cx-locate').addEventListener('click', locateMe);
+    $('#cx-save-btn').addEventListener('click', toggleSave);
+    $('#cx-places').addEventListener('click', onPlacesClick);
+    $('#cx-places-gate').addEventListener('click', (ev) => { if (ev.target.dataset.gate) openPlacesGate('line'); });
+    window.addEventListener(PLACES_EVENT, () => { renderPlaces(); if (!$('#cx-suggest').hidden) renderSuggest(); });
+    window.addEventListener('auth-changed', () => { openPlaces(); S.home = homeState({ auth: null }).home; renderSiteBar(); });
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+        const t = ev.target;
+        if (t?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName || '')) return;
+        ev.preventDefault();
+        search.focus();
+        search.select();
+    });
     $('#cx-catalog-list').addEventListener('change', onCatalogChange);
     for (const b of document.querySelectorAll('[data-range]')) {
         if (!RANGE_IDS.includes(b.dataset.range)) continue;
@@ -1339,6 +1598,7 @@ function wireControls() {
         const c = cleanLoc(ev.detail);
         if (c && S.site && !sameLocation(c, S.site)) {
             S.site = c;
+            syncUrl();
             renderSiteBar();
             loadAll();
         }
@@ -1375,6 +1635,8 @@ export function boot() {
     const r = resolveSite();
     S.site = r.site;
     S.home = r.home;
+    openPlaces();
+    if (r.fromUrl && r.site && !atHome(r.site)) rememberVisit(r.site);   // a shared link is a visit too
     wireControls();
     renderControls();
     renderSiteBar();
@@ -1387,6 +1649,7 @@ export function boot() {
         get state() {
             return {
                 site: S.site,
+                places: { ...placesStatus(), saved: savedPlaces(placesDoc()).map((p) => p.city), recent: recentPlaces(placesDoc()).map((p) => p.city) },
                 utcOffsetS: S.utcOffsetS,
                 workspace: S.ws,
                 datasets: Object.fromEntries([...S.results].map(([k, v]) => [k, { state: v.state, series: v.series.map((s) => s.id) }])),

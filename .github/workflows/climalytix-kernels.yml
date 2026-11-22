@@ -60,6 +60,11 @@
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
+#   climalytix-places.mjs    the location search: history + saved places as ONE
+#                            mergeable document (commutative, idempotent; an
+#                            unstamped delete and last-write-wins are the
+#                            NEGATIVE CONTROLS), typed coordinates, network-free
+#                            suggestions, geocoder on submit only (source-gated)
 #   climalytix-layer-state.mjs  what the Temperature controls may claim: archive
 #                            down ⇒ ticked but sub-toggles / slider / key off,
 #                            a notice + Retry; off is never a failure
@@ -84,6 +89,8 @@ on:
       - 'js/climate-lab/**'
       - 'js/earth-detail-inset.js'
       - 'js/temp-ramp.js'
+      - 'js/user-location.js'
+      - 'js/data/major-cities.js'
       - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
@@ -100,6 +107,8 @@ on:
       - 'js/climate-lab/**'
       - 'js/earth-detail-inset.js'
       - 'js/temp-ramp.js'
+      - 'js/user-location.js'
+      - 'js/data/major-cities.js'
       - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
@@ -129,6 +138,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: location search — places document, merge, suggestions
+        run: node tests/climalytix-places.mjs
       - name: SiteSeries store + resampler
         run: node tests/climalytix-series.mjs
       - name: catalogue + adapters + workspace
