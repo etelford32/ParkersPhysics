@@ -156,7 +156,7 @@ test.describe('homepage launchpad', () => {
         expect(await page.locator('[data-lp-stats] .lp-stat').count()).toBe(4);
     });
 
-    test('fits the first screen at 1440×900; no sideways scroll on a phone; light theme', async ({ page }) => {
+    test('fits the first screen at 1440×900; no sideways scroll on a phone; light cells with dark text', async ({ page }) => {
         await offline(page);
         await page.setViewportSize({ width: 1440, height: 900 });
         await boot(page);
@@ -178,15 +178,51 @@ test.describe('homepage launchpad', () => {
         }));
         expect(phone.sw).toBeLessThanOrEqual(390);
         expect(phone.over).toBe(0);
+        // LIGHT MODE: the cells are light cards with dark text (owner request) —
+        // not white type on a dark plate. Measured as contrast against each
+        // text's OWN backdrop, with dark mode as the negative control.
+        const cells = () => page.evaluate(() => {
+            const lum = (c) => { const m = c.match(/[\d.]+/g).map(Number); const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]); };
+            const cs = (sel) => getComputedStyle(document.querySelector(sel));
+            const slideBody = document.querySelector('.lp-slide.lp-active .lp-slide-body').getBoundingClientRect();
+            const media = document.querySelector('.lp-slide.lp-active .lp-media').getBoundingClientRect();
+            const tile = document.querySelector('.lp-fix[data-lp-fixture="earth"]');
+            const img = tile.querySelector('img').getBoundingClientRect(), body = tile.querySelector('.lp-fix-body b').getBoundingClientRect();
+            return {
+                heroBg: cs('#hero').backgroundImage, panel: cs('.lp-panel').backgroundColor,
+                slideBg: lum(cs('.lp-slide.lp-active .lp-slide-body').backgroundColor || 'rgb(0,0,0)'),
+                slideBgAlpha: cs('.lp-slide.lp-active .lp-slide-body').backgroundColor,
+                slideText: [cs('.lp-slide.lp-active .lp-slide-sim').color, cs('.lp-slide.lp-active .lp-slide-title').color, cs('.lp-slide.lp-active .lp-slide-sum').color].map(lum),
+                tileBg: lum(cs('.lp-fix').backgroundColor), tileText: [cs('.lp-fix-body b').color, cs('.lp-fix-live').color].map(lum),
+                copyBelowPicture: slideBody.top >= media.bottom - 1,          // the copy is not laid over the photograph
+                tileCopyBesidePicture: body.left >= img.right - 1 || body.top >= img.bottom - 1,
+                scrim: getComputedStyle(document.querySelector('.lp-slide.lp-active'), '::after').display,
+            };
+        });
+        const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
         await boot(page, '/index.html?debug=1&theme=light&exp_home_title=control');
-        const light = await page.evaluate(() => ({
-            bg: getComputedStyle(document.getElementById('hero')).backgroundImage,
-            panel: getComputedStyle(document.querySelector('.lp-panel')).backgroundColor,
-            sim: getComputedStyle(document.querySelector('.lp-slide-sim')).color,
-        }));
-        expect(light.bg).toMatch(/rgb\(246, 249, 254\)/);
+        const light = await cells();
+        expect(light.heroBg).toMatch(/rgb\(246, 249, 254\)/);
         expect(light.panel).toBe('rgb(255, 255, 255)');
-        expect(light.sim).toBe('rgb(255, 255, 255)');     // type on a slide stays white: it sits on a dark photograph
+        expect(light.slideBg).toBeGreaterThan(0.9);                 // a light cell…
+        expect(light.tileBg).toBeGreaterThan(0.9);
+        for (const t of light.slideText) { expect(t).toBeLessThan(0.2); expect(ratio(t, light.slideBg)).toBeGreaterThanOrEqual(4.5); }   // …with dark, AA text
+        for (const t of light.tileText)  { expect(t).toBeLessThan(0.2); expect(ratio(t, light.tileBg)).toBeGreaterThanOrEqual(4.5); }
+        expect(light.copyBelowPicture).toBe(true);
+        expect(light.tileCopyBesidePicture).toBe(true);
+        expect(light.scrim).toBe('none');
+        // NEGATIVE CONTROL: dark mode keeps white type over the photograph.
+        await boot(page, '/index.html?debug=1&theme=dark&exp_home_title=control');
+        const dark = await cells();
+        for (const t of dark.slideText) expect(t).toBeGreaterThan(0.6);
+        expect(dark.copyBelowPicture).toBe(false);
+        expect(dark.scrim).not.toBe('none');
+        // Phone, light: still no sideways scroll, tiles keep dark-on-light.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await boot(page, '/index.html?debug=1&theme=light&exp_home_title=control');
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+        const ph = await cells();
+        expect(ph.tileCopyBesidePicture).toBe(true);
     });
 
     test('home_title: each arm shows its own copy, no arm flashes another, exposure is recorded once', async ({ page }) => {

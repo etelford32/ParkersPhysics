@@ -108,9 +108,11 @@ img{display:block}
    screen is ~250 KB of thumbnails (scripts/build-launchpad-thumbs.py).
    The section keeps id="hero" — the CTA rail's IntersectionObserver and the
    funnel's vocabulary both mean "the first screen" by it.
-   Text INSIDE a slide or tile is white in both themes: it sits on a
-   photograph of a dark scene under a dark scrim. Everything outside them
-   uses the tokens, which js/theme-light.css remaps. */
+   In DARK mode the text of a slide or tile sits ON its photograph under a
+   dark scrim. In LIGHT mode (see the light-theme block) the cells are light
+   cards with dark text and the photograph is a framed picture inside them —
+   white type on a dark plate in the middle of a white page read as a hole.
+   Everything outside the cells uses the tokens js/theme-light.css remaps. */
 #hero{position:relative;overflow:hidden;padding:34px 24px 34px;background:
   radial-gradient(ellipse 60% 55% at 78% 22%,rgba(91,30,255,.18),transparent 65%),
   radial-gradient(ellipse 50% 45% at 8% 86%,rgba(255,31,156,.07),transparent 70%),
@@ -499,9 +501,13 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
 }
 
 /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
-/* THE LAUNCHPAD IN DAYLIGHT (2026-11-22): the section is white and blue; the
-   slides and tiles are photographs of dark scenes and keep their dark scrim
-   and white type (see the LAUNCHPAD note above), framed in a blue hairline. */
+/* THE LAUNCHPAD IN DAYLIGHT (2026-11-22): the section is white and blue, and
+   so are its CELLS (owner request). A slide is a light card: the photograph
+   on top, the copy below it in navy on white. A tile is a light card with the
+   photograph as a picture on its left. The photographs themselves stay as
+   captured (they are dark scenes); only the chips that sit ON a photograph
+   (Real time, the slide counter) keep their dark backing. The section
+   accent --lp-acc is a neon picked for dark and is NOT used for text here. */
 html.theme-light #hero{background:
   radial-gradient(ellipse 70% 55% at 76% 20%,rgba(21,96,212,.12),transparent 70%),
   linear-gradient(180deg,#f6f9fe 0%,#ffffff 100%)}
@@ -521,8 +527,49 @@ html.theme-light #hero .hero-badge{background:var(--pl-blue-soft);border-color:r
 html.theme-light #hero .hero-cta-note{color:var(--pl-text-4)}
 html.theme-light .lp-col-h h2{color:var(--pl-blue-deep)}
 html.theme-light .lp-col-h a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
-html.theme-light .lp-recent,html.theme-light .lp-fix{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .lp-recent,html.theme-light .lp-fix{border-color:var(--pl-border);box-shadow:var(--pl-shadow);background:var(--pl-card)}
+/* — slide: picture above, light copy panel below — */
+html.theme-light .lp-recent::after{opacity:.35;filter:hue-rotate(35deg) saturate(2) brightness(.6)}
+html.theme-light .lp-slide{display:flex;flex-direction:column;color:var(--pl-text-2);background:var(--pl-card)}
+html.theme-light .lp-slide::after{display:none}
+html.theme-light .lp-slide .lp-media{position:relative;inset:auto;flex:1 1 0;min-height:0}
+html.theme-light .lp-slide-body{position:relative;padding:14px 24px 46px;background:var(--pl-card);border-top:1px solid var(--pl-border)}
+html.theme-light .lp-chip{color:var(--pl-text-3);background:var(--pl-bg-soft);border-color:var(--pl-border);backdrop-filter:none}
+html.theme-light .lp-chip-kind{color:var(--pl-blue-deep);background:var(--pl-blue-soft);border-color:rgba(21,96,212,.32)}
+html.theme-light .lp-chip-new{color:#fff;background:var(--pl-ok);border-color:var(--pl-ok)}
+html.theme-light .lp-slide-sim{color:var(--pl-text-1);text-shadow:none}
+html.theme-light .lp-slide-title{color:var(--pl-text-1)}
+html.theme-light .lp-slide-sum{color:var(--pl-text-3)}
+html.theme-light .lp-slide-hl{color:var(--pl-text-4)}
+html.theme-light .lp-slide-hl::before{background:var(--pl-blue)}
+html.theme-light .lp-changed{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.4)}
+html.theme-light .lp-changed:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue-deep)}
+html.theme-light .lp-arrow{background:var(--pl-card);border-color:var(--pl-border-strong);color:var(--pl-text-1);backdrop-filter:none}
+html.theme-light .lp-arrow:hover{background:var(--pl-blue-soft);border-color:var(--pl-blue)}
+html.theme-light .lp-dot::before{background:rgba(11,31,58,.2)}
+html.theme-light .lp-dot[aria-current="true"]::before{background:var(--pl-blue)}
+html.theme-light .lp-plate{color:var(--pl-blue);background:radial-gradient(ellipse 70% 80% at 70% 30%,rgba(21,96,212,.14),transparent 70%),linear-gradient(160deg,#eaf2fe,#f8fbff)}
+html.theme-light .lp-plate svg{filter:none;opacity:.7}
+/* — tile: picture left, light copy right — */
+html.theme-light .lp-fix{color:var(--pl-text-2)}
+html.theme-light .lp-fix::after{display:none}
+html.theme-light .lp-fix>img,html.theme-light .lp-fix .lp-plate{right:auto;width:38%}
+html.theme-light .lp-fix .lp-plate svg{transform:none;width:44px}
+html.theme-light .lp-fix-body{margin-left:38%;padding:12px 14px}
+html.theme-light .lp-fix-body b{color:var(--pl-text-1)}
+html.theme-light .lp-fix-live{color:var(--pl-text-3);-webkit-line-clamp:3}
+html.theme-light .lp-fix-latest{color:var(--pl-blue-deep)}
+html.theme-light .lp-tier{color:var(--pl-ok);background:var(--pl-card);border-color:rgba(13,122,69,.4)}
+@media(max-width:560px){
+  /* a 170 px tile has no room for a side picture: it becomes a band on top */
+  html.theme-light .lp-fix>img,html.theme-light .lp-fix .lp-plate{width:100%;height:58px;bottom:auto}
+  html.theme-light .lp-fix{justify-content:flex-start}
+  html.theme-light .lp-fix-body{margin-left:0;padding:66px 10px 10px}
+  html.theme-light .lp-tier{top:36px}
+  html.theme-light .lp-slide-body{padding:12px 16px 42px}
+}
 html.theme-light .lp-fix:hover{border-color:var(--pl-blue);box-shadow:0 0 0 1px var(--pl-blue),var(--pl-shadow-hover)}
+html.theme-light .lp-live{color:#fff;background:rgba(4,12,28,.72)}
 html.theme-light .lp-open{background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 45%,#1560d4 100%);box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -2px 0 rgba(8,52,128,.75) inset,0 4px 0 #0b3f8f,0 10px 22px rgba(2,0,10,.4)}
 html.theme-light .lp-panel{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
 html.theme-light .lp-log a{color:var(--pl-text-2)}
