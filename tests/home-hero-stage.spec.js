@@ -35,7 +35,7 @@ import { test, expect } from '@playwright/test';
 import { synthOvation } from './fixtures/ovation-synthetic.mjs';
 import { synthRegions, synthBus } from './fixtures/sun-outlook-synthetic.mjs';
 
-const URL = '/index.html?exp_home_bg_carousel=control&debug=1';
+const URL = '/live-sky.html?exp_home_bg_carousel=control&debug=1';
 
 async function boot(page) {
     await page.goto(URL, { waitUntil: 'domcontentloaded' });

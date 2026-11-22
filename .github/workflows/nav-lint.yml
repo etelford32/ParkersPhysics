@@ -86,3 +86,10 @@ jobs:
       # silently lag the log.
       - name: build log page + feed are in sync
         run: node scripts/build-recent-development.mjs --check
+
+      # The homepage's first screen is a launchpad DERIVED from the build log
+      # (js/home-launchpad-model.js): the carousel follows the log, the six
+      # permanent tiles are static markup pinned to the catalogue, and the
+      # thumbnails must match the showcase manifest.
+      - name: homepage launchpad gate
+        run: node tests/home-launchpad.mjs

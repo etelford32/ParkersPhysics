@@ -28,7 +28,7 @@ import { test, expect } from '@playwright/test';
 // tab click and ~20 s per hover (measured in a trace, 2026-09-21).
 test.use({ timezoneId: 'UTC', reducedMotion: 'reduce' });
 
-const URL = '/index.html?exp_home_bg_carousel=control';
+const URL = '/live-sky.html?exp_home_bg_carousel=control';
 const pad = (n) => String(n).padStart(2, '0');
 const isoDay = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 const utcMidnight = (d) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());

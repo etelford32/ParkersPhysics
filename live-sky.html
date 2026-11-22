@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html data-theme-support="light" lang="en">
+<head>
+<meta charset="UTF-8">
+<script type="importmap">
+{"imports":{
+    "three": "/js/vendor/three-0.160.0/three.module.js",
+    "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+}}
+</script>
+<!-- perf-hints:start -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
+<link rel="modulepreload" href="/js/swpc-feed.js">
+<!-- perf-hints:end -->
+<!-- Hero boot (2026-09-23): the live magnetosphere's module graph, fetched
+     while the HTML parses. The PAGE WIRING module imports it first thing
+     (in parallel with the console), so without these the browser only
+     discovered three levels of it one round trip at a time. Kept OUT of the
+     perf-hints block, which scripts/perf_hints.py owns. -->
+<link rel="modulepreload" href="/js/hero-space-weather.js">
+<link rel="modulepreload" href="/js/magnetosphere-engine.js">
+<link rel="modulepreload" href="/js/hero-earth.js">
+<link rel="modulepreload" href="/js/sun-altitude.js">
+<link rel="modulepreload" href="/js/geo/coords.glsl.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/UnrealBloomPass.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/Pass.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/CopyShader.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/LuminosityHighPassShader.js">
+<!-- The Earth's boot-tier maps (assets/earth, ~115 KB — js/hero-earth.js
+     TEXTURE_TIERS.boot; the entrance waits on them, capped). `crossorigin`
+     because three's TextureLoader requests in CORS mode and a preload is
+     only reused on a matching mode; `media` because a reduced-motion visitor
+     never gets the scene and should not pay for its maps. -->
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/day-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/water-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/lights-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/relief-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Live Sky Console — Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/live-sky.html">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/live-sky.html">
+<meta property="og:image:alt" content="Parkers Physics — live space weather simulations">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Parkers Physics — Watch Space Weather Happen. Live.">
+<meta name="twitter:description" content="Your sky's space-weather risks, live: aurora odds for your location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data. Free to start.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/index.jpg">
+
+<meta name="description" content="Your sky's space-weather risks, live: aurora odds for your exact location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data, validated against the May 2024 Gannon G5 superstorm.">
+<meta name="theme-color" content="#03010e">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Parkers Physics">
+<meta property="og:title" content="Parkers Physics — Watch Space Weather Happen. Live.">
+<meta property="og:description" content="Your sky's space-weather risks, live: aurora odds for your location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data. Free to start.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/index.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ── Parkers Physics design tokens ──────────────────────────────────────── */
+:root{
+  /* Type */
+  --font-display:'Orbitron','Segoe UI',system-ui,sans-serif;
+  --font-sans:'Space Grotesk','Segoe UI',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --tracking-cyber:.18em;
+  /* Voids */
+  --black-void:#02000a;--black-deeper:#050010;--black-panel:#07021a;
+  --black-elev-1:#0d0626;--black-elev-2:#150a35;
+  /* Cosmic palette */
+  --indigo-500:#3b1eff;--indigo-400:#6a48ff;--indigo-300:#9a85ff;
+  --uv-700:#5500b3;--uv-600:#7b00ee;--uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
+  --pink-600:#e60088;--pink-500:#ff1f9c;--pink-400:#ff5cb8;
+  --lightning-pure:#ffffff;--lightning-bolt:#f5f8ff;
+  --lightning-arc:#8ff0ff;--lightning-spark:#4ddbff;--lightning-deep:#1f8fff;
+  /* Status */
+  --status-ok:#2eff9e;--status-warn:#ffd23f;--status-danger:#ff3050;--status-alert:#ff1f9c;
+  /* Foreground ramp */
+  --fg-1:#f5f0ff;--fg-2:#cdc4f0;--fg-3:#9d92c8;--fg-4:#6f6695;--fg-5:#48426e;--fg-6:#38335a;
+  /* Signature gradients */
+  --grad-uv:linear-gradient(135deg,#3b1eff,#9d3aff);
+  --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
+  --grad-spectrum:linear-gradient(135deg,#3b1eff,#9d3aff,#ff1f9c);
+  --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
+  /* Glows */
+  --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
+  --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
+  --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+/* The ROOT carries the page colour too, so nothing can paint the UA's white
+   root before <body>'s background applies (the page is dark end to end). */
+html{overflow-y:auto;scroll-behavior:smooth;background:#03010e;color-scheme:dark}
+body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);font-family:var(--font-sans)}
+a{text-decoration:none;color:inherit}
+img{display:block}
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
+
+/* ── HERO / SKY CONSOLE ──────────────────────────────────────────────────
+   The cinematic magnetosphere canvas stays as the section backdrop
+   (js/hero-space-weather.js — self-handles WebGL failure / reduced motion);
+   the console floats above it on opaque surfaces so the data stays
+   readable no matter how hot the bloom runs. */
+/* The layered radial gradients are the no-WebGL / reduced-motion echo of the
+   canvas' deep-field nebula (js/hero-space-weather.js NEBULA_FRAG) — the
+   hero reads "intergalactic" on the fallback path too, at zero cost. */
+#hero{position:relative;overflow:hidden;padding:38px 16px 46px;background:
+  radial-gradient(ellipse 60% 40% at 18% 22%,rgba(91,30,255,.22),transparent 70%),
+  radial-gradient(ellipse 50% 35% at 82% 70%,rgba(0,150,170,.16),transparent 70%),
+  radial-gradient(ellipse 35% 25% at 60% 15%,rgba(255,31,156,.10),transparent 70%),
+  radial-gradient(ellipse at 50% 30%,#071026 0%,#03010e 70%)}
+/* The canvas starts TRANSPARENT and crossfades in over the CSS backdrop when
+   the hero module has warmed its programs and put frames on it (`hero-live`,
+   set by js/hero-space-weather.js on its second frame). It used to CUT in — an
+   opaque WebGL frame replacing the CSS nebula in one repaint, after a
+   main-thread stall. If the module never arrives the canvas simply stays
+   invisible, which is the no-WebGL look. */
+#hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;
+  opacity:0;transition:opacity 1.6s cubic-bezier(.25,.6,.25,1)}
+#hero.hero-live #hero-canvas{opacity:1}
+#hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 40%,rgba(2,0,10,.5),rgba(2,0,10,.15) 75%)}
+.hero-inner{position:relative;z-index:1;max-width:1000px;margin:0 auto}
+/* ── THE STAGE (2026-09-20) ───────────────────────────────────────────────
+   #hero-stage is an EMPTY box that the canvas frames Earth into
+   (js/hero-space-weather.js `stage` option measures its rect every resize
+   and solves fov + look-at so Earth's disc fills ~60% of the box's short
+   side and nothing in the DOM sits over it). Before this the console was a
+   full-width 1000px block over the middle of the canvas and Earth was
+   pushed to the lower-right corner at ~85px radius, half under the Air
+   Quality card — the badge promised a live magnetosphere the visitor could
+   not see. Two layouts, ONE mechanism:
+     ≥1100px  split: copy + console in a 560px left column, the stage is the
+              right column spanning every row. The sunlit limb faces the copy
+              (the camera azimuth in the hero module puts the Sun screen-left).
+     <1100px  stacked: the stage is a short cinematic band between the copy
+              and the console, so phones still get an unobstructed Earth.
+   The legibility scrim goes LEFT-weighted on the split layout so it stops
+   dimming the one thing the layout exists to show. Do not put content in
+   #hero-stage; if it needs to be covered, that is a layout change, not a
+   z-index one. */
+#hero-stage{position:relative;height:250px;margin:18px 0 10px;pointer-events:none;container-type:size}
+/* ── BOOT RETICLE (2026-09-23) ────────────────────────────────────────────
+   The one exception to "nothing in #hero-stage": two pseudo-elements that
+   exist only while the scene boots and are GONE before Earth settles, so
+   they never cover it. `hero-booting` (set by the inline script under the
+   canvas, only where the hero will actually run) shows a lock-on reticle
+   exactly where Earth will land: centred on the stage, 1.14 × the resting
+   disc. Until the module loads that is a CSS guess — Earth's radius is
+   framed at 0.30 of the box's SHORT side → 30cqmin — and once it has
+   measured the stage the module publishes the real radius as
+   --hero-disc-r (larger on phones, where its fov clamp binds) and the ring
+   ranges out to it. The camera then pushes in and Earth grows into the
+   ring; on `hero-live` the ring swells and dissolves. Every
+   animation here is transform/opacity (individual `rotate`/`scale`
+   properties) so it runs on the COMPOSITOR and keeps turning through the
+   main-thread work of booting WebGL. */
+#hero-stage::before,#hero-stage::after{content:'';position:absolute;left:50%;top:50%;width:calc(var(--hero-disc-r,30cqmin) * 2.28);aspect-ratio:1;
+  translate:-50% -50%;border-radius:50%;opacity:0;pointer-events:none;transition:opacity .5s ease,width .8s cubic-bezier(.2,.7,.2,1)}
+#hero-stage::before{border:1px solid rgba(143,240,255,.26);
+  background:
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 50% 0/1px 9px no-repeat,
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 50% 100%/1px 9px no-repeat,
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 0 50%/9px 1px no-repeat,
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 100% 50%/9px 1px no-repeat,
+    radial-gradient(circle,rgba(20,60,140,.16) 0 58%,rgba(77,219,255,.07) 80%,transparent 88%);
+  box-shadow:0 0 28px rgba(77,219,255,.10);animation:hero-breathe 2.4s ease-in-out infinite}
+#hero-stage::after{width:calc(var(--hero-disc-r,30cqmin) * 2.28 + 14px);border:1.5px solid transparent;border-top-color:rgba(143,240,255,.85);
+  border-right-color:rgba(157,58,255,.35);filter:drop-shadow(0 0 5px rgba(77,219,255,.6));
+  animation:hero-scan 1.5s linear infinite}
+#hero.hero-booting #hero-stage::before,#hero.hero-booting #hero-stage::after{opacity:1}
+/* Lock-on: the ring holds while the camera pushes Earth into it, then swells
+   out and dissolves; the scanning arc stops being needed at once. */
+#hero.hero-live #hero-stage::before{opacity:0;scale:1.16;animation:none;
+  transition:opacity 1.2s ease 1.1s,scale 2.4s cubic-bezier(.2,.7,.2,1) .6s}
+#hero.hero-live #hero-stage::after{opacity:0;transition:opacity .45s ease}
+@keyframes hero-scan{to{rotate:360deg}}
+@keyframes hero-breathe{50%{scale:1.025}}
+
+/* ── ENTRANCE — the copy settles in while the scene boots ─────────────────
+   Opacity + `translate` only (compositor), short, and started at first paint
+   rather than on a JS signal, so it costs the headline nothing but a frame
+   of LCP. The console fades up when its module renders (initSkyConsole adds
+   .sky-console) — it used to pop in whole. */
+@keyframes hero-rise{from{opacity:0;translate:0 12px}to{opacity:1;translate:0 0}}
+#hero .hero-badge,#hero .hero-h1,#hero .hero-sub,#hero .hero-values{animation:hero-rise .8s cubic-bezier(.2,.7,.2,1) both}
+#hero .hero-h1{animation-delay:.07s}
+#hero .hero-sub{animation-delay:.16s}
+#hero .hero-values{animation-delay:.24s}
+#hero #sky-console-host.sky-console{animation:hero-rise .7s cubic-bezier(.2,.7,.2,1) both}
+@media (prefers-reduced-motion:reduce){
+  #hero-canvas{transition:none}
+  #hero-stage::before,#hero-stage::after{display:none}
+  #hero .hero-badge,#hero .hero-h1,#hero .hero-sub,#hero .hero-values,#hero #sky-console-host.sky-console{animation:none}
+}
+#hero-scrub-host{position:relative;z-index:2;margin:0 0 14px}
+/* `#hero .x` (0,1,1,0) on purpose: these override the page's own
+   `.hero-top{text-align:center}` etc. declared BELOW this block — same
+   specificity would lose on source order (measured: the column stayed centred). */
+@media(min-width:1100px){
+  #hero .hero-inner{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);column-gap:40px;max-width:1320px;align-items:start}
+  #hero .hero-top,#hero #sky-console-host,#hero .hero-cta,#hero #hero-signup-host{grid-column:1;min-width:0}
+  #hero #hero-stage-col{grid-column:2;grid-row:1/5;align-self:start;min-width:0}
+  #hero #hero-scrub-host{margin:12px 0 0}
+  /* explicit: a size-contained (container-type) grid item did not stretch in Chromium — measured 0px wide, centred */
+  #hero #sky-console-host{width:100%;justify-self:stretch}
+  /* Top-aligned and viewport-capped, NOT stretched over the column: stretched,
+     the box was 1023px tall on a 900px viewport and Earth's centre sat below
+     the fold. The short side (the cap) is what sets the disc size. */
+  #hero #hero-stage{height:min(560px,calc(100vh - 290px));min-height:400px;margin:0}
+  #hero .hero-top{text-align:left}
+  #hero .hero-sub{margin:0}
+  #hero .hero-values{justify-content:flex-start;margin-left:0;margin-right:0}
+  #hero .hero-cta{justify-content:flex-start}
+  #hero .hero-cta-note{text-align:left}
+  #hero::after{background:linear-gradient(90deg,rgba(2,0,10,.62) 0%,rgba(2,0,10,.45) 38%,rgba(2,0,10,0) 56%)}
+}
+.hero-top{text-align:center;margin-bottom:22px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.64rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:18px;box-shadow:var(--glow-uv-sm)}
+.hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.5rem,4vw,2.5rem);letter-spacing:.04em;line-height:1.14;margin-bottom:12px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 16px rgba(60,160,255,.4))}
+.hero-sub{font-size:clamp(.88rem,2vw,1rem);color:var(--fg-3);line-height:1.65;max-width:640px;margin:0 auto}
+.hero-sub em{font-style:normal;color:var(--fg-1)}
+.hero-values{display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:center;margin:12px auto 0;max-width:720px;font-size:.78rem;color:var(--fg-3);line-height:1.5}
+.hero-values span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.hero-values span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dot,#9d3aff);box-shadow:0 0 6px var(--dot,#9d3aff);flex-shrink:0}
+
+/* ── LIVE DEMO EMBEDS (EarthView + flux-rope stage) ──────────────────────── */
+.demo-frame{position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;
+  border:1px solid rgba(0,198,255,.25);background:#05030f}
+.demo-frame iframe{position:absolute;left:0;width:100%;border:0;opacity:0;transition:opacity 1.2s ease;pointer-events:none}
+.demo-frame .demo-open{position:absolute;right:14px;bottom:14px;z-index:2;display:inline-flex;align-items:center;gap:8px;
+  padding:9px 18px;border-radius:999px;background:rgba(2,0,10,.75);border:1px solid rgba(143,240,255,.45);
+  color:#8ff0ff;font-size:.8rem;font-weight:650;backdrop-filter:blur(6px);transition:background .2s,transform .15s}
+.demo-frame .demo-open:hover{background:rgba(2,0,10,.95);transform:translateY(-2px)}
+.demo-live-tag{position:absolute;left:14px;top:12px;z-index:2;display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--font-mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,240,255,.75);
+  background:rgba(2,0,10,.6);padding:4px 10px;border-radius:4px;border:1px solid rgba(154,133,255,.25);backdrop-filter:blur(4px)}
+.demo-live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite}
+#sky-console-host{min-height:540px;container-type:inline-size}  /* the console's tab grid reflows on a @container query — in the split hero it lives in a 560px column on a 1440px viewport */
+
+/* ── ONE ASK (2026-09-06) ────────────────────────────────────────────────
+   This REVERTS the #997 above-the-fold email capture and drops the
+   "Get started free" primary. 60 days of the anonymous funnel: 25 sessions
+   clicked "Open the full dashboard", 0 clicked "Get started free", 0
+   submitted the hero email form (1 focus in 30 days). Three asks in one
+   viewport and the two that nobody wanted were the loudest. The hero now
+   asks the one thing visitors demonstrably want — to see the live
+   dashboard — and the account ask moves to where intent is proven: the
+   sign-in wall's own "create a free account" exit, the console's
+   "Save your sky" chip, and the S5 band below. Don't re-add a second
+   button here without a new funnel read. */
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:24px}
+.hero-cta-note{flex-basis:100%;text-align:center;font-size:.74rem;color:var(--fg-4);margin-top:-2px}
+
+/* ── CTA RAIL — sticky follow-up once the hero has scrolled away ───────────
+   Appears only after #hero leaves the viewport, hides for signed-in
+   visitors and after a dismiss (sessionStorage), never overlaps the
+   nav. Two doors: free alerts (scrolls to the S5 band) and free account. */
+#cta-rail{position:fixed;left:50%;bottom:14px;transform:translate(-50%,120%);z-index:60;display:flex;align-items:center;gap:10px;
+  padding:8px 10px 8px 16px;border-radius:999px;background:rgba(7,2,26,.92);border:1px solid rgba(154,133,255,.35);
+  box-shadow:0 12px 40px rgba(0,0,0,.5),var(--glow-uv-sm);backdrop-filter:blur(10px);transition:transform .35s ease,opacity .3s;opacity:0;
+  max-width:calc(100vw - 24px)}
+#cta-rail[hidden]{display:none}  /* author display:flex above would otherwise beat the UA [hidden] rule */
+#cta-rail.on{transform:translate(-50%,0);opacity:1}
+#cta-rail .rail-copy{font-size:.82rem;color:var(--fg-2);white-space:nowrap}
+#cta-rail .rail-copy b{color:var(--fg-1)}
+#cta-rail .rail-btn{padding:8px 16px;font-size:.7rem;border-radius:999px;white-space:nowrap}
+#cta-rail .rail-link{font-size:.78rem;color:var(--uv-300);white-space:nowrap;border-bottom:1px solid rgba(183,101,255,.35)}
+#cta-rail .rail-x{background:none;border:0;color:var(--fg-4);font-size:1rem;cursor:pointer;padding:4px 6px;line-height:1}
+#cta-rail .rail-x:hover{color:var(--fg-1)}
+@media(max-width:640px){#cta-rail .rail-copy,#cta-rail .rail-link{display:none}#cta-rail{gap:6px;padding:6px 6px 6px 10px}}
+/* ── BEVELED BUTTONS (2026-09-21) ────────────────────────────────────────
+   A physical key, not a flat chip: a top highlight (inset 1px white), a
+   dark under-lip (inset bottom), a solid base plate (the 0 6px 0 shadow —
+   the "3D" depth), and the glow. :active drops the key onto its plate
+   (translateY = plate height, plate shadow → 2px) so the press reads as
+   travel, not as a colour change. The same recipe is mirrored in
+   js/home-signup-upsell.js (.hsu-btn), js/hero-sonify.js (.hsn-btn),
+   js/hero-rope-layer.js (.hrs-play) and the console's Locate button — keep
+   the plate/travel numbers in step. */
+.btn-primary{position:relative;padding:14px 32px;border-radius:14px;color:#fff;font-family:var(--font-display);font-weight:800;font-size:.88rem;letter-spacing:.12em;text-transform:uppercase;border:none;cursor:pointer;
+  background:linear-gradient(180deg,#c47cff 0%,#9d3aff 38%,#ff1f9c 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -3px 0 rgba(70,0,120,.85) inset,0 6px 0 #4a0a8a,0 10px 0 rgba(0,0,0,.35),0 16px 40px rgba(157,58,255,.5),0 0 60px rgba(255,31,156,.25);
+  text-shadow:0 1px 0 rgba(0,0,0,.35);transition:transform .08s,box-shadow .12s,filter .2s}
+.btn-primary::after{content:'';position:absolute;inset:1px 1px 50%;border-radius:13px 13px 40% 40%;background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,0));pointer-events:none}
+.btn-primary:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 -3px 0 rgba(70,0,120,.85) inset,0 7px 0 #4a0a8a,0 11px 0 rgba(0,0,0,.35),0 20px 48px rgba(157,58,255,.6),0 0 70px rgba(255,31,156,.3)}
+.btn-primary:active{transform:translateY(4px);box-shadow:0 1px 0 rgba(255,255,255,.25) inset,0 -1px 0 rgba(70,0,120,.85) inset,0 2px 0 #4a0a8a,0 4px 0 rgba(0,0,0,.35),0 8px 20px rgba(157,58,255,.4)}
+.btn-primary:focus-visible{outline:2px solid #8ff0ff;outline-offset:4px}
+.btn-secondary{position:relative;padding:13px 30px;border-radius:14px;color:#e6e9f5;font-size:.95rem;font-weight:650;border:0;cursor:pointer;
+  background:linear-gradient(180deg,#2a1a5e 0%,#170c3a 55%,#0d0626 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.16) inset,0 -3px 0 rgba(0,0,0,.55) inset,0 6px 0 #06031a,0 10px 24px rgba(2,0,10,.6);
+  transition:transform .08s,box-shadow .12s,color .2s}
+.btn-secondary:hover{color:#fff;transform:translateY(-1px);box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 -3px 0 rgba(0,0,0,.55) inset,0 7px 0 #06031a,0 14px 30px rgba(2,0,10,.65)}
+.btn-secondary:active{transform:translateY(4px);box-shadow:0 1px 0 rgba(255,255,255,.1) inset,0 -1px 0 rgba(0,0,0,.55) inset,0 2px 0 #06031a,0 4px 12px rgba(2,0,10,.6)}
+@media (prefers-reduced-motion:reduce){.btn-primary,.btn-secondary{transition:none}}
+
+/* ── LIVE TICKER (styles injected by js/home-ticker.js) ──────────────────── */
+.sw-ticker{min-height:44px}
+
+/* ── SHARED SECTION CHROME — tighter rhythm than the pre-console page ───── */
+.section{padding:56px 24px}
+.section-inner{max-width:1060px;margin:0 auto}
+.section-label{font-family:var(--font-display);font-size:.68rem;text-transform:uppercase;letter-spacing:var(--tracking-cyber);color:var(--uv-400);font-weight:700;margin-bottom:10px;text-shadow:var(--glow-uv-sm)}
+.section-h2{font-family:var(--font-display);font-size:clamp(1.25rem,3vw,1.9rem);font-weight:800;letter-spacing:.02em;color:var(--fg-1);line-height:1.2;margin-bottom:12px;text-transform:uppercase}
+.section-sub{font-size:.92rem;color:var(--fg-3);line-height:1.65;max-width:640px;margin-bottom:30px}
+.fade-in{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
+.fade-in.visible{opacity:1;transform:none}
+
+/* ── AURORACLE CAPTURE (band styles injected by js/aurora-capture.js) ─────── */
+#aurora{padding:48px 24px 36px}
+.aurora-capture-band .aurora-trust{flex-basis:100%;font-size:.78rem;color:var(--fg-4);margin:6px 0 0;max-width:none}
+
+/* ── DEPTH LADDER — compressed: no thumbs, one readable row per step ─────── */
+#depth{background:linear-gradient(180deg,#03010e,#040113)}
+.depth-ladder{list-style:none;display:flex;flex-direction:column;gap:10px;max-width:900px}
+.depth-step{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:16px;align-items:center;
+  background:linear-gradient(180deg,rgba(13,6,38,.5),rgba(7,2,26,.85));border:1px solid rgba(154,133,255,.14);
+  border-left:calc(2px + var(--d)*1px) solid var(--step-accent,#9d3aff);border-radius:12px;
+  padding:12px 18px;transition:transform .2s ease,border-color .2s}
+.depth-step:hover{transform:translateX(4px);border-color:var(--step-accent,#9d3aff)}
+.depth-num{font-family:var(--font-mono);color:var(--fg-4);font-size:.68rem;letter-spacing:.2em}
+.depth-title{font-family:var(--font-display);text-transform:uppercase;color:var(--fg-1);font-size:.82rem;letter-spacing:.05em;margin-bottom:2px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.depth-desc{font-size:.8rem;color:var(--fg-3);line-height:1.55}
+.depth-links{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+@media(max-width:700px){.depth-step{grid-template-columns:1fr}.depth-links{flex-direction:row;flex-wrap:wrap;align-items:center}}
+.sim-tier{font-family:var(--font-display);font-size:.56rem;font-weight:700;text-transform:uppercase;letter-spacing:var(--tracking-cyber);padding:3px 9px;border-radius:999px;flex-shrink:0}
+.sim-tier.free{background:rgba(46,255,158,.10);color:var(--status-ok);border:1px solid rgba(46,255,158,.30)}
+.sim-tier.advanced{background:rgba(183,101,255,.12);color:var(--uv-300);border:1px solid rgba(183,101,255,.30)}
+.sim-tier.ops{background:rgba(255,31,156,.10);color:var(--pink-400);border:1px solid rgba(255,31,156,.30)}
+.sim-tier.gold{background:rgba(255,215,0,.10);color:#ffd23f;border:1px solid rgba(255,215,0,.30)}
+.sim-link{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-display);font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent,var(--uv-300));transition:gap .15s,text-shadow .2s;white-space:nowrap}
+.sim-link:hover{gap:11px;text-shadow:0 0 8px currentColor}
+.catalog-strip{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:26px;align-items:center;font-size:.82rem}
+.catalog-strip a{color:var(--fg-3);display:inline-flex;align-items:center;gap:7px;transition:color .2s}
+.catalog-strip a::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dot,#9d3aff)}
+.catalog-strip a:hover{color:var(--fg-1)}
+.catalog-strip .all{color:var(--uv-300);font-weight:600;border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:1px}
+.catalog-strip .all::before{display:none}
+
+/* ── SIMULATION SHOWCASE (cards + filters injected by js/home-showcase.js) ── */
+#showcase{background:linear-gradient(180deg,#03010e 0%,#050216 100%);border-top:1px solid rgba(154,133,255,.10)}
+.showcase-inner{max-width:1180px}
+#showcase .section-sub{max-width:720px}
+#showcase-host{min-height:420px}
+.showcase-foot{margin-top:22px;font-size:.84rem;color:var(--fg-4)}
+.showcase-foot a{color:var(--uv-300);font-weight:600;border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:1px}
+.showcase-fallback{color:var(--fg-3)}
+
+/* ── BUILT LIKE AN INSTRUMENT — methods, validation, provenance ───────────── */
+#methods{background:#03010e;border-top:1px solid rgba(154,133,255,.12)}
+.methods-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:6px}
+.method{position:relative;display:flex;flex-direction:column;gap:8px;padding:18px 18px 16px;border-radius:14px;
+  background:linear-gradient(180deg,rgba(13,6,38,.55),rgba(7,2,26,.85));border:1px solid rgba(154,133,255,.14);
+  transition:border-color .2s,transform .2s}
+.method:hover{border-color:rgba(154,133,255,.4);transform:translateY(-2px)}
+.method-ico{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;color:var(--m-acc,#9d3aff);
+  background:color-mix(in srgb,var(--m-acc,#9d3aff) 14%,transparent);border:1px solid color-mix(in srgb,var(--m-acc,#9d3aff) 35%,transparent)}
+.method-ico svg{width:20px;height:20px}
+.method h3{font-family:var(--font-display);font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-1);line-height:1.3}
+.method p{font-size:.84rem;color:var(--fg-3);line-height:1.55}
+.method .receipt{font-family:var(--font-mono);font-size:.68rem;color:var(--fg-2);line-height:1.5;padding:8px 10px;border-radius:8px;
+  background:rgba(2,0,10,.5);border:1px solid rgba(154,133,255,.12)}
+.method .receipt b{color:var(--m-acc,#9d3aff);font-weight:600}
+.method a.method-link{margin-top:auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-size:.66rem;font-weight:700;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--m-acc,#9d3aff);transition:gap .15s}
+.method a.method-link:hover{gap:12px}
+.audience-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.audience{flex:1 1 220px;display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:12px;text-decoration:none;
+  background:rgba(13,6,38,.45);border:1px solid rgba(154,133,255,.14);transition:border-color .2s,background .2s}
+.audience:hover{border-color:rgba(154,133,255,.45);background:rgba(13,6,38,.7)}
+.audience b{font-family:var(--font-display);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-1)}
+.audience span{font-size:.8rem;color:var(--fg-3);line-height:1.45}
+.audience em{font-style:normal;font-size:.7rem;color:var(--uv-300);letter-spacing:.08em;text-transform:uppercase;margin-top:4px}
+
+/* ── ATTRACT EMBED + DEMO SECTIONS ────────────────────────────────────────── */
+.sw-attract-section,.demo-section{padding:56px 20px 64px;text-align:center;background:#03010e}
+
+/* ── VALIDATION — one compact credibility band ────────────────────────────── */
+#validation{background:linear-gradient(180deg,rgba(91,30,255,.04),rgba(255,31,156,.03));border-top:1px solid rgba(157,58,255,.18);border-bottom:1px solid rgba(157,58,255,.18);padding:44px 24px}
+.stats-row{display:flex;flex-wrap:wrap;gap:8px 28px;justify-content:center;margin-bottom:22px}
+.stat-item{display:flex;align-items:baseline;gap:8px}
+.stat-num{font-family:var(--font-display);font-size:1.5rem;font-weight:800;background:var(--grad-uv-pink);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:.02em}
+.stat-desc{font-family:var(--font-display);font-size:.6rem;color:var(--fg-4);text-transform:uppercase;letter-spacing:var(--tracking-cyber)}
+.validation-line{text-align:center;font-size:.9rem;color:var(--fg-2);line-height:1.7;max-width:720px;margin:0 auto 6px}
+.validation-line a{color:var(--uv-300);border-bottom:1px solid rgba(183,101,255,.35);transition:color .2s,border-color .2s}
+.validation-line a:hover{color:var(--uv-400);border-color:var(--uv-400)}
+.validation-lineage{text-align:center;font-size:.78rem;color:var(--fg-4);max-width:720px;margin:0 auto 24px}
+.sources-grid{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.source-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(13,6,38,.55);border:1px solid rgba(154,133,255,.18);border-radius:999px;font-family:var(--font-mono);font-size:.72rem;transition:border-color .2s}
+.source-chip:hover{border-color:rgba(183,101,255,.45)}
+.source-chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:pulse-dot 2.2s ease-in-out infinite}
+.source-chip span{color:var(--fg-4)}
+.source-chip strong{color:var(--fg-1);font-weight:600}
+.source-freq{font-size:.62rem;color:var(--fg-5);margin-left:4px}
+
+/* ── PRICING — compact strip ─────────────────────────────────────────────── */
+#pricing{background:rgba(0,0,10,.6)}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:20px}
+.price-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:22px 22px 20px;position:relative;transition:transform .2s,border-color .2s}
+.price-card:hover{transform:translateY(-3px)}
+.price-card.popular{border-color:rgba(255,200,0,.35);background:rgba(255,180,0,.05)}
+.price-popular-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000;font-size:.6rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;padding:3px 12px;border-radius:20px;white-space:nowrap}
+.price-name{font-family:var(--font-display);font-size:.8rem;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-2);font-weight:700}
+.price-alias{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:#667;margin-bottom:10px}
+.price-amount{font-size:1.9rem;font-weight:800;color:#e8f4ff;line-height:1;margin-bottom:8px}
+.price-amount span{font-size:.85rem;font-weight:400;color:#778}
+.price-tagline{font-size:.78rem;color:#8a94a8;margin-bottom:16px;line-height:1.5}
+.price-btn{display:block;text-align:center;padding:10px;border-radius:8px;font-weight:700;font-size:.84rem;transition:filter .2s,transform .15s}
+.price-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.price-btn.free-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#cdd}
+.price-btn.basic-btn{background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000}
+.price-btn.adv-btn{background:linear-gradient(135deg,#7b2ff7,#00c6ff);color:#fff}
+.pricing-compare-link{text-align:center;font-size:.84rem;color:#778}
+.pricing-compare-link a{color:#ffb830;font-weight:600;border-bottom:1px solid rgba(255,180,60,.3);transition:color .2s,border-color .2s}
+.pricing-compare-link a:hover{color:#ffd700;border-color:#ffd700}
+
+/* ── AGENCIES DOOR — deliberately quiet ──────────────────────────────────── */
+#agencies{background:#020108;border-top:1px solid rgba(154,133,255,.12);text-align:center}
+#agencies .section-sub{margin:0 auto 26px}
+
+/* ── FOOTER ───────────────────────────────────────────────────────────────── */
+footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52px 24px 32px}
+.footer-inner{max-width:1060px;margin:0 auto}
+.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:40px}
+@media(max-width:768px){.footer-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.footer-grid{grid-template-columns:1fr}}
+.footer-brand-logo{height:36px;width:auto;border-radius:50%;margin-bottom:12px}
+.footer-brand-name{font-size:1rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px}
+.footer-tagline{font-size:.8rem;color:#556;line-height:1.6;margin-bottom:14px}
+.footer-attribution{font-size:.68rem;color:#445;line-height:1.8;font-family:monospace}
+.footer-col-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#778;font-weight:700;margin-bottom:14px}
+.footer-links{display:flex;flex-direction:column;gap:8px}
+.footer-links a{font-size:.83rem;color:#556;transition:color .2s}
+.footer-links a:hover{color:#ffb830}
+.footer-bottom{padding-top:24px;border-top:1px solid rgba(255,255,255,.05);display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;font-size:.73rem;color:#445}
+.footer-bottom a{color:#445;transition:color .2s}
+.footer-bottom a:hover{color:#778}
+
+@media(max-width:640px){
+  .hero-cta{flex-direction:column;align-items:center}
+  .btn-primary,.btn-secondary{width:100%;max-width:320px;text-align:center}
+  .section{padding:44px 16px}
+}
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+/* THE LIVE SCENE STAYS DARK; THE HERO AROUND IT GOES LIGHT (2026-11-09).
+   Until this pass the whole #hero was re-pinned to the dark tokens, so a
+   daytime visitor got a 900px black block on top of a white page — the
+   owner's "very janky". The canvas is a live view of space with its own
+   tuned colour pipeline (js/hero-color.js) and cannot be lit, so instead it
+   is framed: #hero-window (a dark, bordered, rounded plate that sits UNDER
+   the canvas) and a clip-path on the canvas both follow the stage column's
+   rect, published as --hero-win-* by the ResizeObserver after the hero
+   markup. The copy, badge and values take the light palette; the dark
+   tokens are re-pinned ONLY on #hero-stage-col, so the scrubber and the
+   sound layer that live inside the window keep their dark styling. The sky
+   console and the sign-up card set their own light colours in their
+   modules' injected CSS. In dark mode #hero-window is display:none and the
+   clip-path is absent — the dark page is pixel-identical to before. */
+#hero-window{display:none}
+html.theme-light #hero{background:
+  radial-gradient(ellipse 70% 55% at 76% 38%,rgba(21,96,212,.14),transparent 70%),
+  radial-gradient(ellipse 55% 45% at 12% 85%,rgba(9,118,186,.10),transparent 70%),
+  linear-gradient(180deg,#f6f9fe 0%,#ffffff 100%)}
+/* A faint graph-paper grid: the hero reads as an instrument panel, not a poster. */
+html.theme-light #hero::before{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.55;
+  background-image:linear-gradient(rgba(21,96,212,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(21,96,212,.07) 1px,transparent 1px);
+  background-size:48px 48px;
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 40%,#000 30%,transparent 100%);
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 40%,#000 30%,transparent 100%)}
+html.theme-light #hero::after{background:none}
+html.theme-light #hero-window{display:block;position:absolute;z-index:0;pointer-events:none;
+  top:var(--hero-win-t,0px);left:var(--hero-win-l,0px);width:var(--hero-win-w,0px);height:var(--hero-win-h,0px);
+  border-radius:22px;background:radial-gradient(ellipse at 50% 30%,#0a1430 0%,#040914 70%);
+  box-shadow:0 0 0 1px var(--pl-border-strong),0 1px 0 rgba(255,255,255,.6),0 18px 48px rgba(11,31,58,.22),0 2px 6px rgba(11,31,58,.12)}
+html.theme-light #hero-canvas{clip-path:inset(var(--hero-win-t,0px) calc(100% - var(--hero-win-l,0px) - var(--hero-win-w,0px)) calc(100% - var(--hero-win-t,0px) - var(--hero-win-h,0px)) var(--hero-win-l,0px) round 22px)}
+html.theme-light #hero #hero-stage-col{padding:12px 14px 14px}
+html.theme-light #hero .hero-h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text;filter:none}
+html.theme-light #hero .hero-sub{color:var(--pl-text-3)}
+html.theme-light #hero .hero-sub em{color:var(--pl-text-1)}
+html.theme-light #hero .hero-badge{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.32);color:var(--pl-blue-deep);box-shadow:none}
+html.theme-light #hero .hero-values{color:var(--pl-text-3)}
+html.theme-light #hero .hero-values span::before{box-shadow:none;filter:brightness(.72) saturate(1.3)}
+html.theme-light #hero .hero-cta-note{color:var(--pl-text-4)}
+/* The boot reticle on the dark window keeps its cyan; nothing to restate. */
+html.theme-light #hero #hero-stage-col{color-scheme:dark;
+  --indigo-500:#3b1eff;--indigo-400:#6a48ff;--indigo-300:#9a85ff;
+  --uv-700:#5500b3;--uv-600:#7b00ee;--uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
+  --pink-600:#e60088;--pink-500:#ff1f9c;--pink-400:#ff5cb8;
+  --lightning-pure:#ffffff;--lightning-bolt:#f5f8ff;
+  --lightning-arc:#8ff0ff;--lightning-spark:#4ddbff;--lightning-deep:#1f8fff;
+  --status-ok:#2eff9e;--status-warn:#ffd23f;--status-danger:#ff3050;--status-alert:#ff1f9c;
+  --fg-1:#f5f0ff;--fg-2:#cdc4f0;--fg-3:#9d92c8;--fg-4:#6f6695;--fg-5:#48426e;--fg-6:#38335a;
+  --grad-uv:linear-gradient(135deg,#3b1eff,#9d3aff);
+  --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
+  --grad-spectrum:linear-gradient(135deg,#3b1eff,#9d3aff,#ff1f9c);
+  --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
+  --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
+  --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
+  --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5)}
+/* The live ticker directly under the hero is a soft-blue band with a blue
+   rule on top (js/home-ticker.js carries those rules). */
+
+/* Buttons: the purple→pink key becomes a blue key (same plate + travel). */
+html.theme-light .btn-primary{background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 40%,#1560d4 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -3px 0 rgba(8,52,128,.75) inset,0 6px 0 #0b3f8f,0 10px 0 rgba(11,31,58,.18),0 16px 34px rgba(21,96,212,.32)}
+html.theme-light .btn-primary:hover{box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 -3px 0 rgba(8,52,128,.75) inset,0 7px 0 #0b3f8f,0 11px 0 rgba(11,31,58,.18),0 20px 40px rgba(21,96,212,.4)}
+html.theme-light .btn-primary:active{box-shadow:0 1px 0 rgba(255,255,255,.25) inset,0 -1px 0 rgba(8,52,128,.75) inset,0 2px 0 #0b3f8f,0 4px 0 rgba(11,31,58,.18),0 8px 18px rgba(21,96,212,.3)}
+html.theme-light .btn-primary:focus-visible{outline-color:var(--pl-blue-bright)}
+html.theme-light .btn-secondary{color:var(--pl-blue-deep);background:linear-gradient(180deg,#ffffff 0%,#f3f7fd 100%);
+  box-shadow:0 0 0 1px var(--pl-border-strong) inset,0 -3px 0 rgba(21,96,212,.10) inset,0 6px 0 #c3d5ee,0 10px 22px rgba(21,96,212,.14)}
+html.theme-light .btn-secondary:hover{color:var(--pl-blue);box-shadow:0 0 0 1px var(--pl-blue) inset,0 -3px 0 rgba(21,96,212,.10) inset,0 7px 0 #c3d5ee,0 14px 28px rgba(21,96,212,.2)}
+html.theme-light .btn-secondary:active{box-shadow:0 0 0 1px var(--pl-blue) inset,0 -1px 0 rgba(21,96,212,.10) inset,0 2px 0 #c3d5ee,0 4px 10px rgba(21,96,212,.14)}
+/* Section rhythm: white / soft-blue alternation, navy type, blue accents. */
+html.theme-light .sw-attract-section,html.theme-light .demo-section{background:var(--pl-bg)}
+html.theme-light #neo-top10{background:var(--pl-bg-soft);border-top:1px solid var(--pl-border);border-bottom:1px solid var(--pl-border)}
+html.theme-light :is(.demo-section,.sw-attract-section) > h2{color:var(--pl-text-1)!important}   /* inline #e8f4ff */
+html.theme-light :is(.demo-section,.sw-attract-section) > p{color:var(--pl-text-3)!important}    /* inline #8b94ad */
+html.theme-light :is(.demo-section,.sw-attract-section) > p b{color:var(--pl-text-1)!important}  /* inline #cdd8f0 */
+html.theme-light #neo-top10-host > p{color:var(--pl-text-3)!important}                           /* mount-failure note */
+html.theme-light .section-label{text-shadow:none;color:var(--pl-blue)}
+/* The demo embeds are live dark scenes: keep the window dark, frame it. */
+html.theme-light .demo-frame{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+
+/* AurOracle capture band (styles injected by the shared js/aurora-capture.js —
+   overridden HERE, scoped to #aurora, so its other pages are untouched). */
+html.theme-light #aurora .aurora-capture-band{background:linear-gradient(135deg,var(--pl-blue-soft) 0%,var(--pl-bg-soft) 60%,#ffffff 100%);
+  border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light #aurora .aurora-kicker{color:var(--pl-blue-deep);font-weight:600}
+html.theme-light #aurora .aurora-capture-band h2{color:var(--pl-text-1)}
+html.theme-light #aurora .aurora-capture-band p{color:var(--pl-text-3)}
+html.theme-light #aurora .aurora-capture-band input[type=email]:focus{border-color:var(--pl-blue);box-shadow:0 0 0 3px rgba(21,96,212,.16)}
+html.theme-light #aurora .aurora-capture-band button{background:var(--pl-btn);color:#fff}
+html.theme-light #aurora .aurora-capture-band button:hover{background:var(--pl-btn-hover);filter:none}
+html.theme-light #aurora .aurora-status{color:var(--pl-text-4)}
+html.theme-light #aurora .aurora-upsell a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+
+/* Depth ladder: white step cards on soft blue. Each step's neon accent
+   (inline --step-accent / --accent) is mapped to a readable-on-white shade. */
+html.theme-light #depth{background:var(--pl-bg-soft)}
+html.theme-light .depth-step{--lt-acc:var(--pl-blue);background:var(--pl-card);border-color:var(--pl-border);
+  border-left-color:var(--lt-acc);box-shadow:var(--pl-shadow)}
+html.theme-light .depth-step[style*="--step-accent:#2eff9e"]{--lt-acc:var(--pl-ok)}
+html.theme-light .depth-step[style*="--step-accent:#ffd23f"]{--lt-acc:#b07800}
+html.theme-light .depth-step[style*="--step-accent:#4ddc99"]{--lt-acc:#0f8a63}
+html.theme-light .depth-step[style*="--step-accent:#9d3aff"]{--lt-acc:var(--pl-blue)}
+html.theme-light .depth-step[style*="--step-accent:#ff1f9c"]{--lt-acc:var(--pl-sky)}
+html.theme-light .depth-step:hover{border-color:var(--pl-border-strong);border-left-color:var(--lt-acc);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .depth-num{color:var(--pl-text-4)}
+html.theme-light .sim-link{color:var(--lt-acc,var(--pl-blue))}
+html.theme-light .sim-link[style*="--accent:#ff5cb8"]{color:var(--pl-blue-deep)}
+html.theme-light .sim-link:hover{text-shadow:none;filter:brightness(.85)}
+html.theme-light .sim-tier.free{background:rgba(13,122,69,.08);color:var(--pl-ok);border-color:rgba(13,122,69,.32)}
+html.theme-light .sim-tier.advanced{background:var(--pl-blue-soft);color:var(--pl-blue-deep);border-color:rgba(21,96,212,.32)}
+html.theme-light .sim-tier.ops{background:#e3f4ff;color:#075d91;border-color:rgba(9,118,186,.32)}
+html.theme-light .sim-tier.gold{background:#fff6dc;color:var(--pl-warn);border-color:rgba(138,90,0,.3)}
+html.theme-light .catalog-strip a{color:var(--pl-text-3)}
+html.theme-light .catalog-strip a:hover{color:var(--pl-blue)}
+html.theme-light .catalog-strip .all{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+
+/* Simulation showcase + methods: white cards on soft blue (card internals
+   are themed in js/home-showcase.js). */
+html.theme-light #showcase{background:var(--pl-bg-soft);border-top-color:var(--pl-border)}
+html.theme-light .showcase-foot{color:var(--pl-text-4)}
+html.theme-light .showcase-foot a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .showcase-fallback{color:var(--pl-text-3)}
+html.theme-light #methods{background:var(--pl-bg);border-top-color:var(--pl-border)}
+html.theme-light .method{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .method:hover{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .method h3{color:var(--pl-text-1)}
+html.theme-light .method p{color:var(--pl-text-3)}
+html.theme-light .method .receipt{background:var(--pl-bg-sunk);border-color:var(--pl-border);color:var(--pl-text-2)}
+html.theme-light .method .receipt b,html.theme-light .method a.method-link,html.theme-light .method-ico{filter:brightness(.62) saturate(1.35)}
+html.theme-light .audience{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .audience:hover{background:var(--pl-blue-soft);border-color:var(--pl-border-strong)}
+html.theme-light .audience b{color:var(--pl-text-1)}
+html.theme-light .audience span{color:var(--pl-text-3)}
+html.theme-light .audience em{color:var(--pl-blue)}
+
+/* Validation band */
+html.theme-light #validation{background:var(--pl-bg);border-top-color:var(--pl-border);border-bottom-color:var(--pl-border)}
+html.theme-light .stat-num{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text}
+html.theme-light .stat-desc{color:var(--pl-text-4)}
+html.theme-light .validation-line{color:var(--pl-text-2)}
+html.theme-light .validation-line a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .validation-line a:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue-deep)}
+html.theme-light .validation-lineage{color:var(--pl-text-4)}
+html.theme-light .source-chip{background:var(--pl-card);border-color:var(--pl-border);box-shadow:0 1px 2px rgba(11,31,58,.05)}
+html.theme-light .source-chip:hover{border-color:var(--pl-border-strong)}
+html.theme-light .source-chip span{color:var(--pl-text-4)}
+html.theme-light .source-chip strong{color:var(--pl-text-1)}
+html.theme-light .source-freq{color:var(--pl-text-4)}
+
+/* Pricing strip */
+html.theme-light #pricing{background:var(--pl-bg-soft)}
+html.theme-light .price-card{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .price-card:hover{box-shadow:var(--pl-shadow-hover)}
+html.theme-light .price-card.popular{background:var(--pl-card);border-color:var(--pl-blue);box-shadow:0 0 0 1px var(--pl-blue),var(--pl-shadow-hover)}
+html.theme-light .price-popular-badge{background:var(--pl-grad-btn);color:#fff}
+html.theme-light .price-name{color:var(--pl-text-1)}
+html.theme-light .price-alias{color:var(--pl-text-4)}
+html.theme-light .price-amount{color:var(--pl-text-1)}
+html.theme-light .price-amount span{color:var(--pl-text-4)}
+html.theme-light .price-tagline{color:var(--pl-text-3)}
+html.theme-light .price-btn.free-btn{background:var(--pl-card);border-color:var(--pl-border-strong);color:var(--pl-blue-deep)}
+html.theme-light .price-btn.basic-btn{background:var(--pl-grad-btn);color:#fff}
+html.theme-light .price-btn.adv-btn{background:linear-gradient(135deg,#0b4aa8,#0976ba);color:#fff}
+html.theme-light .price-btn:hover{filter:brightness(1.06)}
+html.theme-light .pricing-compare-link{color:var(--pl-text-4)}
+html.theme-light .pricing-compare-link a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .pricing-compare-link a:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue-deep)}
+
+/* Agencies door + footer (the footer classes are themed by theme-light.css) */
+html.theme-light #agencies{background:var(--pl-bg);border-top-color:var(--pl-border)}
+html.theme-light .footer-bottom{border-top-color:var(--pl-border)}
+
+/* CTA rail: a white pill instead of the dark one. */
+html.theme-light #cta-rail{background:rgba(255,255,255,.96);border-color:var(--pl-border);box-shadow:0 12px 34px rgba(11,31,58,.16)}
+html.theme-light #cta-rail .rail-copy{color:var(--pl-text-2)}
+html.theme-light #cta-rail .rail-copy b{color:var(--pl-text-1)}
+html.theme-light #cta-rail .rail-link{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light #cta-rail .rail-x{color:var(--pl-text-4)}
+html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
+</style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://parkersphysics.com/#org",
+      "name": "Parkers Physics",
+      "alternateName": "Parker Physics App",
+      "url": "https://parkersphysics.com/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://parkersphysics.com/ParkersPhysics_logo2.jpg"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://parkersphysics.com/#website",
+      "name": "Parkers Physics",
+      "url": "https://parkersphysics.com/",
+      "description": "Your sky's space-weather risks, live — aurora odds, NOAA storm scales, satellite drag — driven by live NASA and NOAA satellite data, rendered in your browser.",
+      "publisher": {
+        "@id": "https://parkersphysics.com/#org"
+      },
+      "inLanguage": "en-US"
+    }
+  ]
+}
+</script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
+</head>
+<body>
+
+<!-- Landing-page analytics: identical bootstrap to signin/signup so the
+     funnel sees `landing_view` as the first stage in any user's
+     conversion path. CTAs below carry data-funnel-cta="…" attributes
+     and are picked up by a delegated click listener that fires
+     `landing_cta_click` with the cta name.
+
+     The home_redesign / home_headline / home_sub experiments CONCLUDED
+     2026-07 — this page shipped as the deliberate winner, the middleware
+     A/B split is retired, and no assign() runs here anymore (a stale
+     pp_home_v cookie must not record exposures against the new page). -->
+<script type="module">
+    import './js/telemetry.js';
+    // experiments.js transitively boots analytics.js + auth-funnel.js.
+    import { experiments } from './js/experiments.js';
+
+    experiments.track('landing_view', { page: 'live-sky' });
+
+    // Delegated click capture for any element with data-funnel-cta.
+    // One listener for the whole page keeps perf/memory bounded
+    // regardless of how many CTAs marketing adds later.
+    document.addEventListener('click', (e) => {
+        const a = e.target?.closest?.('[data-funnel-cta]');
+        if (!a) return;
+        experiments.track('landing_cta_click', {
+            cta: a.getAttribute('data-funnel-cta'),
+            dest: a.getAttribute('href') || null,
+        });
+    }, { capture: true, passive: true });
+</script>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("live-sky");</script>
+
+<main id="main-content">
+<!-- live-sky.html (2026-11-22): the live magnetosphere + personal sky console
+     that was the HOMEPAGE HERO until the homepage's first screen became the
+     simulation launchpad (index.html #hero / js/home-launchpad.js, owner
+     decision). The section is moved here UNCHANGED — same ids, same wiring,
+     same modules — so every hero gate (tests/home-hero-*.spec.js,
+     tests/home-temp-outlook.spec.js) runs against this page. -->
+
+<!-- ── S1 · SKY CONSOLE — the answer layer ────────────────────────────────
+     2026-08 redesign: the hero IS the product now. js/home-sky-console.js
+     renders a personal conditions console — Air quality (default) / Major
+     events / Temperature / Space weather / Aurora (secondary by design) —
+     over the cinematic live-magnetosphere canvas (js/hero-space-weather.js,
+     kept from the 2026-07 hero as the backdrop; 2026-09 added its deep-field
+     nebula. The 2026-09 background carousel of captured sims was retired
+     2026-11-09 — those captures are now the Simulation Showcase, S3). Space data comes from the
+     page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
+     (per-location Open-Meteo). See the wiring module at the bottom of
+     <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
+     reword it without a new experiment. ONE ask below the console (the
+     dashboard) — see the "ONE ASK" CSS note for the funnel numbers. -->
+<section id="hero" aria-label="Your sky, live: air, temperature, major events">
+  <!-- The dark plate the live canvas is framed on in LIGHT mode (see the
+       LIGHT THEME CSS note). display:none in dark mode. Before the canvas in
+       DOM order so the canvas paints over it. -->
+  <div id="hero-window" aria-hidden="true"></div>
+  <canvas id="hero-canvas" aria-hidden="true"></canvas>
+  <script>
+  /* Boot reticle on — only where the hero will actually boot (the page
+     wiring skips it under reduced motion; no WebGL means no scene). Parsed
+     inline so the reticle is in the very first paint. The hero module swaps
+     this for `hero-live` once it is drawing (or drops it on failure); the
+     timeout is the backstop for a module that never arrives. */
+  (function () {
+    var h = document.getElementById('hero');
+    if (!h || !window.WebGLRenderingContext || !window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    h.classList.add('hero-booting');
+    setTimeout(function () { h.classList.remove('hero-booting'); }, 20000);
+  })();
+  </script>
+  <div class="hero-inner">
+    <div class="hero-top">
+      <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
+      <h1 class="hero-h1">Watch space weather happen. Live.</h1>
+      <p class="hero-sub">One console for <em>your</em> sky — live, local, and physics all the way down.</p>
+      <!-- 2026-09-21: four pills folded into ONE line. Same four claims,
+           same order, same dot colours; the pills were the noisiest thing
+           left above the fold and pushed the CTA under it at 1440×900. -->
+      <p class="hero-values" aria-label="What you get">
+        <span style="--dot:#2eff9e">Air quality now + the week ahead</span>
+        <span style="--dot:#ff5cb8">Major events 7 days out</span>
+        <span style="--dot:#ff8c5a">Why your temperature moves</span>
+        <span style="--dot:#8ff0ff">Validated on the May 2024 G5</span>
+      </p>
+    </div>
+    <!-- The stage: empty on purpose — the live canvas frames Earth into this
+         box (see the CSS note). Under it, the CME transit scrubber
+         (js/hero-rope-layer.js mounts #hero-scrub into #hero-scrub-host). -->
+    <div id="hero-stage-col">
+      <div id="hero-stage" aria-hidden="true"></div>
+      <div id="hero-scrub-host"></div>
+      <!-- Opt-in sound layer (js/hero-sonify.js): the solar wind as audio,
+           conditioned on the saved location's aurora verdict. Never autoplays. -->
+      <div id="hero-sound-host"></div>
+    </div>
+    <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
+    <!-- ONE ask (see the CSS note above): the dashboard, which is what the
+         funnel shows people actually click. It is sign-in gated; a new
+         visitor lands on signin.html, which carries its own "create a free
+         account" exit for exactly that bounce. The funnel id stays
+         hero_magnetosphere so the before/after series is continuous. -->
+    <div class="hero-cta" role="group" aria-label="Primary action">
+      <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard <span aria-hidden="true">→</span></a>
+      <span class="hero-cta-note">Free · a free account saves your location, alerts and dashboards · no credit card</span>
+    </div>
+    <!-- Passwordless sign-up upsell (js/home-signup-upsell.js). Re-added
+         2026-09-21 at the author's request over the ONE ASK note above,
+         as a DIFFERENT ask (one field, magic link, "your sky by email")
+         with its own funnel ids — read that module's header before
+         touching either the copy or the decision. Hidden when signed in. -->
+    <div id="hero-signup-host"></div>
+  </div>
+  <script>
+  /* Publish the stage column's rect (relative to #hero) as --hero-win-t/l/w/h.
+     Light mode frames the live canvas into it (#hero-window + the canvas
+     clip-path); dark mode reads nothing. Runs in both so a theme flip at
+     sunset needs no layout work. Observed, not polled: the column's height
+     follows the viewport cap and the scrubber's wrap. */
+  (function () {
+    var hero = document.getElementById('hero');
+    var col = document.getElementById('hero-stage-col');
+    if (!hero || !col || !window.ResizeObserver) return;
+    var publish = function () {
+      var h = hero.getBoundingClientRect(), c = col.getBoundingClientRect();
+      if (!(c.width > 0 && c.height > 0)) return;
+      hero.style.setProperty('--hero-win-t', (c.top - h.top).toFixed(1) + 'px');
+      hero.style.setProperty('--hero-win-l', (c.left - h.left).toFixed(1) + 'px');
+      hero.style.setProperty('--hero-win-w', c.width.toFixed(1) + 'px');
+      hero.style.setProperty('--hero-win-h', c.height.toFixed(1) + 'px');
+    };
+    var ro = new ResizeObserver(publish);
+    ro.observe(hero); ro.observe(col);
+    publish();
+  })();
+  </script>
+</section>
+
+<!-- ── S2 · LIVE TICKER — the proof strip ─────────────────────────────────
+     Rendered by js/home-ticker.js from the same swpc-update event the
+     console consumes. Its job while scrolling the marketing below:
+     "real pipelines, real cadence." No CTA. -->
+<div class="sw-ticker" data-sw-ticker></div>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────────── -->
+<footer id="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <div class="footer-grid">
+
+      <div class="footer-brand">
+        <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics logo" class="footer-brand-logo">
+        <p class="footer-brand-name">Parkers Physics</p>
+        <p class="footer-tagline">Watch space weather happen. Live.</p>
+        <p class="footer-attribution">&copy; 2026 Parkers Physics.<br>All rights reserved.</p>
+      </div>
+
+      <nav aria-label="Simulations">
+        <p class="footer-col-title">Simulations</p>
+        <div class="footer-links">
+          <a href="earth.html">Earth Weather</a>
+          <a href="sun.html">Solar Surface</a>
+          <a href="space-weather.html">Space Weather</a>
+          <a href="upper-atmosphere.html">Upper Atmosphere</a>
+          <a href="auroracle.html">AurOracle</a>
+          <a href="simulations.html">All Simulations →</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Product">
+        <p class="footer-col-title">Product</p>
+        <div class="footer-links">
+          <a href="pricing.html">Pricing</a>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="for-operators.html">For Agencies &amp; Operators</a>
+          <a href="signin.html" data-funnel-cta="footer_signin">Sign In</a>
+          <a href="signup.html" data-funnel-cta="footer_signup">Create Account</a>
+          <a href="recent-development.html">Recent Development</a>
+          <a href="feedback.html">Feedback</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Legal &amp; Sources">
+        <p class="footer-col-title">Legal</p>
+        <div class="footer-links">
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="eula.html">Terms of Service</a>
+        </div>
+        <p class="footer-col-title" style="margin-top:1.4rem">Data Sources</p>
+        <div class="footer-links">
+          <a href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>
+          <a href="https://ssd.jpl.nasa.gov/horizons/" target="_blank" rel="noopener">NASA JPL Horizons</a>
+          <a href="https://api.nasa.gov/" target="_blank" rel="noopener">NASA DONKI</a>
+          <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
+          <a href="https://github.com/etelford32/heliochronicles" target="_blank" rel="noopener">HelioChronicles · historical (CC BY 4.0)</a>
+        </div>
+      </nav>
+
+    </div>
+  </div>
+</footer>
+
+<!-- ── PAGE WIRING ─────────────────────────────────────────────────────────
+     One SpaceWeatherFeed for the whole page. The sky console
+     (initSkyConsole), the ticker (initHomeTicker) and the hero backdrop
+     (HeroSpaceWeather) all consume the window 'swpc-update' event — NONE
+     constructs a feed. The feed starts LAST so every listener is attached
+     before the first dispatch. Do not import page modules that start their
+     own feed. -->
+<script type="module">
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { initHomeTicker } from './js/home-ticker.js';
+import { initSkyConsole } from './js/home-sky-console.js';
+import { experiments } from './js/experiments.js';
+
+/* Intersection-observer fade-ins */
+(function(){
+  const els = document.querySelectorAll('.fade-in');
+  if (!els.length) return;
+  if (!('IntersectionObserver' in window)){
+    els.forEach(el => el.classList.add('visible'));
+    return;
+  }
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting){ e.target.classList.add('visible'); obs.unobserve(e.target); }
+    });
+  }, { threshold: 0.12 });
+  els.forEach(el => obs.observe(el));
+})();
+
+/* Ticker + sky console — swpc-update listeners attach before the feed
+   starts. The console works even when WebGL/reduced-motion kills the
+   backdrop canvas: the numbers are the product either way. A console boot
+   failure must never take the ticker (or the feed) down with it. */
+/* Hero backdrop: live magnetosphere. Skipped under prefers-reduced-motion —
+   the CSS gradient backdrop remains and the console stays live. WebGL
+   failure self-handles (the module hides its canvas). Its import starts
+   FIRST, in parallel with the console's (2026-09-23: it used to wait for
+   initSkyConsole, i.e. two more module round trips before three.js was
+   even requested — the <head> modulepreloads cover the rest of the graph).
+   The console boot and the hero are both awaited — the hero with a cap —
+   so the hero's swpc-update listener attaches before the first feed
+   dispatch, but a hung network can never stall the console. */
+const heroCanvas = document.getElementById('hero-canvas');
+const heroHost = document.getElementById('hero');
+const heroWanted = !!heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const heroModule = heroWanted ? import('./js/hero-space-weather.js') : null;
+
+initHomeTicker(document.querySelector('[data-sw-ticker]'));
+const consoleReady = initSkyConsole(document.getElementById('sky-console-host'))
+  .catch(err => console.warn('[home] sky console failed to boot:', err));
+
+// The module downloads in parallel, but the scene is BUILT only once the
+// console has rendered (or 1.5 s have passed): building + compiling it is
+// main-thread work, and done first it pushed the console's first render back
+// by seconds on a software rasteriser (measured). The console is the product;
+// the canvas is the backdrop.
+const consoleOrCap = Promise.race([consoleReady, new Promise(r => setTimeout(r, 1500))]);
+let heroReady = Promise.resolve(null);
+if (heroModule) {
+  heroReady = Promise.all([heroModule, consoleOrCap])
+    .then(([m]) => {
+      const h = new m.HeroSpaceWeather(heroCanvas, {
+        stage: document.getElementById('hero-stage'),
+        // The Sun + CME flux ropes + τ scrubber (js/hero-rope-layer.js):
+        // the default "Next 24 h" tab flies today's CMEs on the flux-rope
+        // kernel off a live Sun (js/hero-sun.js); the "CME transit" tab
+        // consumes the ONE shared provider started below and replays the
+        // validated Gannon train while nothing is in flight.
+        ropes: {
+          host: document.getElementById('hero-scrub-host'),
+          replay: () => import('./js/hero-rope-layer.js').then(r => r.gannonReplay()),
+        },
+      });
+      h.start();
+      return h;
+    })
+    .catch(() => { heroCanvas.style.display = 'none'; heroHost?.classList.remove('hero-booting'); return null; });
+} else if (heroCanvas) {
+  heroCanvas.style.display = 'none';
+}
+await consoleReady;
+await Promise.race([heroReady, new Promise(r => setTimeout(r, 4000))]);
+
+/* Passwordless sign-up upsell — see js/home-signup-upsell.js header. */
+import('./js/home-signup-upsell.js')
+  .then(m => m.mountSignupUpsell(document.getElementById('hero-signup-host'), {
+    track: (stage, meta) => experiments.track(stage, meta),
+  }))
+  .catch(err => console.warn('[home] signup upsell failed to mount:', err));
+
+/* Opt-in sound layer — mounts only when the hero scene booted (it
+   sonifies the scene's own state). */
+heroReady.then(h => {
+  if (!h) return;
+  return import('./js/hero-sonify.js')
+    .then(m => m.mountHeroSonify({ host: document.getElementById('hero-sound-host'), getState: () => h.audioState() }));
+}).catch(err => console.warn('[home] sound layer failed to mount:', err));
+
+/* The shared flux-rope forecast provider (js/sun-flux-rope.js — the same
+   loop sun.html / the dashboard run): DONKI → compounding train → kernel
+   ensemble, published on 'flux-rope-forecast' for the hero's rope layer.
+   Started on idle after the hero is up so the 147 KB WASM + ensemble never
+   sit on the boot path; it publishes idle/failed states too, which is what
+   lets the hero fall back to the Gannon replay honestly. */
+if (heroCanvas && heroCanvas.style.display !== 'none') {
+  const startProvider = () => import('./js/sun-flux-rope.js')
+    .then(m => m.startFluxRopeProvider({ delayMs: 1500 }))
+    .catch(err => console.info('[home] flux-rope provider unavailable:', err?.message ?? err));
+  if ('requestIdleCallback' in window) requestIdleCallback(startProvider, { timeout: 6000 });
+  else setTimeout(startProvider, 2500);
+}
+
+/* ONE feed for the whole page — started after all listeners are attached. */
+new SpaceWeatherFeed().start();
+</script>
+</body>
+</html>

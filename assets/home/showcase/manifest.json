@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-09T17:49:58.774Z",
+  "generatedAt": "2026-11-22T18:43:21.939Z",
   "slides": [
     {
       "id": "earth",
@@ -126,6 +126,20 @@
       "bytes": {
         "poster": 131954,
         "clip": 264640
+      }
+    },
+    {
+      "id": "earth-interior",
+      "poster": "assets/home/showcase/earth-interior.jpg",
+      "clip": "assets/home/showcase/earth-interior.webm",
+      "width": 1366,
+      "height": 938,
+      "source": "/earth-interior.html",
+      "capturedAt": "2026-11-22T18:43:21.900Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 76767,
+        "clip": 140254
       }
     },
     {

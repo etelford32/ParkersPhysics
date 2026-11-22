@@ -245,6 +245,26 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         },
     },
     {
+        id: 'earth-interior',
+        does: 'Watch an earthquake’s waves cross the planet to you.',
+        claim: 'Today’s USGS earthquakes traced through PREM at true radii — every phase, its travel time and its strength — beside the observed core field, the plates and the subducting slabs.',
+        model: 'PREM ray tracing · CHAOS-8.1 · Slab2',
+        data: 'USGS · PB2002 · Smithsonian GVP',
+        scale: 'surface → 6,371 km',
+        verb: 'Open the Earth',
+        accent: '#5aa2ff',
+        capture: {
+            url: '/earth-interior.html',
+            crop: '#ei-canvas',
+            ready: '!!document.querySelector(\'#ei-views [data-view="cutaway"]\')',
+            // The structure view: the live-earthquake view draws nothing without the USGS feed.
+            prep: 'document.querySelector(\'#ei-views [data-view="cutaway"]\').click()',
+            hide: ['nav'],
+            settleMs: 9000,
+            clipMs: 6000,
+        },
+    },
+    {
         id: 'pollution',
         does: 'Scrub a week of PM2.5 back, and a week ahead.',
         claim: 'PM2.5 interpolated across ~105 cities on one shared time axis, hotspots clustered, plumes advected by the wind field.',

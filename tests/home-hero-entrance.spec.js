@@ -34,7 +34,7 @@
 import { test, expect } from '@playwright/test';
 import { synthOvation } from './fixtures/ovation-synthetic.mjs';
 
-const URL = '/index.html?exp_home_bg_carousel=control&debug=1';
+const URL = '/live-sky.html?exp_home_bg_carousel=control&debug=1';
 
 test.describe('home hero entrance', () => {
     // Boot alone measured ~41 s on the software rasteriser (home-hero-stage).

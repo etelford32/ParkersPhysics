@@ -26,7 +26,7 @@
 import { test, expect } from '@playwright/test';
 import { outputTransform, srgbDecode, srgbEncode } from '../js/hero-color.js';
 
-const URL = '/index.html?exp_home_bg_carousel=control&debug=1&intro=0';
+const URL = '/live-sky.html?exp_home_bg_carousel=control&debug=1&intro=0';
 const THREE_URL = '/js/vendor/three-0.160.0/three.module.js';
 
 /** Draw N solid patches through the real HeroPost and read them back. */

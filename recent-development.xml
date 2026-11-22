@@ -11,12 +11,22 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Fri, 20 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Sun, 22 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Homepage: the newest simulations first</title>
+      <link>https://parkersphysics.com/recent-development.html#home-launchpad</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#home-launchpad</guid>
+      <pubDate>Sun, 22 Nov 2026 00:00:00 GMT</pubDate>
+      <category>Improvement</category>
+      <category>Platform</category>
+      <description>&lt;p&gt;The first screen of the homepage is now a launchpad: a carousel of the simulations most recently built or improved, drawn from this build log, beside six real-time simulations that are always one click away.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The carousel is this log: when an entry is added here, its simulation moves to the front of the homepage with the date and what changed.&lt;/li&gt;&lt;li&gt;Six permanent doors — Galaxy, Solar System, EarthView, Climalytix, Real-Time Mars and Sun Watch — each showing its most recent logged change.&lt;/li&gt;&lt;li&gt;The newest log entries and all five sections are listed directly under the carousel.&lt;/li&gt;&lt;li&gt;The live magnetosphere and personal sky console that used to open the homepage now have their own page.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Home&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/live-sky.html&quot;&gt;Open Live Sky Console&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/simulations.html&quot;&gt;Open All simulations&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>Bz Column: the Sun&#39;s north–south field followed from L1 to the ground</title>
@@ -26,6 +36,26 @@
       <category>New simulation</category>
       <category>Space Weather</category>
       <description>&lt;p&gt;A new page follows the interplanetary field down through ten altitudes, from three spacecraft a million and a half kilometres upstream to fourteen observatories on the ground, and marks every value as measured, estimated or forecast. Each prediction it makes is scored in public against the simplest alternative.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The page opens on a cut through Earth from noon to midnight: each arrow is one minute of solar wind an L1 spacecraft has already measured, drawn where that wind is right now on its way in.&lt;/li&gt;&lt;li&gt;Three L1 spacecraft are kept separate and combined into one value with an error bar, instead of the single-spacecraft number most displays show.&lt;/li&gt;&lt;li&gt;USGS ground data is read once a second. A one-minute product reads the peak rate of change several times too low, and the page prints both.&lt;/li&gt;&lt;li&gt;Tested over 131 days of our own record: given the measured wind, the ring-current model beats &amp;quot;no change&amp;quot; during disturbed periods from 2 to 24 hours. As a forecast beyond about an hour it does not, and the page says so.&lt;/li&gt;&lt;li&gt;Where a prediction loses to its control it is shown as losing. On the first live day, two of them did.&lt;/li&gt;&lt;li&gt;One rung, low Earth orbit, is marked &amp;quot;not built&amp;quot;: no public instrument reports there in real time.&lt;/li&gt;&lt;li&gt;Correction: the route that feeds live observatory data to TIGA and Inner Earth was reading station coordinates from a field USGS does not send, and returned an error while USGS was healthy. It now returns all fourteen stations.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/bz.html&quot;&gt;Open Bz Column&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/tiga.html&quot;&gt;Open TIGA · Geomagnetic&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Inner Earth: live earthquakes crossing a true-radius planet</title>
+      <link>https://parkersphysics.com/recent-development.html#inner-earth</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#inner-earth</guid>
+      <pubDate>Thu, 19 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;A new page opens on the latest USGS earthquakes and draws their seismic waves travelling through the Earth to where you are, on a cutaway built from the PREM reference model. It also carries the observed magnetic field at the core, the tectonic plates and the subducting slabs in 3D.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Rays and wavefronts are traced through PREM, the standard one-dimensional Earth model, and the structure is checked against an independent seismology library.&lt;/li&gt;&lt;li&gt;Each arrival is listed with its phase, its travel time and its relative strength; where the earthquake has a published mechanism, the radiation pattern is the event&amp;#39;s own.&lt;/li&gt;&lt;li&gt;The magnetic field view is the CHAOS-8.1 field model from 1997 to now, drawn at the core–mantle boundary. It is the observed field, not a dynamo simulation.&lt;/li&gt;&lt;li&gt;Plates are Bird&amp;#39;s PB2002 boundaries with their velocities; slabs are USGS Slab2 surfaces, shown at true depth with live hypocentres.&lt;/li&gt;&lt;li&gt;A geoelectric nowcast estimates the electric field a geomagnetic disturbance induces in the ground beneath an observatory.&lt;/li&gt;&lt;li&gt;If the earthquake feed is down, no earthquake is drawn.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/earth-interior.html&quot;&gt;Open Inner Earth&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Climalytix: temperature on the real terrain, with sun, shade and cold-air pooling</title>
+      <link>https://parkersphysics.com/recent-development.html#climalytix-terrain-temperature</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#climalytix-terrain-temperature</guid>
+      <pubDate>Mon, 09 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New layer / feature</category>
+      <category>Research</category>
+      <description>&lt;p&gt;The Climalytix map now corrects the forecast temperature for the actual height of the ground, then adds modelled warming on sunlit slopes, cooling in terrain shadow and cold air settling in valleys at night. The System Status page also says why a feed is not healthy.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The lapse rate is fitted from the forecast itself for each view and instant, so night-time inversions are kept rather than erased by a textbook constant.&lt;/li&gt;&lt;li&gt;Cast shadows include the curvature of the Earth, and a new chart shows today&amp;#39;s sun path at the site against its terrain horizon.&lt;/li&gt;&lt;li&gt;The map clock is the current minute: fields are interpolated between forecast frames instead of showing the nearest three-hourly one.&lt;/li&gt;&lt;li&gt;The colour scale fits the range in view by default and says so; the absolute scale is one click away.&lt;/li&gt;&lt;li&gt;These are modelled terms on top of the GFS forecast — direction and timing are the claims, sizes are approximate — and every surface labels them.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/climalytix.html&quot;&gt;Open Climalytix&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/status.html&quot;&gt;Open System status&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
     <item>
@@ -46,6 +76,46 @@
       <category>Improvement</category>
       <category>Platform</category>
       <description>&lt;p&gt;In daylight the homepage is now white and blue end to end, with the live magnetosphere framed in a dark instrument window instead of a black block; below it, a new Simulation Showcase replaces the background slideshow and the embedded EarthView with one card per simulation.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Each card names the physics the page runs, the data behind it and what you can do there; hover plays a short captured loop, click opens the simulation.&lt;/li&gt;&lt;li&gt;Filter the showcase by the site&amp;#39;s own sections — Space Weather, Earth &amp;amp; Orbit, Local Space, Deep Space.&lt;/li&gt;&lt;li&gt;A new &amp;quot;Built like an instrument&amp;quot; band for researchers and operators: named published models, hindcast receipts, the locked-then-scored forecast ledger, provenance rules, and where to start by who you are.&lt;/li&gt;&lt;li&gt;Captures are dated on every card and say when they were rendered in software; the pages themselves run live.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Home&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/simulations.html&quot;&gt;Open All simulations&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Climalytix: one place, every dataset on one clock</title>
+      <link>https://parkersphysics.com/recent-development.html#climalytix</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#climalytix</guid>
+      <pubDate>Mon, 09 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Research</category>
+      <description>&lt;p&gt;A new workspace for a single location: the reanalysis record, the current forecast, climate indices and geomagnetic activity on one shared time axis, under a map of temperature, airflow, air quality and terrain.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Series are aligned by instant and never upsampled; a gap is drawn as a gap, not as zero.&lt;/li&gt;&lt;li&gt;The forecast comes from our own archive of NOAA&amp;#39;s GFS model. When that archive is unavailable the page says so and substitutes nothing.&lt;/li&gt;&lt;li&gt;Map layers include 10 m airflow, PM2.5, elevation and slope, sun exposure, orographic lift, slope winds, thermals and storm ingredients — each with its assumptions stated beside it.&lt;/li&gt;&lt;li&gt;Public data only.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/climalytix.html&quot;&gt;Open Climalytix&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Glacier Watch: 48 glaciers tracked from orbit</title>
+      <link>https://parkersphysics.com/recent-development.html#glacier-watch</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#glacier-watch</guid>
+      <pubDate>Sun, 08 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;A new page follows 48 glaciers with NASA ITS_LIVE satellite velocities — a decade of annual speeds plus image pairs from the last few weeks — beside WGMS mass-balance records, and lists every one of Earth&amp;#39;s 274,531 glaciers from the RGI 7.0 inventory.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;&amp;quot;Faster than usual&amp;quot; is judged against each glacier&amp;#39;s own seasonal cycle and needs to clear the measurement error.&lt;/li&gt;&lt;li&gt;Where a glacier moves too slowly for the satellites to resolve, the page says that instead of plotting noise.&lt;/li&gt;&lt;li&gt;Ice thickness and bed shape are a model inverted from the observed speed, and are labelled as a model everywhere.&lt;/li&gt;&lt;li&gt;Missing mass-balance years are left as gaps and never counted as zero change.&lt;/li&gt;&lt;li&gt;Also an EarthView layer: tracked glaciers, and the full inventory on the globe.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/glacier-watch.html&quot;&gt;Open Glacier Watch&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/earth.html&quot;&gt;Open EarthView&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Recent Development: this build log, and an RSS feed</title>
+      <link>https://parkersphysics.com/recent-development.html#recent-development-page</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#recent-development-page</guid>
+      <pubDate>Sun, 08 Nov 2026 00:00:00 GMT</pubDate>
+      <category>Platform</category>
+      <category>Platform</category>
+      <description>&lt;p&gt;Everything that ships is now recorded on one page, sprint by sprint, written for visitors rather than reviewers, with a feed you can subscribe to. The hand-written changelog it replaces had stopped in May.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/recent-development.html&quot;&gt;Open Recent Development&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/feedback.html&quot;&gt;Open Feedback&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>A daylight theme: white and blue while your Sun is up</title>
+      <link>https://parkersphysics.com/recent-development.html#light-theme</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#light-theme</guid>
+      <pubDate>Sun, 08 Nov 2026 00:00:00 GMT</pubDate>
+      <category>Platform</category>
+      <category>Platform</category>
+      <description>&lt;p&gt;Reading pages — the home page, the catalogue, the section hubs, pricing, the blog — now switch to a light theme between your local sunrise and sunset. A switch under the logo pins either one.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The simulations themselves stay dark on purpose: space is black.&lt;/li&gt;&lt;li&gt;Sunrise and sunset come from your saved location; without one the page uses 07:00–19:00 local time and says which.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/simulations.html&quot;&gt;Open All simulations&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
     <item>
@@ -446,56 +516,6 @@
       <category>Improvement</category>
       <category>Local Space</category>
       <description>&lt;p&gt;A searchable feature index, a top-down map view, zoom-through to the surface, and a season computed correctly from JPL.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/mars.html&quot;&gt;Open Real-Time Mars&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Climate Lab dashboard</title>
-      <link>https://parkersphysics.com/recent-development.html#climate-lab</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#climate-lab</guid>
-      <pubDate>Fri, 25 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New simulation</category>
-      <category>Platform</category>
-      <description>&lt;p&gt;Your account dashboard is now an instrument bench: a home weather station, meteogram, alert console and satellite pass tracker.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/dashboard.html&quot;&gt;Open Dashboard&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage: the Sun&#39;s next 24 hours</title>
-      <link>https://parkersphysics.com/recent-development.html#hero-next-24h</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#hero-next-24h</guid>
-      <pubDate>Thu, 24 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Space Weather</category>
-      <description>&lt;p&gt;The homepage opens on today&amp;#39;s Sun — real NOAA active regions — and plays the next 24 hours of CMEs through the flux-rope engine.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage: today&#39;s Earth and NOAA&#39;s aurora</title>
-      <link>https://parkersphysics.com/recent-development.html#hero-real-earth</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#hero-real-earth</guid>
-      <pubDate>Wed, 23 Sep 2026 00:00:00 GMT</pubDate>
-      <category>Improvement</category>
-      <category>Space Weather</category>
-      <description>&lt;p&gt;The homepage globe is NASA imagery turned to today&amp;#39;s sunlight and season, with the live OVATION aurora oval on the real magnetic dipole.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>EarthView clouds follow the clock</title>
-      <link>https://parkersphysics.com/recent-development.html#cloud-time-aware</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#cloud-time-aware</guid>
-      <pubDate>Wed, 23 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Earth &amp; Orbit</category>
-      <description>&lt;p&gt;Scrubbing time now shows archived satellite cloud frames for that moment, a wind-advected nowcast just ahead, and model-only clouds further out.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/earth.html&quot;&gt;Open EarthView&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage 30-day temperature outlook</title>
-      <link>https://parkersphysics.com/recent-development.html#temp-outlook</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#temp-outlook</guid>
-      <pubDate>Mon, 21 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Earth &amp; Orbit</category>
-      <description>&lt;p&gt;A daily-candle temperature chart and a 30-day calendar for your location, relaxing from the forecast toward the local normal.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
   </channel>

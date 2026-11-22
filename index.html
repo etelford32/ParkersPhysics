@@ -11,32 +11,19 @@
 <!-- perf-hints:start -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <link rel="modulepreload" href="/js/swpc-feed.js">
 <!-- perf-hints:end -->
-<!-- Hero boot (2026-09-23): the live magnetosphere's module graph, fetched
-     while the HTML parses. The PAGE WIRING module imports it first thing
-     (in parallel with the console), so without these the browser only
-     discovered three levels of it one round trip at a time. Kept OUT of the
-     perf-hints block, which scripts/perf_hints.py owns. -->
-<link rel="modulepreload" href="/js/hero-space-weather.js">
-<link rel="modulepreload" href="/js/magnetosphere-engine.js">
-<link rel="modulepreload" href="/js/hero-earth.js">
-<link rel="modulepreload" href="/js/sun-altitude.js">
-<link rel="modulepreload" href="/js/geo/coords.glsl.js">
-<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/UnrealBloomPass.js">
-<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/Pass.js">
-<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/CopyShader.js">
-<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/LuminosityHighPassShader.js">
-<!-- The Earth's boot-tier maps (assets/earth, ~115 KB — js/hero-earth.js
-     TEXTURE_TIERS.boot; the entrance waits on them, capped). `crossorigin`
-     because three's TextureLoader requests in CORS mode and a preload is
-     only reused on a matching mode; `media` because a reduced-motion visitor
-     never gets the scene and should not pay for its maps. -->
-<link rel="preload" as="image" type="image/webp" href="/assets/earth/day-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
-<link rel="preload" as="image" type="image/webp" href="/assets/earth/water-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
-<link rel="preload" as="image" type="image/webp" href="/assets/earth/lights-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
-<link rel="preload" as="image" type="image/webp" href="/assets/earth/relief-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<!-- Launchpad (2026-11-22): the first screen's module graph, fetched while
+     the HTML parses. No three.js on this page any more — the live
+     magnetosphere hero moved to live-sky.html — so three is NOT preloaded
+     (a modulepreload of it here would be ~700 KB the page never runs). -->
+<link rel="modulepreload" href="/js/home-launchpad.js">
+<link rel="modulepreload" href="/js/home-launchpad-model.js">
+<link rel="modulepreload" href="/js/home-launchpad-media.js">
+<link rel="modulepreload" href="/js/dev-log.js">
+<link rel="modulepreload" href="/js/simulations-catalog.js">
+<link rel="modulepreload" href="/js/site-sections.js">
+<link rel="modulepreload" href="/js/glyphs.js">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
@@ -109,134 +96,131 @@ img{display:block}
 .skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
 .skip-link:focus{left:16px}
 
-/* ── HERO / SKY CONSOLE ──────────────────────────────────────────────────
-   The cinematic magnetosphere canvas stays as the section backdrop
-   (js/hero-space-weather.js — self-handles WebGL failure / reduced motion);
-   the console floats above it on opaque surfaces so the data stays
-   readable no matter how hot the bloom runs. */
-/* The layered radial gradients are the no-WebGL / reduced-motion echo of the
-   canvas' deep-field nebula (js/hero-space-weather.js NEBULA_FRAG) — the
-   hero reads "intergalactic" on the fallback path too, at zero cost. */
-#hero{position:relative;overflow:hidden;padding:38px 16px 46px;background:
-  radial-gradient(ellipse 60% 40% at 18% 22%,rgba(91,30,255,.22),transparent 70%),
-  radial-gradient(ellipse 50% 35% at 82% 70%,rgba(0,150,170,.16),transparent 70%),
-  radial-gradient(ellipse 35% 25% at 60% 15%,rgba(255,31,156,.10),transparent 70%),
-  radial-gradient(ellipse at 50% 30%,#071026 0%,#03010e 70%)}
-/* The canvas starts TRANSPARENT and crossfades in over the CSS backdrop when
-   the hero module has warmed its programs and put frames on it (`hero-live`,
-   set by js/hero-space-weather.js on its second frame). It used to CUT in — an
-   opaque WebGL frame replacing the CSS nebula in one repaint, after a
-   main-thread stall. If the module never arrives the canvas simply stays
-   invisible, which is the no-WebGL look. */
-#hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;
-  opacity:0;transition:opacity 1.6s cubic-bezier(.25,.6,.25,1)}
-#hero.hero-live #hero-canvas{opacity:1}
-#hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 40%,rgba(2,0,10,.5),rgba(2,0,10,.15) 75%)}
-.hero-inner{position:relative;z-index:1;max-width:1000px;margin:0 auto}
-/* ── THE STAGE (2026-09-20) ───────────────────────────────────────────────
-   #hero-stage is an EMPTY box that the canvas frames Earth into
-   (js/hero-space-weather.js `stage` option measures its rect every resize
-   and solves fov + look-at so Earth's disc fills ~60% of the box's short
-   side and nothing in the DOM sits over it). Before this the console was a
-   full-width 1000px block over the middle of the canvas and Earth was
-   pushed to the lower-right corner at ~85px radius, half under the Air
-   Quality card — the badge promised a live magnetosphere the visitor could
-   not see. Two layouts, ONE mechanism:
-     ≥1100px  split: copy + console in a 560px left column, the stage is the
-              right column spanning every row. The sunlit limb faces the copy
-              (the camera azimuth in the hero module puts the Sun screen-left).
-     <1100px  stacked: the stage is a short cinematic band between the copy
-              and the console, so phones still get an unobstructed Earth.
-   The legibility scrim goes LEFT-weighted on the split layout so it stops
-   dimming the one thing the layout exists to show. Do not put content in
-   #hero-stage; if it needs to be covered, that is a layout change, not a
-   z-index one. */
-#hero-stage{position:relative;height:250px;margin:18px 0 10px;pointer-events:none;container-type:size}
-/* ── BOOT RETICLE (2026-09-23) ────────────────────────────────────────────
-   The one exception to "nothing in #hero-stage": two pseudo-elements that
-   exist only while the scene boots and are GONE before Earth settles, so
-   they never cover it. `hero-booting` (set by the inline script under the
-   canvas, only where the hero will actually run) shows a lock-on reticle
-   exactly where Earth will land: centred on the stage, 1.14 × the resting
-   disc. Until the module loads that is a CSS guess — Earth's radius is
-   framed at 0.30 of the box's SHORT side → 30cqmin — and once it has
-   measured the stage the module publishes the real radius as
-   --hero-disc-r (larger on phones, where its fov clamp binds) and the ring
-   ranges out to it. The camera then pushes in and Earth grows into the
-   ring; on `hero-live` the ring swells and dissolves. Every
-   animation here is transform/opacity (individual `rotate`/`scale`
-   properties) so it runs on the COMPOSITOR and keeps turning through the
-   main-thread work of booting WebGL. */
-#hero-stage::before,#hero-stage::after{content:'';position:absolute;left:50%;top:50%;width:calc(var(--hero-disc-r,30cqmin) * 2.28);aspect-ratio:1;
-  translate:-50% -50%;border-radius:50%;opacity:0;pointer-events:none;transition:opacity .5s ease,width .8s cubic-bezier(.2,.7,.2,1)}
-#hero-stage::before{border:1px solid rgba(143,240,255,.26);
-  background:
-    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 50% 0/1px 9px no-repeat,
-    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 50% 100%/1px 9px no-repeat,
-    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 0 50%/9px 1px no-repeat,
-    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 100% 50%/9px 1px no-repeat,
-    radial-gradient(circle,rgba(20,60,140,.16) 0 58%,rgba(77,219,255,.07) 80%,transparent 88%);
-  box-shadow:0 0 28px rgba(77,219,255,.10);animation:hero-breathe 2.4s ease-in-out infinite}
-#hero-stage::after{width:calc(var(--hero-disc-r,30cqmin) * 2.28 + 14px);border:1.5px solid transparent;border-top-color:rgba(143,240,255,.85);
-  border-right-color:rgba(157,58,255,.35);filter:drop-shadow(0 0 5px rgba(77,219,255,.6));
-  animation:hero-scan 1.5s linear infinite}
-#hero.hero-booting #hero-stage::before,#hero.hero-booting #hero-stage::after{opacity:1}
-/* Lock-on: the ring holds while the camera pushes Earth into it, then swells
-   out and dissolves; the scanning arc stops being needed at once. */
-#hero.hero-live #hero-stage::before{opacity:0;scale:1.16;animation:none;
-  transition:opacity 1.2s ease 1.1s,scale 2.4s cubic-bezier(.2,.7,.2,1) .6s}
-#hero.hero-live #hero-stage::after{opacity:0;transition:opacity .45s ease}
-@keyframes hero-scan{to{rotate:360deg}}
-@keyframes hero-breathe{50%{scale:1.025}}
-
-/* ── ENTRANCE — the copy settles in while the scene boots ─────────────────
-   Opacity + `translate` only (compositor), short, and started at first paint
-   rather than on a JS signal, so it costs the headline nothing but a frame
-   of LCP. The console fades up when its module renders (initSkyConsole adds
-   .sky-console) — it used to pop in whole. */
-@keyframes hero-rise{from{opacity:0;translate:0 12px}to{opacity:1;translate:0 0}}
-#hero .hero-badge,#hero .hero-h1,#hero .hero-sub,#hero .hero-values{animation:hero-rise .8s cubic-bezier(.2,.7,.2,1) both}
-#hero .hero-h1{animation-delay:.07s}
-#hero .hero-sub{animation-delay:.16s}
-#hero .hero-values{animation-delay:.24s}
-#hero #sky-console-host.sky-console{animation:hero-rise .7s cubic-bezier(.2,.7,.2,1) both}
-@media (prefers-reduced-motion:reduce){
-  #hero-canvas{transition:none}
-  #hero-stage::before,#hero-stage::after{display:none}
-  #hero .hero-badge,#hero .hero-h1,#hero .hero-sub,#hero .hero-values,#hero #sky-console-host.sky-console{animation:none}
-}
-#hero-scrub-host{position:relative;z-index:2;margin:0 0 14px}
-/* `#hero .x` (0,1,1,0) on purpose: these override the page's own
-   `.hero-top{text-align:center}` etc. declared BELOW this block — same
-   specificity would lose on source order (measured: the column stayed centred). */
-@media(min-width:1100px){
-  #hero .hero-inner{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);column-gap:40px;max-width:1320px;align-items:start}
-  #hero .hero-top,#hero #sky-console-host,#hero .hero-cta,#hero #hero-signup-host{grid-column:1;min-width:0}
-  #hero #hero-stage-col{grid-column:2;grid-row:1/5;align-self:start;min-width:0}
-  #hero #hero-scrub-host{margin:12px 0 0}
-  /* explicit: a size-contained (container-type) grid item did not stretch in Chromium — measured 0px wide, centred */
-  #hero #sky-console-host{width:100%;justify-self:stretch}
-  /* Top-aligned and viewport-capped, NOT stretched over the column: stretched,
-     the box was 1023px tall on a 900px viewport and Earth's centre sat below
-     the fold. The short side (the cap) is what sets the disc size. */
-  #hero #hero-stage{height:min(560px,calc(100vh - 290px));min-height:400px;margin:0}
-  #hero .hero-top{text-align:left}
-  #hero .hero-sub{margin:0}
-  #hero .hero-values{justify-content:flex-start;margin-left:0;margin-right:0}
-  #hero .hero-cta{justify-content:flex-start}
-  #hero .hero-cta-note{text-align:left}
-  #hero::after{background:linear-gradient(90deg,rgba(2,0,10,.62) 0%,rgba(2,0,10,.45) 38%,rgba(2,0,10,0) 56%)}
-}
-.hero-top{text-align:center;margin-bottom:22px}
-.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.64rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:18px;box-shadow:var(--glow-uv-sm)}
+/* ── LAUNCHPAD — the first screen (2026-11-22) ────────────────────────────
+   Replaced the live magnetosphere + sky console hero (now live-sky.html).
+   Three parts, all doors into simulations: the RECENT carousel (derived from
+   the build log by js/home-launchpad-model.js, rendered by
+   js/home-launchpad.js), six PERMANENT real-time tiles (static markup below,
+   pinned to the model by tests/home-launchpad.mjs), and the newest build-log
+   entries + the five section hubs. No WebGL, no video, no iframe: the first
+   screen is ~250 KB of thumbnails (scripts/build-launchpad-thumbs.py).
+   The section keeps id="hero" — the CTA rail's IntersectionObserver and the
+   funnel's vocabulary both mean "the first screen" by it.
+   Text INSIDE a slide or tile is white in both themes: it sits on a
+   photograph of a dark scene under a dark scrim. Everything outside them
+   uses the tokens, which js/theme-light.css remaps. */
+#hero{position:relative;overflow:hidden;padding:20px 20px 26px;background:
+  radial-gradient(ellipse 60% 55% at 78% 30%,rgba(91,30,255,.16),transparent 65%),
+  radial-gradient(ellipse 50% 45% at 12% 80%,rgba(255,31,156,.07),transparent 70%),
+  linear-gradient(180deg,#03010e 0%,#07021a 100%)}
+.lp-inner{position:relative;z-index:1;max-width:1320px;margin:0 auto}
+.lp-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px 28px;margin-bottom:14px}
+.lp-head .btn-primary{padding:11px 22px;font-size:.74rem}
+.lp-head .btn-secondary{padding:10px 20px;font-size:.84rem}
+.lp-head .hero-cta{margin-top:0}
+.lp-head-copy{min-width:0;flex:1 1 520px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(157,58,255,.10);border:1px solid rgba(183,101,255,.35);border-radius:20px;font-family:var(--font-display);font-size:.64rem;color:var(--uv-300);letter-spacing:var(--tracking-cyber);text-transform:uppercase;margin-bottom:9px}
 .hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 8px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
 @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
-.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.5rem,4vw,2.5rem);letter-spacing:.04em;line-height:1.14;margin-bottom:12px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 16px rgba(60,160,255,.4))}
-.hero-sub{font-size:clamp(.88rem,2vw,1rem);color:var(--fg-3);line-height:1.65;max-width:640px;margin:0 auto}
+.hero-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(1.3rem,2.6vw,1.9rem);letter-spacing:.04em;line-height:1.14;margin-bottom:6px;text-transform:uppercase;background:var(--grad-headline);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:clamp(.88rem,1.6vw,1rem);color:var(--fg-3);line-height:1.6;max-width:720px}
 .hero-sub em{font-style:normal;color:var(--fg-1)}
-.hero-values{display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:center;margin:12px auto 0;max-width:720px;font-size:.78rem;color:var(--fg-3);line-height:1.5}
-.hero-values span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
-.hero-values span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dot,#9d3aff);box-shadow:0 0 6px var(--dot,#9d3aff);flex-shrink:0}
+.lp-main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:stretch}
+.lp-col{display:flex;flex-direction:column;min-width:0}
+.lp-col-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 2px 9px}
+.lp-col-h h2{font-family:var(--font-display);font-size:.7rem;font-weight:700;letter-spacing:var(--tracking-cyber);text-transform:uppercase;color:var(--uv-300)}
+.lp-col-h a{font-size:.76rem;color:var(--fg-3);border-bottom:1px solid rgba(154,133,255,.3);white-space:nowrap}
+.lp-col-h a:hover{color:var(--fg-1)}
+/* Carousel */
+.lp-recent{position:relative;flex:1;aspect-ratio:16/9;min-height:340px;max-height:min(440px,calc(100vh - 430px));border-radius:18px;overflow:hidden;background:#070b1c;border:1px solid rgba(154,133,255,.22);box-shadow:0 18px 50px rgba(2,0,10,.5)}
+.lp-recent[aria-busy="true"]::before{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(154,133,255,.08) 50%,transparent 70%);background-size:200% 100%;animation:lp-shimmer 1.6s linear infinite}
+@keyframes lp-shimmer{to{background-position:-200% 0}}
+.lp-track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;outline:none;overscroll-behavior-x:contain}
+.lp-track::-webkit-scrollbar{display:none}
+.lp-track:focus-visible{box-shadow:inset 0 0 0 2px #8ff0ff}
+.lp-slide{position:relative;flex:0 0 100%;min-width:0;scroll-snap-align:start;scroll-snap-stop:always;color:#fff}
+.lp-media{position:absolute;inset:0;background:#070b1c}
+.lp-media img{width:100%;height:100%;object-fit:cover;display:block}
+.lp-plate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--lp-acc,#9a85ff);
+  background:radial-gradient(ellipse 70% 80% at 70% 30%,color-mix(in srgb,var(--lp-acc,#9a85ff) 22%,transparent),transparent 70%),linear-gradient(160deg,#0b1030,#05030f)}
+.lp-plate svg{width:min(30%,170px);height:auto;opacity:.75;filter:drop-shadow(0 0 22px currentColor);transform:translate(70%,-34%)}
+.lp-slide::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,.05) 20%,rgba(2,0,10,.62) 58%,rgba(2,0,10,.94) 100%)}
+.lp-slide-body{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:20px 24px 46px}
+.lp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.lp-chip{font-family:var(--font-mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;padding:3px 9px;border-radius:999px;color:rgba(245,240,255,.86);background:rgba(2,0,10,.6);border:1px solid rgba(245,240,255,.22);backdrop-filter:blur(4px)}
+.lp-chip-kind{color:var(--lp-acc,#fff);border-color:var(--lp-acc,rgba(245,240,255,.3))}
+.lp-chip-new{color:#04120b;background:#2eff9e;border-color:#2eff9e;font-weight:700}
+.lp-slide-sim{font-family:var(--font-display);font-weight:800;font-size:clamp(1.15rem,2.3vw,1.7rem);letter-spacing:.03em;text-transform:uppercase;line-height:1.12;color:#fff;margin-bottom:5px;text-shadow:0 2px 14px rgba(2,0,10,.8)}
+.lp-slide-title{font-size:.95rem;font-weight:600;color:#f5f0ff;line-height:1.35;margin-bottom:5px}
+.lp-slide-sum{font-size:.84rem;color:rgba(232,228,250,.82);line-height:1.5;max-width:64ch;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.lp-slide-cta{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-top:12px}
+.lp-open{display:inline-flex;align-items:center;padding:9px 18px;border-radius:11px;font-family:var(--font-display);font-weight:700;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:#fff;
+  background:linear-gradient(180deg,#c47cff 0%,#9d3aff 45%,#7b00ee 100%);box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 -2px 0 rgba(60,0,140,.9) inset,0 4px 0 #4a0a9a,0 10px 22px rgba(157,58,255,.4);transition:transform .08s,filter .2s}
+.lp-open:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.lp-open:active{transform:translateY(3px)}
+.lp-open:focus-visible,.lp-changed:focus-visible,.lp-fix:focus-visible,.lp-door:focus-visible,.lp-log a:focus-visible{outline:2px solid #8ff0ff;outline-offset:3px}
+.lp-changed{font-size:.8rem;color:rgba(245,240,255,.86);border-bottom:1px solid rgba(245,240,255,.4)}
+.lp-changed:hover{color:#fff;border-color:#fff}
+.lp-arrow{position:absolute;top:38%;z-index:2;width:38px;height:38px;border-radius:50%;border:1px solid rgba(245,240,255,.3);background:rgba(2,0,10,.55);color:#fff;font-size:1.3rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px);transition:background .2s,border-color .2s}
+.lp-arrow:hover{background:rgba(2,0,10,.85);border-color:#8ff0ff}
+.lp-arrow:focus-visible{outline:2px solid #8ff0ff;outline-offset:2px}
+.lp-prev{left:12px}.lp-next{right:12px}
+.lp-dots{position:absolute;left:24px;bottom:16px;z-index:2;display:flex;gap:7px}
+.lp-dot{width:22px;height:14px;padding:0;border:0;background:none;cursor:pointer;position:relative}
+.lp-dot::before{content:'';position:absolute;left:0;right:0;top:5px;height:4px;border-radius:2px;background:rgba(245,240,255,.3);transition:background .25s}
+.lp-dot[aria-current="true"]::before{background:#8ff0ff}
+.lp-dot:focus-visible{outline:2px solid #8ff0ff;outline-offset:2px}
+/* Permanent tiles */
+.lp-fixtures{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:12px}
+.lp-fix{position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:112px;border-radius:14px;overflow:hidden;color:#fff;background:#070b1c;border:1px solid rgba(154,133,255,.2);transition:transform .22s cubic-bezier(.2,.7,.2,1),border-color .22s,box-shadow .22s}
+.lp-fix:hover{transform:translateY(-3px);border-color:var(--lp-acc,#9a85ff);box-shadow:0 14px 34px rgba(2,0,10,.5),0 0 0 1px var(--lp-acc,transparent)}
+.lp-fix>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform 5s cubic-bezier(.2,.7,.2,1)}
+.lp-fix:hover>img{transform:scale(1.07)}
+.lp-fix::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,.12) 0%,rgba(2,0,10,.55) 45%,rgba(2,0,10,.93) 100%)}
+.lp-fix .lp-plate svg{width:54px;transform:translateY(-30%)}
+.lp-live{position:absolute;top:9px;left:9px;z-index:1;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,240,255,.9);background:rgba(2,0,10,.6);padding:3px 8px;border-radius:4px;backdrop-filter:blur(4px)}
+.lp-live::before{content:'';width:6px;height:6px;border-radius:50%;background:#2eff9e;box-shadow:0 0 6px #2eff9e;animation:pulse-dot 1.8s ease-in-out infinite}
+.lp-tier{position:absolute;top:9px;right:9px;z-index:1;font-family:var(--font-mono);font-size:.54rem;letter-spacing:.1em;text-transform:uppercase;color:#7dffc4;background:rgba(2,0,10,.6);border:1px solid rgba(46,255,158,.4);padding:2px 7px;border-radius:999px}
+.lp-fix-body{position:relative;z-index:1;display:block;padding:10px 12px 11px}
+.lp-fix-body b{display:block;font-family:var(--font-display);font-size:.82rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#fff;margin-bottom:3px}
+.lp-fix-live{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:.74rem;line-height:1.4;color:rgba(232,228,250,.84)}
+.lp-fix-latest{display:block;margin-top:4px;font-family:var(--font-mono);font-size:.6rem;line-height:1.35;color:var(--lp-acc,#8ff0ff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lp-fix-latest[hidden]{display:none}   /* author display:block above would beat the UA [hidden] rule */
+/* Foot: the build log + the sections */
+.lp-foot{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;margin-top:14px}
+.lp-panel{min-width:0;padding:13px 16px 12px;border-radius:14px;background:rgba(13,6,38,.5);border:1px solid rgba(154,133,255,.16)}
+.lp-log{list-style:none}
+.lp-log a{display:grid;grid-template-columns:52px 92px minmax(0,1fr);gap:10px;align-items:baseline;padding:4px 0;font-size:.82rem;color:var(--fg-2)}
+.lp-log a:hover .lp-log-title{color:var(--fg-1);text-decoration:underline}
+.lp-log time{font-family:var(--font-mono);font-size:.68rem;color:var(--fg-4)}
+.lp-log-kind{font-family:var(--font-mono);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:var(--uv-300)}
+.lp-log-kind[data-kind="simulation"]{color:var(--status-ok)}
+.lp-log-kind[data-kind="fix"]{color:var(--status-warn)}
+.lp-log-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lp-doors{display:flex;flex-wrap:wrap;gap:8px}
+.lp-door{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border-radius:999px;font-size:.8rem;font-weight:600;color:var(--fg-2);border:1px solid rgba(154,133,255,.28);transition:color .2s,border-color .2s,background .2s}
+.lp-door:hover{color:var(--fg-1);border-color:var(--uv-400);background:rgba(157,58,255,.12)}
+.lp-door.all{color:#fff;background:var(--grad-uv);border-color:transparent}
+.lp-note{margin-top:10px;font-size:.7rem;color:var(--fg-4);line-height:1.5}
+.lp-note a{border-bottom:1px solid rgba(154,133,255,.35)}
+@media(max-width:980px){
+  .lp-main,.lp-foot{grid-template-columns:1fr}
+  .lp-recent{aspect-ratio:auto;height:min(470px,74vh);min-height:400px}
+  .lp-fix{min-height:132px}
+}
+@media(max-width:560px){
+  #hero{padding:46px 12px 24px}   /* clears the theme switch under the logo */
+  .lp-head .hero-cta{width:100%}
+  .lp-slide-body{padding:16px 16px 42px}
+  .lp-arrow{display:none}          /* swipe is the control on a phone */
+  .lp-dots{left:16px}
+  .lp-log a{grid-template-columns:48px minmax(0,1fr)}
+  .lp-log-kind{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .hero-badge::before,.lp-live::before,.lp-recent[aria-busy="true"]::before{animation:none}
+  .lp-fix,.lp-fix>img,.lp-open{transition:none}
+}
 
 /* ── LIVE DEMO EMBEDS (EarthView + flux-rope stage) ──────────────────────── */
 .demo-frame{position:relative;max-width:960px;margin:0 auto;aspect-ratio:16/9;border-radius:14px;overflow:hidden;
@@ -250,7 +234,6 @@ img{display:block}
   font-family:var(--font-mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,240,255,.75);
   background:rgba(2,0,10,.6);padding:4px 10px;border-radius:4px;border:1px solid rgba(154,133,255,.25);backdrop-filter:blur(4px)}
 .demo-live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--status-ok);box-shadow:0 0 6px var(--status-ok);animation:pulse-dot 1.8s ease-in-out infinite}
-#sky-console-host{min-height:540px;container-type:inline-size}  /* the console's tab grid reflows on a @container query — in the split hero it lives in a 560px column on a 1440px viewport */
 
 /* ── ONE ASK (2026-09-06) ────────────────────────────────────────────────
    This REVERTS the #997 above-the-fold email capture and drops the
@@ -457,61 +440,33 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
 }
 
 /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
-/* THE LIVE SCENE STAYS DARK; THE HERO AROUND IT GOES LIGHT (2026-11-09).
-   Until this pass the whole #hero was re-pinned to the dark tokens, so a
-   daytime visitor got a 900px black block on top of a white page — the
-   owner's "very janky". The canvas is a live view of space with its own
-   tuned colour pipeline (js/hero-color.js) and cannot be lit, so instead it
-   is framed: #hero-window (a dark, bordered, rounded plate that sits UNDER
-   the canvas) and a clip-path on the canvas both follow the stage column's
-   rect, published as --hero-win-* by the ResizeObserver after the hero
-   markup. The copy, badge and values take the light palette; the dark
-   tokens are re-pinned ONLY on #hero-stage-col, so the scrubber and the
-   sound layer that live inside the window keep their dark styling. The sky
-   console and the sign-up card set their own light colours in their
-   modules' injected CSS. In dark mode #hero-window is display:none and the
-   clip-path is absent — the dark page is pixel-identical to before. */
-#hero-window{display:none}
+/* THE LAUNCHPAD IN DAYLIGHT (2026-11-22): the section is white and blue; the
+   slides and tiles are photographs of dark scenes and keep their dark scrim
+   and white type (see the LAUNCHPAD note above), framed in a blue hairline. */
 html.theme-light #hero{background:
-  radial-gradient(ellipse 70% 55% at 76% 38%,rgba(21,96,212,.14),transparent 70%),
-  radial-gradient(ellipse 55% 45% at 12% 85%,rgba(9,118,186,.10),transparent 70%),
+  radial-gradient(ellipse 70% 55% at 76% 20%,rgba(21,96,212,.12),transparent 70%),
   linear-gradient(180deg,#f6f9fe 0%,#ffffff 100%)}
-/* A faint graph-paper grid: the hero reads as an instrument panel, not a poster. */
-html.theme-light #hero::before{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.55;
-  background-image:linear-gradient(rgba(21,96,212,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(21,96,212,.07) 1px,transparent 1px);
-  background-size:48px 48px;
-  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 40%,#000 30%,transparent 100%);
-  mask-image:radial-gradient(ellipse 80% 70% at 50% 40%,#000 30%,transparent 100%)}
-html.theme-light #hero::after{background:none}
-html.theme-light #hero-window{display:block;position:absolute;z-index:0;pointer-events:none;
-  top:var(--hero-win-t,0px);left:var(--hero-win-l,0px);width:var(--hero-win-w,0px);height:var(--hero-win-h,0px);
-  border-radius:22px;background:radial-gradient(ellipse at 50% 30%,#0a1430 0%,#040914 70%);
-  box-shadow:0 0 0 1px var(--pl-border-strong),0 1px 0 rgba(255,255,255,.6),0 18px 48px rgba(11,31,58,.22),0 2px 6px rgba(11,31,58,.12)}
-html.theme-light #hero-canvas{clip-path:inset(var(--hero-win-t,0px) calc(100% - var(--hero-win-l,0px) - var(--hero-win-w,0px)) calc(100% - var(--hero-win-t,0px) - var(--hero-win-h,0px)) var(--hero-win-l,0px) round 22px)}
-html.theme-light #hero #hero-stage-col{padding:12px 14px 14px}
 html.theme-light #hero .hero-h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text;filter:none}
 html.theme-light #hero .hero-sub{color:var(--pl-text-3)}
 html.theme-light #hero .hero-sub em{color:var(--pl-text-1)}
 html.theme-light #hero .hero-badge{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.32);color:var(--pl-blue-deep);box-shadow:none}
-html.theme-light #hero .hero-values{color:var(--pl-text-3)}
-html.theme-light #hero .hero-values span::before{box-shadow:none;filter:brightness(.72) saturate(1.3)}
 html.theme-light #hero .hero-cta-note{color:var(--pl-text-4)}
-/* The boot reticle on the dark window keeps its cyan; nothing to restate. */
-html.theme-light #hero #hero-stage-col{color-scheme:dark;
-  --indigo-500:#3b1eff;--indigo-400:#6a48ff;--indigo-300:#9a85ff;
-  --uv-700:#5500b3;--uv-600:#7b00ee;--uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
-  --pink-600:#e60088;--pink-500:#ff1f9c;--pink-400:#ff5cb8;
-  --lightning-pure:#ffffff;--lightning-bolt:#f5f8ff;
-  --lightning-arc:#8ff0ff;--lightning-spark:#4ddbff;--lightning-deep:#1f8fff;
-  --status-ok:#2eff9e;--status-warn:#ffd23f;--status-danger:#ff3050;--status-alert:#ff1f9c;
-  --fg-1:#f5f0ff;--fg-2:#cdc4f0;--fg-3:#9d92c8;--fg-4:#6f6695;--fg-5:#48426e;--fg-6:#38335a;
-  --grad-uv:linear-gradient(135deg,#3b1eff,#9d3aff);
-  --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
-  --grad-spectrum:linear-gradient(135deg,#3b1eff,#9d3aff,#ff1f9c);
-  --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
-  --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
-  --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
-  --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5)}
+html.theme-light .lp-col-h h2{color:var(--pl-blue-deep)}
+html.theme-light .lp-col-h a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .lp-recent,html.theme-light .lp-fix{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .lp-fix:hover{border-color:var(--pl-blue);box-shadow:0 0 0 1px var(--pl-blue),var(--pl-shadow-hover)}
+html.theme-light .lp-open{background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 45%,#1560d4 100%);box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -2px 0 rgba(8,52,128,.75) inset,0 4px 0 #0b3f8f,0 10px 22px rgba(2,0,10,.4)}
+html.theme-light .lp-panel{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .lp-log a{color:var(--pl-text-2)}
+html.theme-light .lp-log time{color:var(--pl-text-4)}
+html.theme-light .lp-log-kind{color:var(--pl-blue-deep)}
+html.theme-light .lp-log-kind[data-kind="simulation"]{color:var(--pl-ok)}
+html.theme-light .lp-log-kind[data-kind="fix"]{color:var(--pl-warn)}
+html.theme-light .lp-door{color:var(--pl-text-2);border-color:var(--pl-border-strong);background:var(--pl-card)}
+html.theme-light .lp-door:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue);background:var(--pl-blue-soft)}
+html.theme-light .lp-door.all{color:#fff;background:var(--pl-grad-btn);border-color:transparent}
+html.theme-light .lp-note{color:var(--pl-text-4)}
+html.theme-light .lp-note a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
 /* The live ticker directly under the hero is a soft-blue band with a blue
    rule on top (js/home-ticker.js carries those rules). */
 
@@ -710,104 +665,119 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
 
 <main id="main-content">
 
-<!-- ── S1 · SKY CONSOLE — the answer layer ────────────────────────────────
-     2026-08 redesign: the hero IS the product now. js/home-sky-console.js
-     renders a personal conditions console — Air quality (default) / Major
-     events / Temperature / Space weather / Aurora (secondary by design) —
-     over the cinematic live-magnetosphere canvas (js/hero-space-weather.js,
-     kept from the 2026-07 hero as the backdrop; 2026-09 added its deep-field
-     nebula. The 2026-09 background carousel of captured sims was retired
-     2026-11-09 — those captures are now the Simulation Showcase, S3). Space data comes from the
-     page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
-     (per-location Open-Meteo). See the wiring module at the bottom of
-     <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
-     reword it without a new experiment. ONE ask below the console (the
-     dashboard) — see the "ONE ASK" CSS note for the funnel numbers. -->
-<section id="hero" aria-label="Your sky, live: air, temperature, major events">
-  <!-- The dark plate the live canvas is framed on in LIGHT mode (see the
-       LIGHT THEME CSS note). display:none in dark mode. Before the canvas in
-       DOM order so the canvas paints over it. -->
-  <div id="hero-window" aria-hidden="true"></div>
-  <canvas id="hero-canvas" aria-hidden="true"></canvas>
-  <script>
-  /* Boot reticle on — only where the hero will actually boot (the page
-     wiring skips it under reduced motion; no WebGL means no scene). Parsed
-     inline so the reticle is in the very first paint. The hero module swaps
-     this for `hero-live` once it is drawing (or drops it on failure); the
-     timeout is the backstop for a module that never arrives. */
-  (function () {
-    var h = document.getElementById('hero');
-    if (!h || !window.WebGLRenderingContext || !window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    h.classList.add('hero-booting');
-    setTimeout(function () { h.classList.remove('hero-booting'); }, 20000);
-  })();
-  </script>
-  <div class="hero-inner">
-    <div class="hero-top">
-      <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
-      <h1 class="hero-h1">Watch space weather happen. Live.</h1>
-      <p class="hero-sub">One console for <em>your</em> sky — live, local, and physics all the way down.</p>
-      <!-- 2026-09-21: four pills folded into ONE line. Same four claims,
-           same order, same dot colours; the pills were the noisiest thing
-           left above the fold and pushed the CTA under it at 1440×900. -->
-      <p class="hero-values" aria-label="What you get">
-        <span style="--dot:#2eff9e">Air quality now + the week ahead</span>
-        <span style="--dot:#ff5cb8">Major events 7 days out</span>
-        <span style="--dot:#ff8c5a">Why your temperature moves</span>
-        <span style="--dot:#8ff0ff">Validated on the May 2024 G5</span>
-      </p>
+<!-- ── S1 · LAUNCHPAD — newest simulations first ──────────────────────────
+     2026-11-22 (owner decision): the first screen sends visitors INTO the
+     simulations. It replaced the live magnetosphere + personal sky console,
+     which moved UNCHANGED to live-sky.html (with every gate that pinned it).
+       • RECENT   — a carousel derived from the build log (js/dev-log.js):
+                    one slide per simulation, newest logged change first.
+                    Add a log entry and the homepage follows; there is no
+                    second list. Rules: js/home-launchpad-model.js header.
+       • ALWAYS   — six real-time simulations, permanent, in the owner's
+                    order. STATIC markup (first paint, no JS needed);
+                    tests/home-launchpad.mjs pins it to FIXTURE_IDS, the
+                    catalogue titles/hrefs and the model's copy.
+       • THE LOG  — newest entries → recent-development.html, + the hubs.
+     The H1 is the 2026-07 home_headline experiment WINNER — do not reword it
+     without a new experiment. The dashboard CTA keeps its funnel id
+     (hero_magnetosphere) so the before/after series stays continuous. -->
+<section id="hero" class="lp" aria-label="Newest simulations and the real-time worlds">
+  <div class="lp-inner">
+    <div class="lp-head">
+      <div class="lp-head-copy">
+        <div class="hero-badge" role="status"><span><span data-lp-count-wrap hidden><span data-lp-count></span> simulations · </span>Live NASA &amp; NOAA data</span></div>
+        <h1 class="hero-h1">Watch space weather happen. Live.</h1>
+        <p class="hero-sub">New simulations and upgrades land here first, <em>straight from the build log</em>. Six real-time worlds are always one click away.</p>
+      </div>
+      <div class="hero-cta" role="group" aria-label="Primary actions">
+        <a href="simulations.html" class="btn-primary" data-funnel-cta="launchpad_browse_all">Browse every simulation <span aria-hidden="true">→</span></a>
+        <a href="space-weather.html" class="btn-secondary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard</a>
+      </div>
     </div>
-    <!-- The stage: empty on purpose — the live canvas frames Earth into this
-         box (see the CSS note). Under it, the CME transit scrubber
-         (js/hero-rope-layer.js mounts #hero-scrub into #hero-scrub-host). -->
-    <div id="hero-stage-col">
-      <div id="hero-stage" aria-hidden="true"></div>
-      <div id="hero-scrub-host"></div>
-      <!-- Opt-in sound layer (js/hero-sonify.js): the solar wind as audio,
-           conditioned on the saved location's aurora verdict. Never autoplays. -->
-      <div id="hero-sound-host"></div>
+
+    <div class="lp-main">
+      <div class="lp-col">
+        <div class="lp-col-h"><h2 id="lp-recent-h">Newly built &amp; improved</h2><a href="recent-development.html" data-funnel-cta="launchpad_buildlog">Full build log →</a></div>
+        <div class="lp-recent" data-lp-recent role="region" aria-roledescription="carousel" aria-labelledby="lp-recent-h" aria-busy="true">
+          <noscript><p style="padding:24px;color:#cdc4f0">The carousel needs JavaScript. <a href="recent-development.html" style="text-decoration:underline">Read the build log →</a></p></noscript>
+        </div>
+      </div>
+      <div class="lp-col">
+        <div class="lp-col-h"><h2 id="lp-live-h">Always live</h2><a href="simulations.html" data-funnel-cta="launchpad_all_from_live">All simulations →</a></div>
+        <div class="lp-fixtures" role="list" aria-labelledby="lp-live-h">
+          <a class="lp-fix" role="listitem" href="galactic-map.html" data-lp-fixture="galactic-map" data-funnel-cta="launchpad_fixture_galactic-map" style="--lp-acc:#8ff0ff">
+            <img src="assets/home/launchpad/galactic-map-480.jpg" alt="" width="480" height="270" decoding="async">
+            <span class="lp-live">Real time</span><span class="lp-tier">Free account</span>
+            <span class="lp-fix-body"><b>Galaxy</b><span class="lp-fix-live">A 3D map of the Milky Way’s stars — and where tonight’s sky sits in it.</span><span class="lp-fix-latest" data-lp-latest hidden></span></span>
+          </a>
+          <a class="lp-fix" role="listitem" href="solar-system.html" data-lp-fixture="solar-system" data-funnel-cta="launchpad_fixture_solar-system" style="--lp-acc:#8ff0ff">
+            <img src="assets/home/launchpad/solar-system-480.jpg" alt="" width="480" height="270" decoding="async">
+            <span class="lp-live">Real time</span>
+            <span class="lp-fix-body"><b>Solar System</b><span class="lp-fix-live">Every planet placed from the ephemeris at this instant, with near-Earth objects and CMEs in flight.</span><span class="lp-fix-latest" data-lp-latest hidden></span></span>
+          </a>
+          <a class="lp-fix" role="listitem" href="earth.html" data-lp-fixture="earth" data-funnel-cta="launchpad_fixture_earth" style="--lp-acc:#2eff9e">
+            <img src="assets/home/launchpad/earth-480.jpg" alt="" width="480" height="270" decoding="async">
+            <span class="lp-live">Real time</span>
+            <span class="lp-fix-body"><b>EarthView</b><span class="lp-fix-live">Live weather, wind, clouds and tonight’s aurora oval on one physically lit globe.</span><span class="lp-fix-latest" data-lp-latest hidden></span></span>
+          </a>
+          <a class="lp-fix" role="listitem" href="climalytix.html" data-lp-fixture="climalytix" data-funnel-cta="launchpad_fixture_climalytix" style="--lp-acc:#ffd23f">
+            <span class="lp-plate" aria-hidden="true"><svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7 15l4-5 3 3 5-7"/></svg></span>
+            <span class="lp-live">Real time</span>
+            <span class="lp-fix-body"><b>Climalytix</b><span class="lp-fix-live">One location, every dataset on one clock: the forecast, the record, the terrain, the air.</span><span class="lp-fix-latest" data-lp-latest hidden></span></span>
+          </a>
+          <a class="lp-fix" role="listitem" href="mars.html" data-lp-fixture="mars" data-funnel-cta="launchpad_fixture_mars" style="--lp-acc:#ff8c5a">
+            <img src="assets/home/launchpad/mars-480.jpg" alt="" width="480" height="270" decoding="async">
+            <span class="lp-live">Real time</span>
+            <span class="lp-fix-body"><b>Real-Time Mars</b><span class="lp-fix-live">MOLA terrain you can descend to, with today’s season and local time from JPL.</span><span class="lp-fix-latest" data-lp-latest hidden></span></span>
+          </a>
+          <a class="lp-fix" role="listitem" href="sun.html" data-lp-fixture="sun" data-funnel-cta="launchpad_fixture_sun" style="--lp-acc:#ffb830">
+            <img src="assets/home/launchpad/sun-480.jpg" alt="" width="480" height="270" decoding="async">
+            <span class="lp-live">Real time</span>
+            <span class="lp-fix-body"><b>Sun Watch</b><span class="lp-fix-live">Today’s solar disk from SDO, NOAA’s active regions, and flares and CMEs as they launch.</span><span class="lp-fix-latest" data-lp-latest hidden></span></span>
+          </a>
+        </div>
+      </div>
     </div>
-    <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
-    <!-- ONE ask (see the CSS note above): the dashboard, which is what the
-         funnel shows people actually click. It is sign-in gated; a new
-         visitor lands on signin.html, which carries its own "create a free
-         account" exit for exactly that bounce. The funnel id stays
-         hero_magnetosphere so the before/after series is continuous. -->
-    <div class="hero-cta" role="group" aria-label="Primary action">
-      <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard <span aria-hidden="true">→</span></a>
-      <span class="hero-cta-note">Free · a free account saves your location, alerts and dashboards · no credit card</span>
+
+    <div class="lp-foot">
+      <div class="lp-panel">
+        <div class="lp-col-h"><h2>Latest from the build log</h2><a href="recent-development.xml" data-funnel-cta="launchpad_rss">RSS</a></div>
+        <ul class="lp-log" data-lp-log>
+          <li><a href="recent-development.html" data-funnel-cta="launchpad_buildlog_fallback"><time></time><span class="lp-log-kind"></span><span class="lp-log-title">See everything that has shipped, sprint by sprint →</span></a></li>
+        </ul>
+      </div>
+      <div class="lp-panel">
+        <div class="lp-col-h"><h2>Explore by section</h2></div>
+        <div class="lp-doors">
+          <a class="lp-door" href="space-weather-hub.html" data-funnel-cta="launchpad_section_space-weather">Space Weather</a>
+          <a class="lp-door" href="earth-orbit.html" data-funnel-cta="launchpad_section_earth-orbit">Earth &amp; Orbit</a>
+          <a class="lp-door" href="local-space.html" data-funnel-cta="launchpad_section_local-space">Local Space</a>
+          <a class="lp-door" href="deep-space.html" data-funnel-cta="launchpad_section_deep-space">Deep Space</a>
+          <a class="lp-door" href="research.html" data-funnel-cta="launchpad_section_research">Research</a>
+          <a class="lp-door all" href="simulations.html" data-funnel-cta="launchpad_section_all">All simulations →</a>
+        </div>
+        <p class="lp-note">Pictures are dated captures of the pages; the pages themselves run live. Your own sky — air, temperature, aurora — is on the <a href="live-sky.html" data-funnel-cta="launchpad_live_sky">Live Sky Console</a>.</p>
+      </div>
     </div>
-    <!-- Passwordless sign-up upsell (js/home-signup-upsell.js). Re-added
-         2026-09-21 at the author's request over the ONE ASK note above,
-         as a DIFFERENT ask (one field, magic link, "your sky by email")
-         with its own funnel ids — read that module's header before
-         touching either the copy or the decision. Hidden when signed in. -->
-    <div id="hero-signup-host"></div>
   </div>
-  <script>
-  /* Publish the stage column's rect (relative to #hero) as --hero-win-t/l/w/h.
-     Light mode frames the live canvas into it (#hero-window + the canvas
-     clip-path); dark mode reads nothing. Runs in both so a theme flip at
-     sunset needs no layout work. Observed, not polled: the column's height
-     follows the viewport cap and the scrubber's wrap. */
-  (function () {
-    var hero = document.getElementById('hero');
-    var col = document.getElementById('hero-stage-col');
-    if (!hero || !col || !window.ResizeObserver) return;
-    var publish = function () {
-      var h = hero.getBoundingClientRect(), c = col.getBoundingClientRect();
-      if (!(c.width > 0 && c.height > 0)) return;
-      hero.style.setProperty('--hero-win-t', (c.top - h.top).toFixed(1) + 'px');
-      hero.style.setProperty('--hero-win-l', (c.left - h.left).toFixed(1) + 'px');
-      hero.style.setProperty('--hero-win-w', c.width.toFixed(1) + 'px');
-      hero.style.setProperty('--hero-win-h', c.height.toFixed(1) + 'px');
-    };
-    var ro = new ResizeObserver(publish);
-    ro.observe(hero); ro.observe(col);
-    publish();
-  })();
-  </script>
 </section>
+<script type="module">
+  // Mounted at once: this IS the first screen. The permanent tiles and every
+  // link above already work; this fills the carousel, the log and each tile's
+  // "latest change" line from the build log.
+  import('./js/home-launchpad.js')
+    .then((m) => {
+      const root = document.getElementById('hero');
+      m.mountHomeLaunchpad(root);
+      const wrap = root.querySelector('[data-lp-count-wrap]');
+      if (wrap && root.querySelector('[data-lp-count]')?.textContent) wrap.hidden = false;
+    })
+    .catch((err) => {
+      console.warn('[home] launchpad failed to mount:', err);
+      const host = document.querySelector('[data-lp-recent]');
+      if (host) { host.removeAttribute('aria-busy'); host.innerHTML = '<p style="padding:24px;color:#cdc4f0">The carousel is unavailable right now. <a href="recent-development.html" style="text-decoration:underline">Read the build log →</a></p>'; }
+    });
+</script>
 
 <!-- ── S2 · LIVE TICKER — the proof strip ─────────────────────────────────
      Rendered by js/home-ticker.js from the same swpc-update event the
@@ -895,11 +865,10 @@ window.addEventListener('message', (e) => {
    Both are full WebGL apps (earth.html, space-weather.html?preview=1).
    `loading="lazy"` alone did not defer them: Chromium's lazy-load distance
    is ~1250px, and on a 1440×900 screen both started fetching 150 ms into
-   the load — two more three.js scenes booting against the hero's entrance.
-   They carry data-src and get a real src only when (a) they come within
-   800px of the viewport AND (b) the hero has settled ('hero-intro-done'),
-   the visitor has scrolled, or 6 s have passed — whichever is first, so a
-   page whose hero never boots still loads them. `loading="lazy"` stays
+   the load. They carry data-src and get a real src only when (a) they come
+   within 800px of the viewport AND (b) the visitor has scrolled or 6 s have
+   passed — whichever is first. (Until 2026-11-22 the live hero's
+   'hero-intro-done' also opened the gate; that hero is on live-sky.html.) `loading="lazy"` stays
    (tests/space-weather-attract.spec.js pins it). */
 (function () {
   const frames = [...document.querySelectorAll('iframe[data-src]')];
@@ -913,7 +882,6 @@ window.addEventListener('message', (e) => {
     near.forEach(load);
     near.clear();
   };
-  window.addEventListener('hero-intro-done', openGate, { once: true });
   setTimeout(openGate, 6000);
   const onScroll = () => { if (scrollY > 240) { window.removeEventListener('scroll', onScroll); openGate(); } };
   window.addEventListener('scroll', onScroll, { passive: true });
@@ -1306,6 +1274,7 @@ window.addEventListener('message', (e) => {
           <a href="space-weather.html">Space Weather</a>
           <a href="upper-atmosphere.html">Upper Atmosphere</a>
           <a href="auroracle.html">AurOracle</a>
+          <a href="live-sky.html">Live Sky Console</a>
           <a href="simulations.html">All Simulations →</a>
         </div>
       </nav>
@@ -1344,17 +1313,14 @@ window.addEventListener('message', (e) => {
 </footer>
 
 <!-- ── PAGE WIRING ─────────────────────────────────────────────────────────
-     One SpaceWeatherFeed for the whole page. The sky console
-     (initSkyConsole), the ticker (initHomeTicker) and the hero backdrop
-     (HeroSpaceWeather) all consume the window 'swpc-update' event — NONE
-     constructs a feed. The feed starts LAST so every listener is attached
-     before the first dispatch. Do not import page modules that start their
-     own feed. -->
+     One SpaceWeatherFeed for the whole page; the ticker (initHomeTicker)
+     consumes its window 'swpc-update' event and never constructs a feed.
+     The feed starts LAST so the listener is attached before the first
+     dispatch. Do not import page modules that start their own feed. The
+     live hero + sky console that used to be wired here are on live-sky.html. -->
 <script type="module">
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { initHomeTicker } from './js/home-ticker.js';
-import { initSkyConsole } from './js/home-sky-console.js';
-import { experiments } from './js/experiments.js';
 
 /* Intersection-observer fade-ins */
 (function(){
@@ -1372,88 +1338,7 @@ import { experiments } from './js/experiments.js';
   els.forEach(el => obs.observe(el));
 })();
 
-/* Ticker + sky console — swpc-update listeners attach before the feed
-   starts. The console works even when WebGL/reduced-motion kills the
-   backdrop canvas: the numbers are the product either way. A console boot
-   failure must never take the ticker (or the feed) down with it. */
-/* Hero backdrop: live magnetosphere. Skipped under prefers-reduced-motion —
-   the CSS gradient backdrop remains and the console stays live. WebGL
-   failure self-handles (the module hides its canvas). Its import starts
-   FIRST, in parallel with the console's (2026-09-23: it used to wait for
-   initSkyConsole, i.e. two more module round trips before three.js was
-   even requested — the <head> modulepreloads cover the rest of the graph).
-   The console boot and the hero are both awaited — the hero with a cap —
-   so the hero's swpc-update listener attaches before the first feed
-   dispatch, but a hung network can never stall the console. */
-const heroCanvas = document.getElementById('hero-canvas');
-const heroHost = document.getElementById('hero');
-const heroWanted = !!heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-const heroModule = heroWanted ? import('./js/hero-space-weather.js') : null;
-
 initHomeTicker(document.querySelector('[data-sw-ticker]'));
-const consoleReady = initSkyConsole(document.getElementById('sky-console-host'))
-  .catch(err => console.warn('[home] sky console failed to boot:', err));
-
-// The module downloads in parallel, but the scene is BUILT only once the
-// console has rendered (or 1.5 s have passed): building + compiling it is
-// main-thread work, and done first it pushed the console's first render back
-// by seconds on a software rasteriser (measured). The console is the product;
-// the canvas is the backdrop.
-const consoleOrCap = Promise.race([consoleReady, new Promise(r => setTimeout(r, 1500))]);
-let heroReady = Promise.resolve(null);
-if (heroModule) {
-  heroReady = Promise.all([heroModule, consoleOrCap])
-    .then(([m]) => {
-      const h = new m.HeroSpaceWeather(heroCanvas, {
-        stage: document.getElementById('hero-stage'),
-        // The Sun + CME flux ropes + τ scrubber (js/hero-rope-layer.js):
-        // the default "Next 24 h" tab flies today's CMEs on the flux-rope
-        // kernel off a live Sun (js/hero-sun.js); the "CME transit" tab
-        // consumes the ONE shared provider started below and replays the
-        // validated Gannon train while nothing is in flight.
-        ropes: {
-          host: document.getElementById('hero-scrub-host'),
-          replay: () => import('./js/hero-rope-layer.js').then(r => r.gannonReplay()),
-        },
-      });
-      h.start();
-      return h;
-    })
-    .catch(() => { heroCanvas.style.display = 'none'; heroHost?.classList.remove('hero-booting'); return null; });
-} else if (heroCanvas) {
-  heroCanvas.style.display = 'none';
-}
-await consoleReady;
-await Promise.race([heroReady, new Promise(r => setTimeout(r, 4000))]);
-
-/* Passwordless sign-up upsell — see js/home-signup-upsell.js header. */
-import('./js/home-signup-upsell.js')
-  .then(m => m.mountSignupUpsell(document.getElementById('hero-signup-host'), {
-    track: (stage, meta) => experiments.track(stage, meta),
-  }))
-  .catch(err => console.warn('[home] signup upsell failed to mount:', err));
-
-/* Opt-in sound layer — mounts only when the hero scene booted (it
-   sonifies the scene's own state). */
-heroReady.then(h => {
-  if (!h) return;
-  return import('./js/hero-sonify.js')
-    .then(m => m.mountHeroSonify({ host: document.getElementById('hero-sound-host'), getState: () => h.audioState() }));
-}).catch(err => console.warn('[home] sound layer failed to mount:', err));
-
-/* The shared flux-rope forecast provider (js/sun-flux-rope.js — the same
-   loop sun.html / the dashboard run): DONKI → compounding train → kernel
-   ensemble, published on 'flux-rope-forecast' for the hero's rope layer.
-   Started on idle after the hero is up so the 147 KB WASM + ensemble never
-   sit on the boot path; it publishes idle/failed states too, which is what
-   lets the hero fall back to the Gannon replay honestly. */
-if (heroCanvas && heroCanvas.style.display !== 'none') {
-  const startProvider = () => import('./js/sun-flux-rope.js')
-    .then(m => m.startFluxRopeProvider({ delayMs: 1500 }))
-    .catch(err => console.info('[home] flux-rope provider unavailable:', err?.message ?? err));
-  if ('requestIdleCallback' in window) requestIdleCallback(startProvider, { timeout: 6000 });
-  else setTimeout(startProvider, 2500);
-}
 
 /* ONE feed for the whole page — started after all listeners are attached. */
 new SpaceWeatherFeed().start();

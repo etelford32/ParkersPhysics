@@ -397,6 +397,7 @@ export const NON_SIMULATION_PAGES = new Set([
     'for-operators.html',
     'home-v2.html',
     'index.html',
+    'live-sky.html',            // the live magnetosphere + sky console (the homepage hero until 2026-11-22)
     'local-space.html',         // section hub
     'pricing.html',
     'privacy.html',

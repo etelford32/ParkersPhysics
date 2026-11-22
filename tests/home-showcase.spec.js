@@ -119,7 +119,7 @@ test.describe('home simulation showcase', () => {
         await ctx.close();
     });
 
-    test('light theme: white cards, and the hero frames its live scene in a dark window', async ({ page }) => {
+    test('light theme: white cards; the live scene (now live-sky.html) is framed in a dark window', async ({ page }) => {
         test.slow();
         await page.setViewportSize({ width: 1440, height: 900 });
         await offline(page);
@@ -128,8 +128,14 @@ test.describe('home simulation showcase', () => {
         // Card surface is white (the palette's --pl-card), not the dark gradient.
         const bg = await page.locator('#showcase-host .hs-card').first().evaluate((el) => getComputedStyle(el).backgroundColor);
         expect(bg).toBe('rgb(255, 255, 255)');
-        // The hero itself is light; its live canvas is clipped to the stage
+        // The homepage's first screen is light too.
+        const homeBg = await page.evaluate(() => getComputedStyle(document.getElementById('hero')).backgroundImage);
+        expect(homeBg).toMatch(/linear-gradient\(rgb\(246, 249, 254\)/);
+        // The live hero moved to live-sky.html on 2026-11-22 with its light-mode
+        // framing: the page is light; the live canvas is clipped to the stage
         // column and the dark window plate sits exactly under that column.
+        await page.goto('/live-sky.html?theme=light', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(() => getComputedStyle(document.getElementById('hero')).getPropertyValue('--hero-win-w').trim() !== '');
         const heroBg = await page.evaluate(() => getComputedStyle(document.getElementById('hero')).backgroundImage);
         expect(heroBg).toMatch(/linear-gradient/);
         const win = await page.evaluate(() => {
@@ -143,7 +149,7 @@ test.describe('home simulation showcase', () => {
         expect(win.dx).toBeLessThan(1.5); expect(win.dy).toBeLessThan(1.5); expect(win.dw).toBeLessThan(1.5); expect(win.dh).toBeLessThan(1.5);
         expect(win.clip).toMatch(/inset/);
         // NEGATIVE CONTROL: dark mode shows no window and does not clip.
-        await page.goto('/index.html?theme=dark', { waitUntil: 'domcontentloaded' });
+        await page.goto('/live-sky.html?theme=dark', { waitUntil: 'domcontentloaded' });
         const dark = await page.evaluate(() => ({
             display: getComputedStyle(document.getElementById('hero-window')).display,
             clip: getComputedStyle(document.getElementById('hero-canvas')).clipPath,

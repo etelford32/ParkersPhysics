@@ -9,6 +9,12 @@
  *                                 development.mjs, re-rendered + filtered on
  *                                 load by js/recent-development.js
  *   - recent-development.xml      the RSS feed, written by the same builder
+ *   - index.html #hero            the homepage LAUNCHPAD: its carousel is one
+ *                                 slide per simulation, DERIVED from this log
+ *                                 (js/home-launchpad-model.js). An entry's
+ *                                 FIRST catalogued link decides which
+ *                                 simulation it moves to the front — put the
+ *                                 page the change is about first.
  *   - feedback.html               its "Recent changes" panel shows the newest
  *                                 few entries from here
  *   - scripts/dev-log-draft.mjs   lists merged PRs that are NOT logged yet and
@@ -118,6 +124,13 @@ export const SPRINTS = [
 
 /** PRs deliberately left out of the public log (nothing a visitor can see). */
 export const UNLOGGED_PRS = {
+    1086: 'refinement of the bz-column entry (#1085) — one ground-station outlier rule',
+    1083: 'ingest-worker diagnostics only (Climalytix archive publishing)',
+    1082: 'ingest-worker failure handling only (Climalytix archive publishing)',
+    1077: 'test fixtures only',
+    1073: 'sitemap plumbing',
+    1072: 'migration note only',
+    1071: 'database function fix with no visible change',
     1058: 'test-harness plumbing (import resolution)',
     1053: 'plan document only (EARTHVIEW_LOD_UX_PLAN.md)',
     1030: 'test hardening only',
@@ -130,6 +143,18 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'home-launchpad', date: '2026-11-22', pr: null,
+      title: 'Homepage: the newest simulations first', kind: 'improvement', section: 'platform', icon: 'target',
+      summary: 'The first screen of the homepage is now a launchpad: a carousel of the simulations most recently '
+             + 'built or improved, drawn from this build log, beside six real-time simulations that are always one click away.',
+      highlights: [
+          'The carousel is this log: when an entry is added here, its simulation moves to the front of the homepage with the date and what changed.',
+          'Six permanent doors — Galaxy, Solar System, EarthView, Climalytix, Real-Time Mars and Sun Watch — each showing its most recent logged change.',
+          'The newest log entries and all five sections are listed directly under the carousel.',
+          'The live magnetosphere and personal sky console that used to open the homepage now have their own page.',
+      ],
+      links: [{ href: 'index.html', label: 'Home' }, { href: 'live-sky.html', label: 'Live Sky Console' },
+              { href: 'simulations.html', label: 'All simulations' }] },
     { id: 'bz-column', date: '2026-11-20', pr: 1085,
       title: 'Bz Column: the Sun\'s north–south field followed from L1 to the ground', kind: 'simulation',
       section: 'space-weather', icon: 'magnet',
@@ -146,6 +171,35 @@ export const DEV_LOG = [
           'Correction: the route that feeds live observatory data to TIGA and Inner Earth was reading station coordinates from a field USGS does not send, and returned an error while USGS was healthy. It now returns all fourteen stations.',
       ],
       links: [{ href: 'bz.html' }, { href: 'tiga.html' }] },
+    { id: 'inner-earth', date: '2026-11-19', pr: 1084,
+      title: 'Inner Earth: live earthquakes crossing a true-radius planet', kind: 'simulation',
+      section: 'earth-orbit', icon: 'dynamo',
+      summary: 'A new page opens on the latest USGS earthquakes and draws their seismic waves travelling through '
+             + 'the Earth to where you are, on a cutaway built from the PREM reference model. It also carries the '
+             + 'observed magnetic field at the core, the tectonic plates and the subducting slabs in 3D.',
+      highlights: [
+          'Rays and wavefronts are traced through PREM, the standard one-dimensional Earth model, and the structure is checked against an independent seismology library.',
+          'Each arrival is listed with its phase, its travel time and its relative strength; where the earthquake has a published mechanism, the radiation pattern is the event\'s own.',
+          'The magnetic field view is the CHAOS-8.1 field model from 1997 to now, drawn at the core–mantle boundary. It is the observed field, not a dynamo simulation.',
+          'Plates are Bird\'s PB2002 boundaries with their velocities; slabs are USGS Slab2 surfaces, shown at true depth with live hypocentres.',
+          'A geoelectric nowcast estimates the electric field a geomagnetic disturbance induces in the ground beneath an observatory.',
+          'If the earthquake feed is down, no earthquake is drawn.',
+      ],
+      links: [{ href: 'earth-interior.html' }] },
+    { id: 'climalytix-terrain-temperature', date: '2026-11-09', pr: 1081,
+      title: 'Climalytix: temperature on the real terrain, with sun, shade and cold-air pooling', kind: 'layer',
+      section: 'research', icon: 'chart',
+      summary: 'The Climalytix map now corrects the forecast temperature for the actual height of the ground, then '
+             + 'adds modelled warming on sunlit slopes, cooling in terrain shadow and cold air settling in valleys at night. '
+             + 'The System Status page also says why a feed is not healthy.',
+      highlights: [
+          'The lapse rate is fitted from the forecast itself for each view and instant, so night-time inversions are kept rather than erased by a textbook constant.',
+          'Cast shadows include the curvature of the Earth, and a new chart shows today\'s sun path at the site against its terrain horizon.',
+          'The map clock is the current minute: fields are interpolated between forecast frames instead of showing the nearest three-hourly one.',
+          'The colour scale fits the range in view by default and says so; the absolute scale is one click away.',
+          'These are modelled terms on top of the GFS forecast — direction and timing are the claims, sizes are approximate — and every surface labels them.',
+      ],
+      links: [{ href: 'climalytix.html' }, { href: 'status.html', label: 'System status' }] },
     { id: 'cme-calendar-daily-ledger', date: '2026-11-09', pr: 1080,
       title: 'CME forecast calendar: every day now says what was checked', kind: 'fix',
       section: 'space-weather', icon: 'flux-rope',
@@ -161,7 +215,7 @@ export const DEV_LOG = [
           'A daily automated check of the production ledger now fails if the run did not happen.',
       ],
       links: [{ href: 'cme-forecast.html' }] },
-    { id: 'home-showcase-light-hero', date: '2026-11-09', pr: null,
+    { id: 'home-showcase-light-hero', date: '2026-11-09', pr: 1079,
       title: 'Homepage: a daylight theme that works, and a showcase of the simulations', kind: 'improvement',
       section: 'platform', icon: 'target',
       summary: 'In daylight the homepage is now white and blue end to end, with the live magnetosphere framed in a '
@@ -174,6 +228,44 @@ export const DEV_LOG = [
           'Captures are dated on every card and say when they were rendered in software; the pages themselves run live.',
       ],
       links: [{ href: 'index.html', label: 'Home' }, { href: 'simulations.html', label: 'All simulations' }] },
+    { id: 'climalytix', date: '2026-11-09', pr: 1078,
+      title: 'Climalytix: one place, every dataset on one clock', kind: 'simulation', section: 'research', icon: 'chart',
+      summary: 'A new workspace for a single location: the reanalysis record, the current forecast, climate '
+             + 'indices and geomagnetic activity on one shared time axis, under a map of temperature, airflow, air quality and terrain.',
+      highlights: [
+          'Series are aligned by instant and never upsampled; a gap is drawn as a gap, not as zero.',
+          'The forecast comes from our own archive of NOAA\'s GFS model. When that archive is unavailable the page says so and substitutes nothing.',
+          'Map layers include 10 m airflow, PM2.5, elevation and slope, sun exposure, orographic lift, slope winds, thermals and storm ingredients — each with its assumptions stated beside it.',
+          'Public data only.',
+      ],
+      links: [{ href: 'climalytix.html' }] },
+    { id: 'glacier-watch', date: '2026-11-08', pr: 1076,
+      title: 'Glacier Watch: 48 glaciers tracked from orbit', kind: 'simulation', section: 'earth-orbit', icon: 'glacier',
+      summary: 'A new page follows 48 glaciers with NASA ITS_LIVE satellite velocities — a decade of annual speeds plus '
+             + 'image pairs from the last few weeks — beside WGMS mass-balance records, and lists every one of Earth\'s '
+             + '274,531 glaciers from the RGI 7.0 inventory.',
+      highlights: [
+          '"Faster than usual" is judged against each glacier\'s own seasonal cycle and needs to clear the measurement error.',
+          'Where a glacier moves too slowly for the satellites to resolve, the page says that instead of plotting noise.',
+          'Ice thickness and bed shape are a model inverted from the observed speed, and are labelled as a model everywhere.',
+          'Missing mass-balance years are left as gaps and never counted as zero change.',
+          'Also an EarthView layer: tracked glaciers, and the full inventory on the globe.',
+      ],
+      links: [{ href: 'glacier-watch.html' }, { href: 'earth.html' }] },
+    { id: 'recent-development-page', date: '2026-11-08', pr: 1075,
+      title: 'Recent Development: this build log, and an RSS feed', kind: 'platform', section: 'platform', icon: 'notebook',
+      summary: 'Everything that ships is now recorded on one page, sprint by sprint, written for visitors rather than '
+             + 'reviewers, with a feed you can subscribe to. The hand-written changelog it replaces had stopped in May.',
+      links: [{ href: 'recent-development.html', label: 'Recent Development' }, { href: 'feedback.html', label: 'Feedback' }] },
+    { id: 'light-theme', date: '2026-11-08', pr: 1074,
+      title: 'A daylight theme: white and blue while your Sun is up', kind: 'platform', section: 'platform', icon: 'sun',
+      summary: 'Reading pages — the home page, the catalogue, the section hubs, pricing, the blog — now switch to a light '
+             + 'theme between your local sunrise and sunset. A switch under the logo pins either one.',
+      highlights: [
+          'The simulations themselves stay dark on purpose: space is black.',
+          'Sunrise and sunset come from your saved location; without one the page uses 07:00–19:00 local time and says which.',
+      ],
+      links: [{ href: 'simulations.html', label: 'All simulations' }] },
     { id: 'weather-feed-paced', date: '2026-11-08', pr: 1070,
       title: 'EarthView\'s primary weather feed, back within its rate limit', kind: 'fix', section: 'earth-orbit',
       icon: 'earth',

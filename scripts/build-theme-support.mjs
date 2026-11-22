@@ -35,8 +35,11 @@ export const LIGHT_PAGES = Object.freeze([
     // Catalogue + section hubs (js/catalog-styles.css)
     'simulations.html',
     'space-weather-hub.html', 'earth-orbit.html', 'local-space.html', 'deep-space.html', 'research.html',
-    // Home (the live hero canvas stays dark — it is a sky; the page around it goes light)
+    // Home (a launchpad of simulation thumbnails since 2026-11-22)
     'index.html',
+    // The live magnetosphere + sky console that was the homepage hero (the live canvas stays
+    // dark — it is a sky; the page around it goes light)
+    'live-sky.html',
     // Blog + legal
     'blog.html', 'blog-gannon-hindcast.html', 'blog-stpatrick-hindcast.html', 'blog-why-aurora-forecasts-miss.html',
     // Build log (js/dev-log.js) — a reading page; its own light rules live in js/recent-development.css

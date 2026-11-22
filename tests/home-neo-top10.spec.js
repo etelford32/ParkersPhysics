@@ -52,7 +52,13 @@ async function mockCatalog(page, { down = false } = {}) {
 
 async function openBoard(page) {
     await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
-    await page.evaluate(() => document.getElementById('neo-top10').scrollIntoView());
+    // The Simulation Showcase above mounts as soon as the page loads (the first
+    // screen is the short launchpad since 2026-11-22, so the showcase is within
+    // its 700 px mount margin at once) and adds ~2,300 px of cards. A scroll
+    // aimed BEFORE that lands 3,000 px short and the board, which idles off
+    // screen, never ranks a row. Wait for the showcase, then jump (not smooth).
+    await page.waitForFunction(() => !document.getElementById('showcase-host')?.hasAttribute('aria-busy'), null, { timeout: 30_000 });
+    await page.evaluate(() => document.getElementById('neo-top10').scrollIntoView({ behavior: 'instant' }));
     await page.waitForFunction(() => !!window.__homeNeo, null, { timeout: 30_000 });
 }
 
