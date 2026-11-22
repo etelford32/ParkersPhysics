@@ -30,6 +30,12 @@ export async function loadGrid(meta, fetchFn = fetch, base = DATA_BASE) {
     const u8 = await gunzip(await (await get(fetchFn, base + meta.id + '.bin.gz')).arrayBuffer());
     return makeGrid(meta, int16FromBytes(u8));
 }
+/** A trench site's WIDE window (index `wide` entry): coarser, ±5°, read only for the bending plate's far field. */
+export async function loadWideGrid(meta, fetchFn = fetch, base = DATA_BASE) {
+    if (!meta || !meta.wide) return null;
+    const u8 = await gunzip(await (await get(fetchFn, base + meta.wide.file)).arrayBuffer());
+    return makeGrid(meta.wide, int16FromBytes(u8));
+}
 export async function loadWorld(index, fetchFn = fetch, base = DATA_BASE) {
     const u8 = await gunzip(await (await get(fetchFn, base + index.world.file)).arrayBuffer());
     return decodeWorld(index.world, u8);

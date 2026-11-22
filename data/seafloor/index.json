@@ -35,7 +35,17 @@
    },
    "median_depth_m": 4156,
    "ocean_fraction": 0.9999,
-   "bytes": 95629
+   "bytes": 95629,
+   "wide": {
+    "file": "mariana.wide.bin.gz",
+    "north": 16.35,
+    "west": 137.3,
+    "step_deg": 0.03333333,
+    "nx": 307,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 156177
+   }
   },
   {
    "id": "tonga",
@@ -51,7 +61,17 @@
    },
    "median_depth_m": 5437,
    "ocean_fraction": 0.9993,
-   "bytes": 105903
+   "bytes": 105903,
+   "wide": {
+    "file": "tonga.wide.bin.gz",
+    "north": -18.25,
+    "west": -180.183333,
+    "step_deg": 0.03333333,
+    "nx": 327,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 164415
+   }
   },
   {
    "id": "philippine",
@@ -67,7 +87,17 @@
    },
    "median_depth_m": 5671,
    "ocean_fraction": 0.8133,
-   "bytes": 94101
+   "bytes": 94101,
+   "wide": {
+    "file": "philippine.wide.bin.gz",
+    "north": 15.3,
+    "west": 121.583333,
+    "step_deg": 0.03333333,
+    "nx": 305,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 149648
+   }
   },
   {
    "id": "kuril",
@@ -83,7 +113,17 @@
    },
    "median_depth_m": 5065,
    "ocean_fraction": 0.9803,
-   "bytes": 128674
+   "bytes": 128674,
+   "wide": {
+    "file": "kuril.wide.bin.gz",
+    "north": 49.2,
+    "west": 143.433333,
+    "step_deg": 0.03333333,
+    "nx": 419,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 199173
+   }
   },
   {
    "id": "kermadec",
@@ -99,7 +139,17 @@
    },
    "median_depth_m": 5531,
    "ocean_fraction": 1.0,
-   "bytes": 115027
+   "bytes": 115027,
+   "wide": {
+    "file": "kermadec.wide.bin.gz",
+    "north": -26.9,
+    "west": -183.2,
+    "step_deg": 0.03333333,
+    "nx": 355,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 177474
+   }
   },
   {
    "id": "izu-bonin",
@@ -115,7 +165,17 @@
    },
    "median_depth_m": 5728,
    "ocean_fraction": 1.0,
-   "bytes": 109149
+   "bytes": 109149,
+   "wide": {
+    "file": "izu-bonin.wide.bin.gz",
+    "north": 34.8,
+    "west": 136.933333,
+    "step_deg": 0.03333333,
+    "nx": 347,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 173295
+   }
   },
   {
    "id": "japan",
@@ -131,7 +191,17 @@
    },
    "median_depth_m": 5258,
    "ocean_fraction": 0.9705,
-   "bytes": 117383
+   "bytes": 117383,
+   "wide": {
+    "file": "japan.wide.bin.gz",
+    "north": 43.6,
+    "west": 137.7,
+    "step_deg": 0.03333333,
+    "nx": 385,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 187420
+   }
   },
   {
    "id": "yap",
@@ -147,7 +217,17 @@
    },
    "median_depth_m": 3895,
    "ocean_fraction": 0.9985,
-   "bytes": 95979
+   "bytes": 95979,
+   "wide": {
+    "file": "yap.wide.bin.gz",
+    "north": 13.5,
+    "west": 132.833333,
+    "step_deg": 0.03333333,
+    "nx": 305,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 152779
+   }
   },
   {
    "id": "new-britain",
@@ -163,7 +243,17 @@
    },
    "median_depth_m": 4227,
    "ocean_fraction": 0.9178,
-   "bytes": 98116
+   "bytes": 98116,
+   "wide": {
+    "file": "new-britain.wide.bin.gz",
+    "north": -1.5,
+    "west": 148.466667,
+    "step_deg": 0.03333333,
+    "nx": 303,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 151301
+   }
   },
   {
    "id": "ryukyu",
@@ -179,7 +269,17 @@
    },
    "median_depth_m": 4585,
    "ocean_fraction": 0.9917,
-   "bytes": 104738
+   "bytes": 104738,
+   "wide": {
+    "file": "ryukyu.wide.bin.gz",
+    "north": 30.0,
+    "west": 122.666667,
+    "step_deg": 0.03333333,
+    "nx": 333,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 154654
+   }
   },
   {
    "id": "aleutian",
@@ -195,7 +295,17 @@
    },
    "median_depth_m": 4258,
    "ocean_fraction": 0.981,
-   "bytes": 139006
+   "bytes": 139006,
+   "wide": {
+    "file": "aleutian.wide.bin.gz",
+    "north": 56.0,
+    "west": -185.933333,
+    "step_deg": 0.03333333,
+    "nx": 477,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 211826
+   }
   },
   {
    "id": "atacama",
@@ -211,7 +321,17 @@
    },
    "median_depth_m": 4223,
    "ocean_fraction": 0.7291,
-   "bytes": 107341
+   "bytes": 107341,
+   "wide": {
+    "file": "atacama.wide.bin.gz",
+    "north": -18.4,
+    "west": -76.833333,
+    "step_deg": 0.03333333,
+    "nx": 327,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 167920
+   }
   },
   {
    "id": "middle-america",
@@ -227,7 +347,17 @@
    },
    "median_depth_m": 3952,
    "ocean_fraction": 0.8551,
-   "bytes": 89185
+   "bytes": 89185,
+   "wide": {
+    "file": "middle-america.wide.bin.gz",
+    "north": 19.0,
+    "west": -98.766667,
+    "step_deg": 0.03333333,
+    "nx": 311,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 141556
+   }
   },
   {
    "id": "puerto-rico",
@@ -243,7 +373,17 @@
    },
    "median_depth_m": 5331,
    "ocean_fraction": 0.9405,
-   "bytes": 92982
+   "bytes": 92982,
+   "wide": {
+    "file": "puerto-rico.wide.bin.gz",
+    "north": 24.8,
+    "west": -71.9,
+    "step_deg": 0.03333333,
+    "nx": 319,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 148197
+   }
   },
   {
    "id": "south-sandwich",
@@ -259,7 +399,17 @@
    },
    "median_depth_m": 4419,
    "ocean_fraction": 0.9997,
-   "bytes": 164754
+   "bytes": 164754,
+   "wide": {
+    "file": "south-sandwich.wide.bin.gz",
+    "north": -50.8,
+    "west": -34.5,
+    "step_deg": 0.03333333,
+    "nx": 535,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 259919
+   }
   },
   {
    "id": "cayman",
@@ -307,7 +457,17 @@
    },
    "median_depth_m": 4437,
    "ocean_fraction": 1.0,
-   "bytes": 90544
+   "bytes": 90544,
+   "wide": {
+    "file": "java.wide.bin.gz",
+    "north": -6.1,
+    "west": 109.8,
+    "step_deg": 0.03333333,
+    "nx": 307,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 143943
+   }
   },
   {
    "id": "diamantina",
@@ -371,7 +531,17 @@
    },
    "median_depth_m": 3017,
    "ocean_fraction": 0.8452,
-   "bytes": 113734
+   "bytes": 113734,
+   "wide": {
+    "file": "hellenic.wide.bin.gz",
+    "north": 41.4,
+    "west": 15.2,
+    "step_deg": 0.03333333,
+    "nx": 373,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 178286
+   }
   },
   {
    "id": "molloy",

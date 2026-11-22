@@ -66,8 +66,16 @@ The page reads the Inner Earth page's own files, through its own kernels:
 A closing or sliding rate is the rigid rotation of one plate relative to the other at that spot.
 
 - The bending plate (`js/seafloor/trench-model.js`): the universal elastic-plate trench profile
-  (Caldwell et al. 1976; Turcotte & Schubert) fitted to the median of nine parallel sections of
-  this page's own bathymetry. MODEL. The effective elastic thickness is printed only when the fit
-  passes its tests; E, ν and the densities are textbook constants. The formula was written from
-  the textbook derivation and is checked by its own identities and by planted-plate recovery, not
-  against published thicknesses for these trenches (no literature access at build time).
+  (Caldwell et al. 1976; Turcotte & Schubert) on a fitted straight regional slope, fitted to the
+  median of nine parallel sections of this page's own bathymetry. MODEL. The effective elastic
+  thickness is printed only when the fit passes its tests, one of which is that it survives leaving
+  out the farthest quarter of the profile; E, ν and the densities are textbook constants. The formula
+  was written from the textbook derivation and is checked by its own identities and by planted-plate
+  recovery, not against published thicknesses for these trenches (no literature access at build time).
+
+## Wide windows — the same source, further out
+
+`<id>.wide.bin.gz` (the 17 sites of kind `trench`): ±5° of latitude at 2 arc-minutes (3.7 km), sampled
+from the same AWS Terrain Tiles at zoom 6 by the same baker, same encoding; geometry in the site's
+`wide` entry of `index.json`. Read only by the bending-plate fit, for the sea floor 200–520 km seaward
+of the trench. Depths, the 3D block and the sounder never use it.

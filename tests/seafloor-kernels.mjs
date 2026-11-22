@@ -324,10 +324,10 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     // the fit recovers a PLANTED plate through noise
     let seed = 7; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 - 0.5; };
     const truth = { x0: 24, xb: 78, wb: 420 }, synth = [];
-    for (let x = 0; x <= 250; x += 2) synth.push({ x, depth: 5800 - TM.flexureHeight(x, truth) + 60 * rnd() });
+    for (let x = 0; x <= 520; x += 2) synth.push({ x, depth: 5800 - TM.flexureHeight(x, truth) + 60 * rnd() });
     const f = TM.fitFlexure(synth);
     ok(f.quality === 'good' && Math.abs(f.x0 - 24) <= 2 && Math.abs(f.xb - 78) <= 4 && Math.abs(f.wb - 420) < 30 && Math.abs(f.dRef - 5800) < 20, `planted plate recovered: x0 ${f.x0}, x_b ${f.xb}, w_b ${f.wb.toFixed(0)} m, level ${f.dRef.toFixed(0)} m`);
-    ok(f.rms < 25 && f.lineRms > 10 * f.rms && f.flatRms > 10 * f.rms, 'CONTROLS on the same points: a straight slope and a flat floor both fit ten times worse');
+    ok(f.rms < 25 && f.lineRms > 5 * f.rms && f.flatRms > 5 * f.rms, `CONTROLS on the same points: a straight slope (${f.lineRms.toFixed(0)} m) and a flat floor (${f.flatRms.toFixed(0)} m) against ${f.rms.toFixed(0)} m`);
     near(f.elastic.teKm, TM.elasticFromRise(f.x0, f.xb).teKm, 1e-12, 'its thickness is the fitted lengths\' own');
     // NEGATIVE CONTROLS: sea floors with no bending plate must not get a thickness
     const slope = synth.map((p) => ({ x: p.x, depth: 5000 + 6 * p.x + 60 * rnd() })), flat = synth.map((p) => ({ x: p.x, depth: 5800 + 60 * rnd() }));
@@ -335,13 +335,41 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     ok((!fs1 || fs1.quality === 'poor') && (!ff || ff.quality === 'poor'), `NEGATIVE CONTROL: a plain slope and a flat floor are rejected (${fs1 ? fs1.reasons[0] : 'no fit'}; ${ff ? ff.reasons[0] : 'no fit'})`);
     const seamount = synth.map((p) => ({ x: p.x, depth: p.depth - (p.x > 150 ? 900 : 0) }));
     { const fm = TM.fitFlexure(seamount); ok(fm.quality === 'poor', `NEGATIVE CONTROL: the same plate with a 900 m shoal beyond the rise is rejected (${fm.reasons.join(', ')})`); }
+    // WHY THE SLOPE TERM NEEDS THE LONG WINDOW (measured): on 250 km a slope trades off against the rise, on 520 km it cannot
+    { const teTrue = TM.elasticFromRise(24, 78).teKm; let worstShort = 0, worstLong = 0, worstLevel = 0;
+      for (const sd of [7, 11, 23, 99, 1234]) { let q = sd; const r2 = () => { q = (q * 1664525 + 1013904223) >>> 0; return q / 2 ** 32 - 0.5; };
+        const long = []; for (let x = 0; x <= 520; x += 2) long.push({ x, depth: 5800 - TM.flexureHeight(x, truth) + 60 * r2() });
+        const short = long.filter((p) => p.x <= 250), e = (prof, o) => Math.abs(TM.fitFlexure(prof, { stability: 0, ...o }).elastic.teKm - teTrue) / teTrue;
+        worstShort = Math.max(worstShort, e(short, {})); worstLong = Math.max(worstLong, e(long, {})); worstLevel = Math.max(worstLevel, e(short, { slope: false })); }
+      ok(worstLong < 0.02 && worstLevel < 0.02 && worstShort > 0.04 && worstShort < 0.25, `five noise draws of one level plate: T_e off by up to ${(100 * worstShort).toFixed(0)} % with a slope fitted on 250 km, ${(100 * worstLong).toFixed(1)} % on 520 km (level-floor fit on 250 km: ${(100 * worstLevel).toFixed(1)} %)`); }
     ok(TM.fitFlexure(synth.filter((p) => p.x <= 90)) === null, 'a profile that stops 90 km out is not fitted at all');
+    ok(f.stability.ok && Math.abs(f.slope) < 0.15 && f.teRange[1] <= f.teRange[0] * 1.25, `a level plate: fitted slope ${f.slope.toFixed(2)} m/km, and the thickness holds on three quarters of the profile`);
+    // THE REGIONAL SLOPE: a TILTED plate on a long profile. The slope is recovered with the rise…
+    const tilt = { x0: 30, xb: 84, wb: 300 }, tilted = [];
+    for (let x = 0; x <= 520; x += 2) tilted.push({ x, depth: 5600 + 1.1 * x - TM.flexureHeight(x, tilt) + 60 * rnd() });
+    const ft = TM.fitFlexure(tilted), te0 = TM.elasticFromRise(tilt.x0, tilt.xb).teKm;
+    ok(ft.quality === 'good' && Math.abs(ft.slope - 1.1) < 0.1 && Math.abs(ft.wb - 300) < 40 && Math.abs(ft.elastic.teKm - te0) < 0.15 * te0, `tilted plate recovered: slope ${ft.slope.toFixed(2)} m/km (planted 1.10), rise ${ft.wb.toFixed(0)} m, T_e ${ft.elastic.teKm.toFixed(1)} km (planted ${te0.toFixed(1)})`);
+    near(TM.flexureReference(100, ft), ft.dRef + 100 * ft.slope, 1e-9, 'the reference is the level plus the slope');
+    // …and WITHOUT it the level-floor law (shipped first) pays for the tilt with a wrong rise
+    const fl = TM.fitFlexure(tilted, { slope: false });
+    ok(fl.slope === 0 && (fl.quality === 'poor' || Math.abs(fl.elastic.teKm - te0) > 0.3 * te0) && fl.rms > 2 * ft.rms, `NEGATIVE CONTROL: the level-floor fit of the same plate is ${fl.quality} — T_e ${fl.elastic.teKm.toFixed(1)} km, misfit ${fl.rms.toFixed(0)} m against ${ft.rms.toFixed(0)} m`);
+    { const steep = tilted.map((p) => ({ x: p.x, depth: p.depth + 4 * p.x })); ok(TM.fitFlexure(steep).reasons.includes('slope-implausible'), 'a slope steeper than a cooling plate\'s is refused'); }
+    { const kink = tilted.map((p) => ({ x: p.x, depth: p.depth + (p.x > 400 ? 6 * (p.x - 400) : 0) })), fk = TM.fitFlexure(kink); ok(fk.quality === 'poor', `a profile whose far quarter bends away is rejected (${fk.reasons.join(', ')})`); }
+    ok(TM.fitFlexure(tilted, { stability: 0 }).stability === null, 'the reach test can be switched off (A/B)');
 
     // real data: Bird's plates and Slab2 at the baked sites
     const gz = (p) => JSON.parse(zlib.gunzipSync(rd(p)).toString());
     const plates = decodePlates(gz('data/earth-interior/plates-pb2002.json.gz')), slabs = decodeSlabs(gz('data/earth-interior/slab2.json.gz'));
+    const wides = new Map();
+    for (const m of index.sites) { const site = SEAFLOOR_SITES.find((s) => s.id === m.id);
+        ok(!!m.wide === (site.kind === 'trench'), `${m.id}: a wide window exactly for a trench`);
+        if (!m.wide) continue;
+        const raw = rd('data/seafloor/' + m.wide.file), g = BA.makeGrid(m.wide, BA.int16FromBytes(zlib.gunzipSync(raw))); wides.set(m.id, g);
+        ok(raw.length === m.wide.bytes && g.nx === m.wide.nx && m.wide.step_deg > m.step_deg && m.wide.north - (m.wide.ny - 1) * m.wide.step_deg < m.north - (m.ny - 1) * m.step_deg - 2.5, `${m.id}: wide window is coarser and reaches > 2.5° further`);
+        const d = m.deepest, dw = BA.sampleDepth(g, d.lat, d.lon); ok(dw != null && Math.abs(dw - d.depth_m) < 0.12 * d.depth_m, `${m.id}: the wide grid is the same sea floor (${Math.round(dw)} m vs ${d.depth_m} m at the deepest cell)`);
+    }
     const model = (id, extra = {}) => { const site = SEAFLOOR_SITES.find((s) => s.id === id), meta = index.sites.find((m) => m.id === id), g = grids.get(id);
-        const detail = PM.siteDetail({ site, meta, grid: g, casts: casts.sites[id] ? casts.sites[id].casts : [] }); return TM.trenchModel({ plates, slabs, grid: g, detail, ...extra }); };
+        const detail = PM.siteDetail({ site, meta, grid: g, casts: casts.sites[id] ? casts.sites[id].casts : [] }); return TM.trenchModel({ plates, slabs, grid: g, detail, wide: wides.get(id) || null, ...extra }); };
     const tonga = model('tonga'), ts = tonga.setting;
     ok(ts.family === 'subduction' && ts.down.name === 'Pacific' && ts.over.name === 'Tonga' && ts.closing > 90 && ts.closing < 125 && ts.obliquityDeg < 15, `Tonga: Pacific under Tonga at ${ts.closing.toFixed(0)} mm/yr, nearly head-on`);
     near(Math.hypot(ts.closing, ts.along), ts.speed, 1e-9, 'closing² + sliding² = speed²');
@@ -353,12 +381,20 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     const deepening = jp.slab.profile.filter((p) => p.depthKm != null); ok(deepening.length > 20 && deepening.every((p) => p.x <= 0), 'the slab lies LANDWARD of the trench (x ≤ 0), never under the incoming plate');
     // the seaward side comes from the plate raster
     for (const t of [tonga, jp, mar]) { const p = t.profile.filter((q) => q.depth != null && q.x > 60); ok(p.length > 20 && t.seawardSign !== 0, 'a seaward profile exists'); }
-    const izu = model('izu-bonin'), java = model('java');
-    ok(izu.flexure.quality === 'good' && izu.flexure.wb > 150 && izu.flexure.wb < 500 && izu.flexure.elastic.teKm > 8 && izu.flexure.elastic.teKm < 40, `Izu–Bonin: outer rise ${izu.flexure.wb.toFixed(0)} m at ${izu.flexure.xb} km, effective thickness ${izu.flexure.elastic.teKm.toFixed(1)} km`);
-    ok(java.flexure.quality === 'good' && java.flexure.rms < 0.4 * java.flexure.lineRms, `Java: fit ${java.flexure.rms.toFixed(0)} m vs a slope's ${java.flexure.lineRms.toFixed(0)} m`);
-    ok(mar.flexure.quality === 'poor' && tonga.flexure.quality === 'poor', `RECORDED, not tuned: Mariana (${mar.flexure.reasons.join(', ')}) and Tonga (${tonga.flexure.reasons.join(', ')}) are rejected on this grid`);
+    const izu = model('izu-bonin'), kur = model('kuril'), alu = model('aleutian'), java = model('java'), hel = model('hellenic');
+    for (const [nm, t, lo, hi] of [['Izu–Bonin', izu, 9, 17], ['Kuril', kur, 9, 17], ['Aleutian', alu, 20, 36]]) { const f = t.flexure;
+        ok(f.quality === 'good' && f.elastic.teKm > lo && f.elastic.teKm < hi && f.wb > 100 && f.wb < 900 && Math.abs(f.slope) < 1.5 && f.stability.ok && f.reachKm > 450, `${nm}: rise ${f.wb.toFixed(0)} m at ${f.xb} km on a ${f.slope.toFixed(2)} m/km slope, T_e ${f.elastic.teKm.toFixed(1)} km (${f.teRange.map((v) => v.toFixed(1)).join('–')} with the reach), over ${f.reachKm.toFixed(0)} km`); }
+    ok(izu.profile.some((q) => q.src === 'wide' && q.x > 300 && q.depth != null) && izu.profile.some((q) => q.src === 'fine' && q.x > 0 && q.x < 150), 'the profile is the fine grid near the trench and the wide grid beyond it');
+    // WHAT THE SLOPE TERM BUYS, on real sea floor: the level-floor thickness grows with the length of profile used, the sloped one does not
+    for (const [nm, t] of [['Izu–Bonin', izu], ['Kuril', kur]]) {
+        const cut = t.profile.filter((q) => q.x <= 220), o = { stability: 0 }, te = (prof, slope) => TM.fitFlexure(prof, { ...o, slope }).elastic.teKm;
+        const s1 = te(cut, true), s2 = te(t.profile, true), l1 = te(cut, false), l2 = te(t.profile, false);
+        ok(Math.max(s1, s2) / Math.min(s1, s2) < 1.25 && l2 / l1 > 1.5, `${nm}: 220 km → 520 km of profile moves T_e ${s1.toFixed(1)} → ${s2.toFixed(1)} km with the slope fitted, ${l1.toFixed(1)} → ${l2.toFixed(1)} km on a level floor (NEGATIVE CONTROL)`); }
+    ok(model('kuril', { wide: null }).why === 'profile-too-short' && model('izu-bonin', { wide: null }).flexure.reachKm < 260, 'without the wide window the Kuril profile is too short to fit at all');
+    ok(java.flexure.quality === 'poor' && hel.flexure.quality === 'poor', `RECORDED: Java (${java.flexure.reasons.join(', ')}) and Hellenic (${hel.flexure.reasons.join(', ')}) passed only on a level floor and the short window; they no longer do`);
+    ok(mar.flexure.quality === 'poor' && tonga.flexure.quality === 'poor' && jp.flexure.quality === 'poor', `RECORDED, not tuned: Mariana (${mar.flexure.reasons.join(', ')}), Tonga (${tonga.flexure.reasons.join(', ')}) and Japan (${jp.flexure.reasons.join(', ')}) are rejected`);
     let good = 0, sub = 0; for (const s of SEAFLOOR_SITES) { const t = model(s.id); if (t.setting.near && t.setting.family === 'subduction') sub++; if (t.flexure && t.flexure.quality === 'good') { good++; ok(t.setting.family === 'subduction', `${s.id}: a thickness only at a subduction zone`); } }
-    ok(sub >= 12 && good >= 2 && good <= sub / 2, `${good} of ${sub} subduction sites pass the fit's tests — most do not, and the page says so`);
+    ok(sub === 15 && good === 3, `${good} of ${sub} subduction sites pass the fit's tests — most do not, and the page says so`);
     // what is NOT a trench
     const rom = model('romanche'), nep = model('ne-pacific');
     ok(rom.why === 'not-subduction' && rom.flexure === null && rom.slab === null && rom.setting.family === 'sliding', 'Romanche: a transform fault — no bending plate, no slab');

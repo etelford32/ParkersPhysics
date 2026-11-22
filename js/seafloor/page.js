@@ -7,8 +7,8 @@
  * redraws every panel. Tables update rows IN PLACE where the row set is unchanged.
  */
 import { SEAFLOOR_SITES } from './sites.js';
-import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs } from './load.js';
-import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, FAMILY_STYLE, ELASTIC } from './trench-model.js';
+import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs, loadWideGrid } from './load.js';
+import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, flexureReference, FAMILY_STYLE } from './trench-model.js';
 import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint, customSite, castsNear, cameraReport, ambientColor, worldTexture } from './page-model.js';
 import { BEAMS } from './sounder.js';
 import { MODEL_GAP_WARN_M } from './profile.js';
@@ -18,7 +18,7 @@ import { DIVE_MAX_LAT } from './free-dive.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const NS = 'http://www.w3.org/2000/svg';
-const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
+const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
 window.__seaFloor = S;
 
 // ── tiny SVG helpers ─────────────────────────────────────────────────────────
@@ -358,7 +358,13 @@ function pushBoundaries() {
     $('sf-plate-keys').innerHTML = Object.values(FAMILY_STYLE).map((f) => `<span><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="${f.hex}" stroke-width="2.5"/></svg>${esc(f.label)}</span>`).join('') + '<span><small>plate boundaries: Bird 2003</small></span>';
 }
 function computeTrench() {
-    S.trench = S.plates && S.detail && !S.detail.land ? trenchModel({ plates: S.plates, slabs: S.slabs, grid: cur().grid, detail: S.detail }) : null;
+    const c = cur(), id = S.custom ? null : S.id, w = id ? S.wides.get(id) : null;
+    S.trench = S.plates && S.detail && !S.detail.land ? trenchModel({ plates: S.plates, slabs: S.slabs, grid: c.grid, detail: S.detail, wide: w && w !== 'loading' && w !== 'down' ? w : null }) : null;
+    // the wide window is fetched only for a site that has one, only once the plate model says a plate bends here
+    if (id && c.meta && c.meta.wide && !S.wides.has(id) && S.trench && S.trench.profile) {
+        S.wides.set(id, 'loading');
+        loadWideGrid(c.meta).then((g) => S.wides.set(id, g || 'down'), () => S.wides.set(id, 'down')).then(() => { if (!S.custom && S.id === id && S.detail) { computeTrench(); renderPlates(); } });
+    }
 }
 const compass = (deg) => ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 const WHY = {
@@ -378,6 +384,8 @@ const REASON = {
     'far-field-not-in-the-data': 'the window ends before the sea floor levels out beyond the rise',
     'far-field-not-level': 'the sea floor beyond the rise does not return to a level (seamounts or a sloping plate)',
     'rise-within-the-scatter': 'the rise is no bigger than the scatter of the depths',
+    'slope-implausible': 'the fit needs a steeper regional slope than a cooling plate has',
+    'not-stable-with-reach': 'the answer changes when the farthest quarter of the profile is left out',
 };
 function renderPlates() {
     const facts = $('sf-plates-facts'), t = S.trench;
@@ -405,7 +413,9 @@ function renderPlates() {
     const f = t.flexure;
     if (f && f.quality === 'good') {
         rows.push(['Outer rise', `<b>${Math.round(f.wb)} m</b> high, ${Math.round(f.xb)} km seaward of the trench <small>modelled fit</small>`]);
-        rows.push(['Effective plate thickness', `<b>${f.elastic.teKm.toFixed(0)} km</b> <small>elastic-plate fit; flexural parameter ${Math.round(f.elastic.alphaKm)} km</small>`]);
+        const r = f.teRange.map((v) => Math.round(v));
+        rows.push(['Effective plate thickness', `<b>${f.elastic.teKm.toFixed(0)} km</b> <small>elastic-plate fit${r[0] !== r[1] ? `; ${r[0]}–${r[1]} km when the farthest quarter of the profile is left out` : '; unchanged when the farthest quarter of the profile is left out'}</small>`]);
+        rows.push(['Regional slope', `${Math.abs(f.slope) < 0.05 ? 'level' : `${Math.abs(f.slope).toFixed(1)} m per km, ${f.slope > 0 ? 'deepening' : 'shoaling'} seaward`} <small>fitted with the rise</small>`]);
     }
     facts.innerHTML = `<dl class="sf-dl">${rows.map((r) => `<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join('')}</dl>`;
     renderFlex(t); renderDeep(t);
@@ -429,26 +439,29 @@ function renderFlex(t) {
     svg.appendChild(el('text', { x: W - m.r, y: H - 4, 'text-anchor': 'end' }, 'distance seaward of the trench axis'));
     const good = f && f.quality === 'good';
     if (f) {
-        svg.appendChild(el('line', { x1: x(0), x2: W - m.r, y1: y(f.dRef), y2: y(f.dRef), stroke: '#8f98ad', 'stroke-dasharray': '2 4' }));
-        const curve = []; for (let v = 0; v <= xMax; v += 2) curve.push(`${x(v).toFixed(1)},${y(f.dRef - flexureHeight(v, f)).toFixed(1)}`);
+        svg.appendChild(el('line', { x1: x(0), x2: x(xMax), y1: y(flexureReference(0, f)), y2: y(flexureReference(xMax, f)), stroke: '#8f98ad', 'stroke-dasharray': '2 4' }));
+        const curve = []; for (let v = 0; v <= xMax; v += 2) curve.push(`${x(v).toFixed(1)},${y(flexureReference(v, f) - flexureHeight(v, f)).toFixed(1)}`);
         svg.appendChild(el('path', { d: 'M' + curve.join('L'), fill: 'none', stroke: 'var(--sf-s2)', 'stroke-width': 2, 'stroke-dasharray': good ? '' : '5 4', 'stroke-opacity': good ? 1 : 0.6 }));
     }
     let d = '', pen = false; for (const p of t.profile) { if (p.depth == null || p.x < xMin) { pen = false; continue; } d += `${pen ? 'L' : 'M'}${x(p.x).toFixed(1)},${y(p.depth).toFixed(1)}`; pen = true; }
     svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--sf-s1)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
-    if (good) { svg.appendChild(el('circle', { cx: x(f.xb), cy: y(f.dRef - f.wb), r: 4.5, fill: 'var(--sf-s2)', stroke: '#0b1120', 'stroke-width': 2 })); svg.appendChild(el('text', { x: x(f.xb), y: y(f.dRef - f.wb) - 9, 'text-anchor': 'middle', class: 't-strong' }, `outer rise, ${Math.round(f.wb)} m`)); }
+    if (good) { svg.appendChild(el('circle', { cx: x(f.xb), cy: y(flexureReference(f.xb, f) - f.wb), r: 4.5, fill: 'var(--sf-s2)', stroke: '#0b1120', 'stroke-width': 2 })); svg.appendChild(el('text', { x: x(f.xb), y: y(flexureReference(f.xb, f) - f.wb) - 9, 'text-anchor': 'middle', class: 't-strong' }, `outer rise, ${Math.round(f.wb)} m`)); }
     const cross = el('line', { y1: m.t, y2: H - m.b, stroke: '#e3eaf6', 'stroke-opacity': .5, visibility: 'hidden' }); svg.appendChild(cross);
     const hit = el('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' }); svg.appendChild(hit);
-    const base = !f ? esc(WHY[t.why] || '') : good
+    const firstWide = t.profile.find((p) => p.src === 'wide' && p.depth != null && p.x > 0), wst = S.custom ? null : S.wides.get(S.id);
+    const tail = firstWide ? ` <small>Beyond ${Math.round(firstWide.x)} km the profile is read from a wider, coarser window (3.7 km grid).</small>` : wst === 'loading' ? ' <small>Loading the wider window…</small>' : wst === 'down' ? ' <small>The wider window could not be loaded; this is the near field only.</small>' : '';
+    const base0 = !f ? esc(WHY[t.why] || '') : good
         ? `The curve fits to <b>${Math.round(f.rms)} m</b>; a straight slope fits to ${Math.round(f.lineRms)} m and a flat floor to ${Math.round(f.flatRms)} m.`
         : `<b>No stiffness is quoted here:</b> ${f.reasons.map((r) => REASON[r] || r).join('; ')}. <small>The dashed curve is the rejected fit.</small>`;
+    const base = base0 + tail;
     $('sf-flex-read').innerHTML = base;
     hit.addEventListener('pointermove', (e) => { const r = svg.getBoundingClientRect(), xv = ((e.clientX - r.left) / r.width * W - m.l) / (W - m.l - m.r) * (xMax - xMin) + xMin; let b = pts[0]; for (const p of pts) if (Math.abs(p.x - xv) < Math.abs(b.x - xv)) b = p;
         cross.setAttribute('x1', x(b.x)); cross.setAttribute('x2', x(b.x)); cross.setAttribute('visibility', 'visible');
-        $('sf-flex-read').innerHTML = `${Math.round(b.x)} km: <b>${fmt.m(b.depth)}</b> measured <small>median of ${b.n} sections</small>${f && b.x >= 0 ? ` · ${fmt.m(f.dRef - flexureHeight(b.x, f))} ${good ? 'model' : 'rejected fit'}` : ''}`; });
+        $('sf-flex-read').innerHTML = `${Math.round(b.x)} km: <b>${fmt.m(b.depth)}</b> measured <small>median of ${b.n} sections${b.src === 'wide' ? ', wide 3.7 km grid' : ''}</small>${f && b.x >= 0 ? ` · ${fmt.m(flexureReference(b.x, f) - flexureHeight(b.x, f))} ${good ? 'model' : 'rejected fit'}` : ''}`; });
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); $('sf-flex-read').innerHTML = base; });
     host.appendChild(svg);
     const ln = (c, dash, label) => `<span><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="${c}" stroke-width="2" ${dash ? `stroke-dasharray="${dash}"` : ''}/></svg>${label}</span>`;
-    $('sf-flex-keys').innerHTML = ln('var(--sf-s1)', '', 'Sea floor, median of nine sections') + (f ? ln('var(--sf-s2)', good ? '' : '5 4', good ? 'Elastic-plate model' : 'Elastic-plate fit (rejected)') + ln('#8f98ad', '2 4', 'Undisturbed level in the fit') : '');
+    $('sf-flex-keys').innerHTML = ln('var(--sf-s1)', '', 'Sea floor, median of nine sections') + (f ? ln('var(--sf-s2)', good ? '' : '5 4', good ? 'Elastic-plate model' : 'Elastic-plate fit (rejected)') + ln('#8f98ad', '2 4', 'Undisturbed sea floor in the fit') : '');
 }
 function renderDeep(t) {
     const host = $('sf-deep-chart'), sl = t.slab;

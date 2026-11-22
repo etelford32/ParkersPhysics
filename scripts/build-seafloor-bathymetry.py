@@ -18,6 +18,9 @@ lat/lon grid through the exact inverse — never a stretched tile image (the Cli
 OUTPUT
   <id>.bin.gz   int16 little-endian metres (elevation, negative below sea level), row-major,
                 row 0 = NORTH, col 0 = WEST. gzip mtime 0 so a re-bake is byte-stable.
+  <id>.wide.bin.gz  (kind 'trench' only) the same encoding on a +-5 deg window at 2 arc-minutes, read only by
+                js/seafloor/trench-model.js for the sea floor far seaward of the trench. Its geometry is
+                the site's `wide` entry in index.json.
   world.bin.gz  the whole planet at 0.25 deg for the globe (720 x 1440 cell centres, lat 90..-90), in
                 10 m steps, row-delta coded and byte-shuffled (js/seafloor/bathy.js decodeWorld).
   index.json    per site: grid geometry + the deepest cell FOUND in the grid.
@@ -32,6 +35,9 @@ CACHE = os.path.join(ROOT, 'scripts', '.cache', 'seafloor-tiles')
 TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 ZOOM = 7                 # 0.0028 deg/px at the equator in x; finer than the 1' target everywhere used
 WORLD_ZOOM = 4
+WIDE_HALF_DEG = 5.0     # trench sites also get a WIDE window: the bending plate's far field lies 300-500 km seaward
+WIDE_ARCMIN = 2.0       # 3.7 km: an outer rise is 50-150 km across, so this resolves it; the trench itself stays on the 1' window
+WIDE_ZOOM = 6
 WORLD_STEP = 0.25
 WORLD_QUANT_M = 10      # the globe's relief is stored in 10 m steps (the grid itself is good to ~100 m)
 
@@ -125,11 +131,23 @@ def main():
         zi = np.rint(z).astype(np.int32)
         j, i = np.unravel_index(np.argmin(zi), zi.shape)
         size = write_bin(os.path.join(OUT, s['id'] + '.bin.gz'), z)
+        wide = None
+        if s['kind'] == 'trench':
+            wstep = WIDE_ARCMIN / 60
+            whl = round(min(WIDE_HALF_DEG / max(math.cos(math.radians(s['lat'])), 0.2), 12.0) / wstep) * wstep
+            wny = int(round(2 * WIDE_HALF_DEG / wstep)) + 1; wnx = int(round(2 * whl / wstep)) + 1
+            wnorth = s['lat'] + WIDE_HALF_DEG; wwest = s['lon'] - whl
+            WLON, WLAT = np.meshgrid(wwest + np.arange(wnx) * wstep, wnorth - np.arange(wny) * wstep)
+            wz = sample(WLAT, WLON, WIDE_ZOOM)
+            if not np.isfinite(wz).all(): raise SystemExit(f"{s['id']}: wide window leaves the tile pyramid")
+            wsz = write_bin(os.path.join(OUT, s['id'] + '.wide.bin.gz'), wz)
+            wide = dict(file=s['id'] + '.wide.bin.gz', north=round(float(wnorth), 6), west=round(float(wwest), 6), step_deg=round(wstep, 8), nx=wnx, ny=wny, tile_zoom=WIDE_ZOOM, bytes=wsz)
+            size_w = wsz
         rows.append(dict(
             id=s['id'], north=round(float(north), 6), west=round(float(west), 6), step_deg=round(step, 8), nx=nx, ny=ny,
             deepest=dict(lat=round(float(lat[j]), 5), lon=round(float(((lon[i] + 180) % 360) - 180), 5), depth_m=int(-zi[j, i])),
             median_depth_m=int(-np.median(zi[zi < 0])) if (zi < 0).any() else None,
-            ocean_fraction=round(float((zi < 0).mean()), 4), bytes=size))
+            ocean_fraction=round(float((zi < 0).mean()), 4), bytes=size, **({'wide': wide} if wide else {})))
         print(f"{s['id']:16s} {nx}x{ny}  deepest {-zi[j, i]:6d} m at {lat[j]:.3f}, {lon[i]:.3f}  ({size/1024:.0f} KB)")
     # overview: 0.25 deg, 10 m steps, row-delta coded then byte-shuffled (the glacier catalogue's trick):
     # value[j][i] = q[j][i] - q[j][i-1], first column = difference from the row above; low bytes then high bytes.

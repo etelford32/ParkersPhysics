@@ -23,22 +23,36 @@
  *     D = α⁴·(ρ_m − ρ_w)·g/4   (flexural rigidity)
  *     T_e = [12·(1 − ν²)·D/E]^(1/3)   (effective elastic thickness)
  *
- * `fitFlexure` fits (x₀, x_b, w_b) and the undisturbed depth to the OBSERVED bathymetry: a STACK
- * (median of parallel sections — one section is at the mercy of a single seamount) on the
- * downgoing plate's side, which is decided by the plate raster, never by which side looks deeper.
- * Every fit is scored against two CONTROLS on the same points — a flat sea floor (no bending) and
- * a straight tilted one — and reports `quality`: a fit that does not clearly beat the straight
- * line, whose outer rise is not inside the data, does not stand clear of the scatter, or is not
- * followed by sea floor back at the undisturbed level, is 'poor' and the page prints no elastic
- * thickness for it. MEASURED on the 28 baked windows (2026-11-22): most trenches are 'poor' — the
- * rise is a few hundred metres on a grid whose own scatter is 100–300 m, and seamounts or a young
- * plate's regional slope hide it. That is the honest state of a first model; a regional-slope
- * term and longer windows are the next steps, not a looser test.
+ * `fitFlexure` fits (x₀, x_b, w_b), the undisturbed depth AND A REGIONAL SLOPE to the OBSERVED
+ * bathymetry: a STACK (median of parallel sections — one section is at the mercy of a single
+ * seamount) on the downgoing plate's side, which is decided by the plate raster, never by which
+ * side looks deeper. At the baked trench sites the stack runs 520 km seaward: the 1′ window near
+ * the trench, the WIDE 2′ window (`<id>.wide.bin.gz`, ±5°) beyond it, and `profile[].src` says
+ * which fed each point. Every fit is scored against two CONTROLS on the same points — a flat sea
+ * floor and a straight tilted one — and reports `quality`: a fit whose outer rise is not inside
+ * the data, does not stand clear of the scatter, is not followed by sea floor back on the fitted
+ * reference, needs a slope no cooling plate has, or CHANGES when the farthest quarter of the
+ * profile is left out, is 'poor' and the page prints no elastic thickness for it.
+ *
+ * MEASURED on the 28 baked windows (2026-11-22), in two steps:
+ *   · level floor, 220 km windows (the first model): 3 of 15 subduction sites passed (Izu–Bonin,
+ *     Java, Hellenic) — and the level-floor thickness turned out to GROW with the length of
+ *     profile used (Izu–Bonin 14.6 → 24.5 km from 220 to 520 km, Kuril 12.4 → 23.2).
+ *   · slope fitted, 520 km: 3 of 15 pass, and they are not the same three — Kuril (12 km, which
+ *     could not be fitted at all before), Izu–Bonin (12 km) and Aleutian (27 km) hold; Java and
+ *     Hellenic are gone. Mariana (seamounts), Tonga, Japan, Kermadec, Philippine (a rise no
+ *     bigger than the scatter) are still rejected. The count did not rise; the answers stopped
+ *     depending on the window.
+ * The slope costs precision on a SHORT profile, where it trades off against the rise (planted
+ * plate, 250 km: thickness off by up to ~15 %; 520 km: exact) — it needs the long window.
+ * NEXT, not a looser test: masking seamounts in the stack, and a fit of several profiles along
+ * each trench instead of one.
  *
  * LIMITS, each said on the page: T_e is an EFFECTIVE thickness (a real plate yields and faults as
  * it bends, so it reads thinner than the cold lithosphere is thick); E, ν and the densities are
- * textbook constants (`ELASTIC`); the baked windows reach ~200 km from the trench, which is
- * short for old, stiff plates; the bathymetry is a 1.8 km grid of mostly predicted depth.
+ * textbook constants (`ELASTIC`); the regional slope is ONE straight line over 500 km; the
+ * bathymetry is a 1.8–3.7 km grid of mostly predicted depth; nothing here has been checked
+ * against published thicknesses for these trenches.
  */
 import { nearestStep, stepFamily, FAMILY_STYLE, CLASS_FAMILY } from '../earth-interior/plates-model.js';
 import { plateAt, velocityIn, STEP_CLASSES } from '../earth-interior/plates.js';
@@ -51,7 +65,11 @@ export { FAMILY_STYLE, CLASS_FAMILY, stepFamily };
 export const ELASTIC = Object.freeze({ E: 70e9, nu: 0.25, rhoMantle: 3300, rhoWater: 1030, g: 9.81 });
 /** Past this distance a point is "mid-plate": the boundary is named but no trench is modelled. */
 export const BOUNDARY_NEAR_KM = 200;
-export const STACK = Object.freeze({ offsetsKm: [-40, -30, -20, -10, 0, 10, 20, 30, 40], minLines: 5, stepKm: 2, reachKm: 260 });
+export const STACK = Object.freeze({ offsetsKm: [-40, -30, -20, -10, 0, 10, 20, 30, 40], minLines: 5, stepKm: 2, reachKm: 260, wideReachKm: 520 });
+/** A regional slope steeper than this is not a cooling plate's (young fast-subsiding sea floor is ~2 m/km): the fit is refused. */
+export const SLOPE_MAX_M_PER_KM = 3;
+/** The reach test: refit on this fraction of the profile; the thickness may move by at most this share. */
+export const STABILITY = Object.freeze({ fraction: 0.75, teTolerance: 0.25 });
 const SQRT2_EPI4 = Math.SQRT2 * Math.exp(Math.PI / 4);
 
 /** The universal profile, in units of w_b: height above the undisturbed plate at ξ = (x − x₀)/(x_b − x₀). */
@@ -119,12 +137,65 @@ function lsq2(f, y) {
     return { a, b, rms: Math.sqrt(ss / n) };
 }
 
+/** 3-parameter linear least squares y ≈ a + s·x + b·f (normal equations, centred). Returns { a, s, b, rms } or null. */
+function lsq3(x, f, y) {
+    const n = x.length; let mx = 0, mf = 0, my = 0;
+    for (let i = 0; i < n; i++) { mx += x[i]; mf += f[i]; my += y[i]; } mx /= n; mf /= n; my /= n;
+    let sxx = 0, sff = 0, sxf = 0, sxy = 0, sfy = 0;
+    for (let i = 0; i < n; i++) { const dx = x[i] - mx, df = f[i] - mf, dy = y[i] - my; sxx += dx * dx; sff += df * df; sxf += dx * df; sxy += dx * dy; sfy += df * dy; }
+    const det = sxx * sff - sxf * sxf;
+    if (!(det > 1e-9 * sxx * sff)) return null;                 // the shape is indistinguishable from a straight line on these points
+    const sl = (sxy * sff - sfy * sxf) / det, b = (sfy * sxx - sxy * sxf) / det, a = my - sl * mx - b * mf;
+    let ss = 0; for (let i = 0; i < n; i++) ss += (y[i] - a - sl * x[i] - b * f[i]) ** 2;
+    return { a, s: sl, b, rms: Math.sqrt(ss / n) };
+}
+
+/** The undisturbed sea floor of a fit at x (m): the level, plus the regional slope when one was fitted. */
+export function flexureReference(xKm, f) { return f.dRef + (f.slope || 0) * xKm; }
+
 /**
  * Fit the universal profile to a seaward profile [{ x (km from the trench axis, > 0 seaward), depth (m) }].
- * depth(x) = d_ref − w(x): (d_ref, w_b) by linear least squares for each (x₀, x_b) of a grid search.
- * Returns { x0, xb, wb, dRef, rms, flatRms, lineRms, gain, quality, reasons, reachKm, n, elastic } or null.
+ *
+ *     depth(x) = d_ref + slope·x − w(x)
+ *
+ * (d_ref, slope, w_b) by linear least squares for each (x₀, x_b) of a grid search. THE REGIONAL SLOPE
+ * (m of depth per km seaward) is the plate's own tilt — sea floor deepens with age, and most plates reach
+ * their trench at an angle to their isochrons — and without it a tilted plate fails "far field not level"
+ * however clean its rise is. `slope: false` is the level-floor law shipped first, kept as the A/B and the
+ * gate's negative control. With a slope in the model the straight-line control is NESTED in it (w_b = 0),
+ * so the tests that carry the weight are the ones on the RISE: it must stand clear of the scatter, lie
+ * inside the data, and be followed by sea floor back on the fitted reference.
+ *
+ * AND THE ANSWER MUST NOT DEPEND ON WHERE THE DATA STOP (`STABILITY`): the fit is repeated on the nearest
+ * three quarters of the profile, and a thickness that moves by more than a quarter — or a refit that finds
+ * no rise at all — is 'not-stable-with-reach'. MEASURED on the baked windows (2026-11-22), this is what
+ * the slope term buys: with a level floor the Izu–Bonin thickness read 14.6 km on 220 km of sea floor and
+ * 24.5 km on 520 km (Kuril 12.4 → 23.2), because the fit paid for the plate's tilt with a taller, wider
+ * rise; with the slope fitted the same two trenches read 14.6 → 12.4 and 13.5 → 12.4. It also REMOVED two
+ * earlier passes (Java, Hellenic), which held only on a level floor and only on the short window.
+ * `teRange` is the spread of the two fits — a floor on the uncertainty, not a confidence interval.
+ * Returns { x0, xb, wb, dRef, slope, rms, flatRms, lineRms, gain, quality, reasons, reachKm, n, elastic, teRange, stability } or null.
  */
-export function fitFlexure(profile, { x0Range = [0, 110], riseRange = [16, 130], stepKm = 2, minPoints = 30, minReachKm = 110 } = {}) {
+export function fitFlexure(profile, opts = {}) {
+    const full = fitOnce(profile, opts);
+    if (!full) return null;
+    const frac = opts.stability === undefined ? STABILITY.fraction : opts.stability;
+    full.teRange = [full.elastic.teKm, full.elastic.teKm]; full.stability = null;
+    if (!frac) return full;
+    const near = fitOnce(profile.filter((p) => p.x <= frac * full.reachKm), opts);
+    if (!near) { full.stability = { reachKm: frac * full.reachKm, teKm: null, ok: false }; full.reasons.push('not-stable-with-reach'); }
+    else {
+        const a = full.elastic.teKm, b = near.elastic.teKm, rise = near.wb >= 50 && near.wb >= 1.5 * near.rms;
+        const ok = rise && Math.abs(a - b) <= STABILITY.teTolerance * Math.max(a, b);
+        full.stability = { reachKm: near.reachKm, teKm: b, wb: near.wb, slope: near.slope, ok };
+        full.teRange = [Math.min(a, b), Math.max(a, b)];
+        if (!ok) full.reasons.push('not-stable-with-reach');
+    }
+    full.quality = full.reasons.length ? 'poor' : 'good';
+    return full;
+}
+
+function fitOnce(profile, { x0Range = [0, 110], riseRange = [16, 130], stepKm = 2, minPoints = 30, minReachKm = 110, slope = true } = {}) {
     const pts = profile.filter((p) => p.depth != null && p.x >= 0).sort((a, b) => a.x - b.x);
     if (pts.length < minPoints) return null;
     const x = pts.map((p) => p.x), y = pts.map((p) => p.depth), reachKm = x[x.length - 1];
@@ -132,9 +203,9 @@ export function fitFlexure(profile, { x0Range = [0, 110], riseRange = [16, 130],
     let best = null;
     for (let x0 = x0Range[0]; x0 <= x0Range[1]; x0 += stepKm) for (let L = riseRange[0]; L <= riseRange[1]; L += stepKm) {
         const f = x.map((v) => -flexureShape((v - x0) / L));
-        const r = lsq2(f, y);
+        const r = slope ? lsq3(x, f, y) : lsq2(f, y);
         if (!r || !(r.b > 0)) continue;                      // w_b must be a RISE
-        if (!best || r.rms < best.rms) best = { x0, xb: x0 + L, wb: r.b, dRef: r.a, rms: r.rms };
+        if (!best || r.rms < best.rms) best = { x0, xb: x0 + L, wb: r.b, dRef: r.a, slope: slope ? r.s : 0, rms: r.rms };
     }
     if (!best) return null;
     const mean = y.reduce((a, b) => a + b, 0) / y.length;
@@ -145,25 +216,29 @@ export function fitFlexure(profile, { x0Range = [0, 110], riseRange = [16, 130],
     if (best.xb > reachKm - 10) reasons.push('rise-outside-the-data');
     if (best.wb < 50) reasons.push('no-rise');
     if (best.wb > 1500) reasons.push('rise-implausibly-high');
+    if (Math.abs(best.slope) > SLOPE_MAX_M_PER_KM) reasons.push('slope-implausible');
     if (best.x0 >= x0Range[1] || best.xb - best.x0 >= riseRange[1] || best.xb - best.x0 <= riseRange[0]) reasons.push('at-search-bound');
-    // THE RISE MUST BE SEEN, not just fitted: the sea floor beyond it has to come back down to the
-    // undisturbed level the fit assumed, and the rise has to stand clear of the misfit. Measured on the
-    // real windows: without these two tests Mariana (seamounts shoal the far field by 1 km) and Tonga
-    // (no rise in the stack at all) both passed as 'good' with a 230–630 m "rise".
-    const L = best.xb - best.x0, far = pts.filter((q) => q.x >= best.xb + L).map((q) => q.depth).sort((u, v) => u - v);
-    const farDepth = far.length >= 8 ? far[far.length >> 1] : null;
-    if (farDepth == null) reasons.push('far-field-not-in-the-data');
-    else if (Math.abs(farDepth - best.dRef) > 0.4 * best.wb) reasons.push('far-field-not-level');
+    // THE RISE MUST BE SEEN, not just fitted: the sea floor beyond it has to come back to the undisturbed
+    // reference the fit assumed, and the rise has to stand clear of the misfit. Measured on the real
+    // windows: without these two tests Mariana (seamounts shoal the far field by 1 km) and Tonga (no rise
+    // in the stack at all) both passed as 'good' with a 230–630 m "rise".
+    const L = best.xb - best.x0, far = pts.filter((q) => q.x >= best.xb + L).map((q) => q.depth - flexureReference(q.x, best)).sort((u, v) => u - v);
+    const farOffset = far.length >= 8 ? far[far.length >> 1] : null;
+    if (farOffset == null) reasons.push('far-field-not-in-the-data');
+    else if (Math.abs(farOffset) > 0.4 * best.wb) reasons.push('far-field-not-level');
     if (best.wb < 1.5 * best.rms) reasons.push('rise-within-the-scatter');
-    return { ...best, farDepth, flatRms, lineRms, gain: 1 - best.rms / lineRms, quality: reasons.length ? 'poor' : 'good', reasons, reachKm, n: pts.length, elastic: elasticFromRise(best.x0, best.xb) };
+    return { ...best, farOffset, farDepth: farOffset == null ? null : best.dRef + farOffset, flatRms, lineRms, gain: 1 - best.rms / lineRms, quality: reasons.length ? 'poor' : 'good', reasons, reachKm, n: pts.length, elastic: elasticFromRise(best.x0, best.xb) };
 }
 
 /**
  * Everything about the trench at a detail's sounding point.
  * @param plates   decodePlates() model           @param slabs  decodeSlabs() model (may be null)
  * @param detail   page-model siteDetail (uses point, axis, sectionAzimuth)
+ * @param wide     optional coarser, WIDER grid of the same sea floor (the baked `<id>.wide` window): it supplies
+ *                 the profile only where the fine grid has run out, and `profile[].src` says which fed each point
+ * @param fit      options passed to fitFlexure (`{ slope: false }` is the level-floor A/B)
  */
-export function trenchModel({ plates, slabs = null, grid, detail }) {
+export function trenchModel({ plates, slabs = null, grid, detail, wide = null, fit = {} }) {
     if (!plates || !detail || !detail.point) return null;
     const p = detail.point, setting = plateSetting(plates, p.lat, p.lon);
     if (!setting) return null;
@@ -196,12 +271,17 @@ export function trenchModel({ plates, slabs = null, grid, detail }) {
     if (setting.cls !== 'SUB' || !setting.down) { out.why = 'not-subduction'; return out; }
     if (!seaward) { out.why = 'side-unknown'; return out; }
     // ── the bending plate: stacked profile on the downgoing side, measured from the trench axis ──
-    const stack = stackedSection(grid, p.lat, p.lon, axis.azimuthDeg, across);
+    let stack = stackedSection(grid, p.lat, p.lon, axis.azimuthDeg, across).map((q) => ({ ...q, src: 'fine' }));
+    if (wide) {
+        const far = stackedSection(wide, p.lat, p.lon, axis.azimuthDeg, across, { reachKm: STACK.wideReachKm }), byS = new Map(stack.map((q) => [Math.round(q.s), q]));
+        stack = far.map((q) => { const f = byS.get(Math.round(q.s)); return f && f.depth != null ? f : { ...q, src: 'wide' }; });
+    }
+    out.wide = !!wide;
     const near = stack.filter((q) => q.depth != null && Math.abs(q.s) <= 40);
     if (!near.length) { out.why = 'no-profile'; return out; }
     const axisS = near.reduce((a, q) => (q.depth > a.depth ? q : a)).s;
-    out.profile = stack.map((q) => ({ x: (q.s - axisS) * seaward, depth: q.depth, n: q.n }));
-    out.flexure = fitFlexure(out.profile);
+    out.profile = stack.map((q) => ({ x: (q.s - axisS) * seaward, depth: q.depth, n: q.n, src: q.src }));
+    out.flexure = fitFlexure(out.profile, fit);
     if (!out.flexure) out.why = 'profile-too-short';
     return out;
 }
