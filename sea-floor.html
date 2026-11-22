@@ -117,6 +117,9 @@ dl.sf-dl dt { color:var(--sf-ink-3); } dl.sf-dl dd { margin:0; font-variant-nume
 details.sf-table summary { cursor:pointer; font-size:.72rem; color:var(--sf-ink-3); margin-top:8px; }
 details.sf-table table { width:100%; border-collapse:collapse; font-size:.7rem; margin-top:4px; }
 details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; border-bottom:1px solid rgba(140,190,255,.07); color:var(--sf-ink-2); font-variant-numeric:tabular-nums; }
+.sf-grid3 { display:grid; grid-template-columns:minmax(220px, .8fr) minmax(0, 1.2fr) minmax(0, 1.2fr); gap:16px; align-items:start; }
+@media (max-width: 1180px) { .sf-grid3 { grid-template-columns:minmax(0, 1fr); } }
+.sf-h3 { font-size:.8rem; font-weight:650; margin-bottom:4px; } .sf-h3 small { font-weight:400; color:var(--sf-ink-3); font-size:.7rem; }
 .sf-method { font-size:.74rem; color:var(--sf-ink-2); line-height:1.6; }
 .sf-method p + p { margin-top:6px; } .sf-method b { color:var(--sf-ink); } .sf-method a { color:var(--sf-accent); }
 </style>
@@ -155,6 +158,7 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
           <button id="sf-dive-here" title="Go under the surface at the selected point (or double-click the ocean)">Dive here ▼</button>
           <label title="Relief exaggeration">Relief <input id="sf-globe-exag" type="range" min="1" max="60" step="1" value="30" aria-label="Relief exaggeration on the globe"><span id="sf-globe-exag-val">30×</span></label>
           <label title="Show or drain the ocean"><input id="sf-water" type="checkbox" checked> Water</label>
+          <label title="Plate boundaries (Bird 2003)"><input id="sf-plates" type="checkbox" checked> Plates</label>
         </span>
         <span class="sf-group" data-for="local">
           <button id="sf-dive" title="Fly beneath the surface to the sea floor at the sounding point">Dive ▼</button>
@@ -169,7 +173,28 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
       <div class="sf-ov" id="sf-stage-readout" aria-live="polite"></div>
       <div class="sf-ov" id="sf-dive-hud" aria-live="polite" hidden></div>
     </div>
+    <div class="sf-keys" id="sf-plate-keys"></div>
     <div class="sf-note" id="sf-stage-note"></div>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-plates-panel">
+    <h2>The plates here <small id="sf-plates-sub"></small></h2>
+    <div class="sf-grid3">
+      <div id="sf-plates-facts"><div class="sf-empty">Loading the plate model…</div></div>
+      <div>
+        <h3 class="sf-h3">The bending plate <small>sea floor seaward of the trench, against the elastic-plate model</small></h3>
+        <div class="sf-keys" id="sf-flex-keys"></div>
+        <div class="sf-read" id="sf-flex-read"></div>
+        <div class="sf-chart" id="sf-flex-chart"></div>
+      </div>
+      <div>
+        <h3 class="sf-h3">Where the plate goes <small>true scale, no exaggeration</small></h3>
+        <div class="sf-keys" id="sf-deep-keys"></div>
+        <div class="sf-read" id="sf-deep-read"></div>
+        <div class="sf-chart" id="sf-deep-chart"></div>
+      </div>
+    </div>
+    <div class="sf-note" id="sf-plates-note"></div>
   </section>
 
   <section class="sf-panel sf-span" id="sf-map-panel">
@@ -233,6 +258,12 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
     <p><b>Sound speed and soundings.</b> Sound speed is Chen &amp; Millero (UNESCO 1983) from temperature, salinity and pressure. It differs from the newer TEOS-10 standard by up to
       about 2 m/s at trench pressure, which is roughly 15 m of echo depth at 11 km, and soundings here carry that uncertainty. The echo is timed straight down;
       the beam test uses straight rays on the 1.8 km grid, so a real narrow beam would resolve walls this grid cannot. Depth from pressure is the UNESCO standard-ocean formula.</p>
+    <p><b>Plates and slabs.</b> Plate boundaries, the plates' rotation poles and every closing or sliding rate are Peter Bird's PB2002 model (2003); a rate is the rigid rotation of one plate
+      relative to the other at that spot, so it says nothing about deformation inside a plate. The subducted plate's surface is the USGS Slab2 model. Neither is computed here.</p>
+    <p><b>The bending plate: a model, tested.</b> Seaward of a trench the sinking plate bends like a stiff sheet and pushes up a low outer rise. The page fits the standard elastic-plate curve to the
+      median of nine parallel depth sections and reads an effective plate thickness from the fit. It is "effective" because a real plate cracks as it bends, so it reads thinner than the cold plate really is.
+      A fit is only kept when it clearly beats a straight slope, the rise stands clear of the scatter, and the sea floor beyond the rise returns to the level the fit assumed. On this grid most trenches fail
+      those tests, and the page then shows the profile without a thickness. The rock constants are textbook values.</p>
     <p><b>Diving anywhere.</b> The 28 marked sites are stored with the page. Anywhere else, the sea floor is read at the moment you dive from the same public tiles, at the same 1.8 km detail.
       Temperature is shown only where an archived cast lies within 150 km of your point; elsewhere the page shows pressure and light but no temperature.</p>
     <p><b>Light under water.</b> Sunlight fades by about 4 % per metre in the clearest open ocean, so about 1 % is left at 115 m and effectively none below a few hundred metres. That rate is an order-of-magnitude figure

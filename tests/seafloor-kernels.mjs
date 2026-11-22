@@ -22,6 +22,9 @@ import { SEAFLOOR_SITES, WINDOW_HALF_DEG, GRID_ARCMIN } from '../js/seafloor/sit
 import * as LI from '../js/seafloor/light.js';
 import * as FD from '../js/seafloor/free-dive.js';
 import { terrariumEncode, tileLatLon, TILE_PX } from '../js/climalytix/terrain.js';
+import * as TM from '../js/seafloor/trench-model.js';
+import { decodePlates } from '../js/earth-interior/plates.js';
+import { decodeSlabs } from '../js/earth-interior/slabs.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (p) => fs.readFileSync(path.join(ROOT, p));
@@ -304,5 +307,69 @@ console.log('7. globe, light, free dive');
     const globe = rd('js/seafloor/globe.js').toString();
     ok(!/intersectObject/.test(globe) && /pointAt/.test(globe), 'the globe picks analytically, never by mesh raycast');
     for (const f of ['soundSpeed(', 'potentialTemperature(', 'pressureFromDepth(', 'sunlightFraction(']) ok(!globe.includes(f) && !rd('js/seafloor/stage.js').toString().includes(f), `globe.js / stage.js never call ${f}`);
+}
+// ── 8. plates, slabs and the bending plate ──────────────────────────────────
+console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fit)');
+{
+    // the universal profile's identities
+    near(TM.flexureShape(0), 0, 1e-15, 'w(x0) = 0'); near(TM.flexureShape(1), 1, 1e-12, 'w(x_b) = w_b');
+    let top = 0, at = 0; for (let xi = 0; xi < 6; xi += 1e-3) { const w = TM.flexureShape(xi); if (w > top) { top = w; at = xi; } }
+    ok(Math.abs(at - 1) < 2e-3 && top <= 1 + 1e-9, 'and x_b is where the rise is highest');
+    ok(TM.flexureShape(-0.5) < -0.9 && Math.abs(TM.flexureShape(4)) < 1e-12 && TM.flexureShape(5) < 0 && TM.flexureShape(5) > -0.06, 'trench side goes down; a faint trough follows the rise');
+    // elastic thickness: closed form, and its scaling
+    const el = TM.elasticFromRise(0, 55), K = TM.ELASTIC, aM = 4 * 55e3 / Math.PI;
+    near(el.alphaKm, 220 / Math.PI, 1e-9, 'α = 4(x_b − x0)/π'); near(el.D, aM ** 4 * (K.rhoMantle - K.rhoWater) * K.g / 4, el.D * 1e-12, 'D = α⁴Δρg/4');
+    near(el.teKm, Math.cbrt(12 * (1 - K.nu ** 2) * el.D / K.E) / 1000, 1e-9, 'T_e closed form'); ok(el.teKm > 20 && el.teKm < 35, `a 55 km rise distance is a ${el.teKm.toFixed(1)} km plate`);
+    near(TM.elasticFromRise(0, 110).teKm / el.teKm, 2 ** (4 / 3), 1e-9, 'T_e ∝ (rise distance)^(4/3)');
+    // the fit recovers a PLANTED plate through noise
+    let seed = 7; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 - 0.5; };
+    const truth = { x0: 24, xb: 78, wb: 420 }, synth = [];
+    for (let x = 0; x <= 250; x += 2) synth.push({ x, depth: 5800 - TM.flexureHeight(x, truth) + 60 * rnd() });
+    const f = TM.fitFlexure(synth);
+    ok(f.quality === 'good' && Math.abs(f.x0 - 24) <= 2 && Math.abs(f.xb - 78) <= 4 && Math.abs(f.wb - 420) < 30 && Math.abs(f.dRef - 5800) < 20, `planted plate recovered: x0 ${f.x0}, x_b ${f.xb}, w_b ${f.wb.toFixed(0)} m, level ${f.dRef.toFixed(0)} m`);
+    ok(f.rms < 25 && f.lineRms > 10 * f.rms && f.flatRms > 10 * f.rms, 'CONTROLS on the same points: a straight slope and a flat floor both fit ten times worse');
+    near(f.elastic.teKm, TM.elasticFromRise(f.x0, f.xb).teKm, 1e-12, 'its thickness is the fitted lengths\' own');
+    // NEGATIVE CONTROLS: sea floors with no bending plate must not get a thickness
+    const slope = synth.map((p) => ({ x: p.x, depth: 5000 + 6 * p.x + 60 * rnd() })), flat = synth.map((p) => ({ x: p.x, depth: 5800 + 60 * rnd() }));
+    const fs1 = TM.fitFlexure(slope), ff = TM.fitFlexure(flat);
+    ok((!fs1 || fs1.quality === 'poor') && (!ff || ff.quality === 'poor'), `NEGATIVE CONTROL: a plain slope and a flat floor are rejected (${fs1 ? fs1.reasons[0] : 'no fit'}; ${ff ? ff.reasons[0] : 'no fit'})`);
+    const seamount = synth.map((p) => ({ x: p.x, depth: p.depth - (p.x > 150 ? 900 : 0) }));
+    { const fm = TM.fitFlexure(seamount); ok(fm.quality === 'poor', `NEGATIVE CONTROL: the same plate with a 900 m shoal beyond the rise is rejected (${fm.reasons.join(', ')})`); }
+    ok(TM.fitFlexure(synth.filter((p) => p.x <= 90)) === null, 'a profile that stops 90 km out is not fitted at all');
+
+    // real data: Bird's plates and Slab2 at the baked sites
+    const gz = (p) => JSON.parse(zlib.gunzipSync(rd(p)).toString());
+    const plates = decodePlates(gz('data/earth-interior/plates-pb2002.json.gz')), slabs = decodeSlabs(gz('data/earth-interior/slab2.json.gz'));
+    const model = (id, extra = {}) => { const site = SEAFLOOR_SITES.find((s) => s.id === id), meta = index.sites.find((m) => m.id === id), g = grids.get(id);
+        const detail = PM.siteDetail({ site, meta, grid: g, casts: casts.sites[id] ? casts.sites[id].casts : [] }); return TM.trenchModel({ plates, slabs, grid: g, detail, ...extra }); };
+    const tonga = model('tonga'), ts = tonga.setting;
+    ok(ts.family === 'subduction' && ts.down.name === 'Pacific' && ts.over.name === 'Tonga' && ts.closing > 90 && ts.closing < 125 && ts.obliquityDeg < 15, `Tonga: Pacific under Tonga at ${ts.closing.toFixed(0)} mm/yr, nearly head-on`);
+    near(Math.hypot(ts.closing, ts.along), ts.speed, 1e-9, 'closing² + sliding² = speed²');
+    const jp = model('japan');
+    ok(jp.setting.down.name === 'Pacific' && jp.setting.closing > 75 && jp.setting.closing < 105 && jp.slab.code === 'kur' && jp.slab.dipDeg > 15 && jp.slab.dipDeg < 40, `Japan: ${jp.setting.closing.toFixed(0)} mm/yr, slab dips ${jp.slab.dipDeg.toFixed(0)}° at 100 km`);
+    const mar = model('mariana');
+    ok(mar.slab.code === 'izu' && mar.slab.dipDeg > jp.slab.dipDeg + 15, `the Mariana slab is far steeper (${mar.slab.dipDeg.toFixed(0)}°) than Japan's`);
+    ok(mar.slab.profile.every((p, i, a) => p.depthKm == null || i === 0 || a[i - 1].depthKm == null || p.x < a[i - 1].x || p.x > a[i - 1].x), 'slab profile is ordered');
+    const deepening = jp.slab.profile.filter((p) => p.depthKm != null); ok(deepening.length > 20 && deepening.every((p) => p.x <= 0), 'the slab lies LANDWARD of the trench (x ≤ 0), never under the incoming plate');
+    // the seaward side comes from the plate raster
+    for (const t of [tonga, jp, mar]) { const p = t.profile.filter((q) => q.depth != null && q.x > 60); ok(p.length > 20 && t.seawardSign !== 0, 'a seaward profile exists'); }
+    const izu = model('izu-bonin'), java = model('java');
+    ok(izu.flexure.quality === 'good' && izu.flexure.wb > 150 && izu.flexure.wb < 500 && izu.flexure.elastic.teKm > 8 && izu.flexure.elastic.teKm < 40, `Izu–Bonin: outer rise ${izu.flexure.wb.toFixed(0)} m at ${izu.flexure.xb} km, effective thickness ${izu.flexure.elastic.teKm.toFixed(1)} km`);
+    ok(java.flexure.quality === 'good' && java.flexure.rms < 0.4 * java.flexure.lineRms, `Java: fit ${java.flexure.rms.toFixed(0)} m vs a slope's ${java.flexure.lineRms.toFixed(0)} m`);
+    ok(mar.flexure.quality === 'poor' && tonga.flexure.quality === 'poor', `RECORDED, not tuned: Mariana (${mar.flexure.reasons.join(', ')}) and Tonga (${tonga.flexure.reasons.join(', ')}) are rejected on this grid`);
+    let good = 0, sub = 0; for (const s of SEAFLOOR_SITES) { const t = model(s.id); if (t.setting.near && t.setting.family === 'subduction') sub++; if (t.flexure && t.flexure.quality === 'good') { good++; ok(t.setting.family === 'subduction', `${s.id}: a thickness only at a subduction zone`); } }
+    ok(sub >= 12 && good >= 2 && good <= sub / 2, `${good} of ${sub} subduction sites pass the fit's tests — most do not, and the page says so`);
+    // what is NOT a trench
+    const rom = model('romanche'), nep = model('ne-pacific');
+    ok(rom.why === 'not-subduction' && rom.flexure === null && rom.slab === null && rom.setting.family === 'sliding', 'Romanche: a transform fault — no bending plate, no slab');
+    ok(nep.why === 'mid-plate' && !nep.setting.near && nep.flexure === null && TM.motionLabel(nep.setting).text === 'mid-plate', 'an abyssal plain is mid-plate');
+    ok(/closing$/.test(TM.motionLabel(ts).text) && /sliding$/.test(TM.motionLabel(rom.setting).text), 'motion labels');
+    ok(model('tonga', { slabs: null }).slab === null && model('tonga', { slabs: null }).flexure !== null, 'no slab model ⇒ no slab, and the bending fit still stands');
+    const segs = TM.boundarySegments(plates); ok(segs.length === plates.steps.length && segs.every((g) => TM.FAMILY_STYLE[g.family]), `${segs.length} boundary steps, each in a drawn family`);
+    // the renderers compute none of it
+    for (const file of ['js/seafloor/page.js', 'js/seafloor/stage.js', 'js/seafloor/globe.js']) { const src = rd(file).toString();
+        for (const fnc of ['flexureShape(', 'elasticFromRise(', 'fitFlexure(', 'velocityIn(', 'slabValueAt(', 'nearestStep(']) ok(!src.includes(fnc), `${file} never calls ${fnc}`); }
+    const tm = rd('js/seafloor/trench-model.js').toString();
+    ok(/from '\.\.\/earth-interior\/plates\.js'/.test(tm) && /from '\.\.\/earth-interior\/slabs\.js'/.test(tm) && !/eulerVector\s*=|function plateAt/.test(tm), 'plates and slabs are imported from the Inner Earth kernels, never copied');
 }
 console.log(`\n✅ seafloor-kernels: ${n} checks passed`);

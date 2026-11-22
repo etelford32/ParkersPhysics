@@ -130,6 +130,20 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'sea-floor-plates', date: '2026-11-22', pr: null,
+      title: 'Sea Floor: the plates behind the trenches', kind: 'simulation',
+      section: 'earth-orbit', icon: 'fluid',
+      summary: 'The Sea Floor page now shows why each trench is where it is: the plate boundaries on the globe, which plate sinks under which and how fast, '
+             + 'where the sunken plate goes, and a first model of the plate bending as it goes down.',
+      highlights: [
+          'Plate boundaries are drawn on the globe and on each 3D block, coloured by whether the plates there are colliding, spreading or sliding. They are Peter Bird\'s 2003 plate model.',
+          'Each trench names its plates and their speed. At Tonga the Pacific plate goes under at 109 mm a year, the width of a hand; at the Mariana Trench it is 25 mm a year, coming in at a 42° slant.',
+          'A true-scale section shows the sunken plate from the USGS Slab2 model. Under Japan it goes down at 26°, under the Marianas at 56°, and at true scale the deepest trench on Earth is a notch.',
+          'New model: seaward of a trench the plate bends like a stiff sheet and pushes up a low outer rise. The page fits that curve to the sea floor and reads a plate thickness from it: about 15 km at the Izu–Bonin Trench, from a rise 257 m high.',
+          'The fit is shown with its tests. At most trenches it fails them on this grid (seamounts or a missing rise), and the page then draws the rejected curve and quotes no thickness.',
+          'The Romanche, Cayman and Puerto Rico deeps are shown as what Bird\'s model says they are: places where plates slide past each other, with no sinking plate.',
+      ],
+      links: [{ href: 'sea-floor.html?site=izu-bonin', label: 'Sea Floor: Izu–Bonin Trench' }] },
     { id: 'sea-floor', date: '2026-11-22', pr: null,
       title: 'Sea Floor: a 3D globe of the ocean floor you can dive beneath', kind: 'simulation',
       section: 'earth-orbit', icon: 'fluid',

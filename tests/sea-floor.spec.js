@@ -210,6 +210,49 @@ test('NEGATIVE CONTROL: no index ⇒ nothing drawn, and the page says so', async
     await expect(page.locator('#sf-table-note')).toContainText('Nothing is substituted');
 });
 
+const tectonics = (page) => page.waitForFunction(() => window.__seaFloor?.tectonics !== 'loading' && (window.__seaFloor.tectonics !== 'ok' || window.__seaFloor.trench), null, { timeout: 60_000 });
+const stateOf = (page, name) => page.evaluate((n) => { const o = window[n]; return typeof o.state === 'function' ? o.state() : o.state; }, name);
+
+test('plates: boundaries on the globe and the block, the bending plate, the slab', async ({ page }) => {
+    await boot(page, '/sea-floor.html?site=izu-bonin'); await tectonics(page);
+    const t = await page.evaluate(() => { const t = window.__seaFloor.trench; return { fam: t.setting.family, down: t.setting.down.name, q: t.flexure.quality, te: t.flexure.elastic.teKm, slab: t.slab.code }; });
+    expect(t.fam).toBe('subduction'); expect(t.down).toBe('Pacific'); expect(t.q).toBe('good'); expect(t.slab).toBe('izu');
+    await expect(page.locator('#sf-plates-facts')).toContainText('Pacific');
+    await expect(page.locator('#sf-plates-facts')).toContainText(`${t.te.toFixed(0)} km`);            // the page prints the kernel's thickness
+    await expect(page.locator('#sf-plates-facts')).toContainText('Effective plate thickness');
+    await expect(page.locator('#sf-flex-chart svg path')).toHaveCount(2);                            // sea floor + model
+    await expect(page.locator('#sf-deep-chart svg path')).toHaveCount(2);                            // sea floor + slab top
+    await expect(page.locator('#sf-plate-keys')).toContainText('Bird 2003');
+    await page.waitForFunction(() => window.__seaFloorGlobe && window.__seaFloorStage);
+    expect((await stateOf(page, '__seaFloorGlobe')).boundarySegments).toBeGreaterThan(5000);
+    await page.locator('#sf-mode-globe').click();                                                     // the tick-box belongs to the globe view
+    await page.locator('#sf-plates').uncheck(); expect((await stateOf(page, '__seaFloorGlobe')).boundaries).toBe(false);
+    await page.locator('#sf-mode-local').click();
+    await expect.poll(async () => (await stateOf(page, '__seaFloorStage')).boundaryLines).toBeGreaterThan(3);
+    // the table carries each site's plate motion
+    await expect(page.locator('#sf-table tbody tr', { hasText: 'Tonga' }).first()).toContainText('closing');
+
+    // a trench whose fit is REJECTED says why and prints no thickness
+    await page.goto('/sea-floor.html?site=mariana', { waitUntil: 'load' }); await tectonics(page);
+    await expect(page.locator('#sf-flex-read')).toContainText('No stiffness is quoted here');
+    await expect(page.locator('#sf-plates-facts')).not.toContainText('Effective plate thickness');
+    // a transform fault has no bending plate and no slab
+    await page.goto('/sea-floor.html?site=romanche', { waitUntil: 'load' }); await tectonics(page);
+    await expect(page.locator('#sf-flex-chart')).toContainText('no plate sinks');
+    await expect(page.locator('#sf-flex-chart svg')).toHaveCount(0);
+});
+
+test('NEGATIVE CONTROL: plate model down ⇒ no motions, no boundaries, depths untouched', async ({ page }) => {
+    await page.route('**/data/earth-interior/plates-pb2002.json.gz', (r) => r.fulfill({ status: 503, body: '' }));
+    await boot(page, '/sea-floor.html?site=tonga'); await tectonics(page);
+    await expect(page.locator('#sf-plates-facts')).toContainText('could not be loaded');
+    await expect(page.locator('#sf-flex-chart svg')).toHaveCount(0); await expect(page.locator('#sf-deep-chart svg')).toHaveCount(0);
+    await expect(page.locator('#sf-plates')).toBeDisabled();
+    await page.waitForFunction(() => window.__seaFloorGlobe);
+    expect((await stateOf(page, '__seaFloorGlobe')).boundarySegments || 0).toBe(0);
+    await expect(page.locator('#sf-section-chart svg')).toHaveCount(1);
+});
+
 test('phone width: no overflow, panels stack', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await boot(page);

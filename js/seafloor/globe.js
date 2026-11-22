@@ -45,7 +45,8 @@ export function createGlobe(host, { onPickPoint = null, onPickSite = null, onHov
     water.renderOrder = 2; scene.add(water);
     const markers = new THREE.Group(); markers.renderOrder = 3; scene.add(markers);
     let sites = [], selectedId = null, pin = null;
-    const state = { exaggeration: exag, vertices: 0, frames: 0, water: true, sites: 0, flying: false };
+    const boundaries = new THREE.Group(); boundaries.renderOrder = 3; scene.add(boundaries);
+    const state = { exaggeration: exag, vertices: 0, frames: 0, water: true, sites: 0, flying: false, boundaries: true, boundarySegments: 0 };
 
     function buildTerrain() {
         const nV = (SEG_LON + 1) * (SEG_LAT + 1);
@@ -190,6 +191,18 @@ export function createGlobe(host, { onPickPoint = null, onPickSite = null, onHov
         setSelected(id, point = null) { selectedId = id; pin = point; buildMarkers(); },
         setExaggeration(x) { exag = x; state.exaggeration = x; if (world) buildTerrain(); dirty = true; },
         setWater(on) { water.visible = !!on; state.water = !!on; dirty = true; },
+        /** Plate boundaries as coloured lines on the sea-level shell: segs [{lat1,lon1,lat2,lon2,family}], styles {family:{hex}}. */
+        setBoundaries(segs, styles) {
+            while (boundaries.children.length) { const o = boundaries.children.pop(); o.geometry.dispose(); o.material.dispose(); }
+            const by = new Map();
+            for (const g of segs || []) { if (!by.has(g.family)) by.set(g.family, []); const a = dirOf(g.lat1, g.lon1), b = dirOf(g.lat2, g.lon2); by.get(g.family).push(a[0] * 1.003, a[1] * 1.003, a[2] * 1.003, b[0] * 1.003, b[1] * 1.003, b[2] * 1.003); }
+            for (const [fam, arr] of by) {
+                const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+                boundaries.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: new THREE.Color(styles[fam].hex), transparent: true, opacity: 0.95 })));
+            }
+            state.boundarySegments = (segs || []).length; dirty = true;
+        },
+        setBoundariesVisible(on) { boundaries.visible = !!on; state.boundaries = !!on; dirty = true; },
         /** One-shot flight of the camera to stand over (lat, lon) at `distance` Earth radii from the centre. */
         flyTo(lat, lon, distance = null, ms = 1400) {
             return new Promise((done) => {

@@ -6,7 +6,12 @@
 import { makeGrid, int16FromBytes, decodeWorld } from './bathy.js';
 import { diveWindow, diveTiles, gridFromTiles, diveMeta, demPath, TILE_PX, DIVE_TILE_ZOOM } from './free-dive.js';
 
+import { decodePlates } from '../earth-interior/plates.js';
+import { decodeSlabs } from '../earth-interior/slabs.js';
+
 export const DATA_BASE = 'data/seafloor/';
+/** The Inner Earth page's own baked files (Bird PB2002 plates, USGS Slab2) — read, never copied. */
+export const TECTONICS_BASE = 'data/earth-interior/';
 
 export async function gunzip(buf) {
     const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -55,3 +60,7 @@ export async function loadDiveGrid(lat, lon) {
     const meta = diveMeta(win, sampled);
     return { meta, grid: makeGrid(meta, sampled.z) };
 }
+
+async function gzJson(fetchFn, url) { return JSON.parse(new TextDecoder().decode(await gunzip(await (await get(fetchFn, url)).arrayBuffer()))); }
+export async function loadPlates(fetchFn = fetch, base = TECTONICS_BASE) { return decodePlates(await gzJson(fetchFn, base + 'plates-pb2002.json.gz')); }
+export async function loadSlabs(fetchFn = fetch, base = TECTONICS_BASE) { return decodeSlabs(await gzJson(fetchFn, base + 'slab2.json.gz')); }

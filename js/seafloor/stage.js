@@ -47,10 +47,11 @@ export function createStage(host, { onPick = null, onCamera = null, ambient = nu
 
     const world = new THREE.Group(); scene.add(world);
     let grid = null, origin = null, exag = 5, terrain = null, sea = null, extent = { x: 200, z: 200 };
-    const castGroup = new THREE.Group(), markGroup = new THREE.Group(), pingGroup = new THREE.Group();
-    world.add(castGroup, markGroup, pingGroup);
+    const castGroup = new THREE.Group(), markGroup = new THREE.Group(), pingGroup = new THREE.Group(), plateGroup = new THREE.Group();
+    world.add(castGroup, markGroup, pingGroup, plateGroup);
+    let plateData = null;
     let casts = [], marks = null, ping = null, dirty = true, visible = true, raf = 0;
-    const state = { exaggeration: exag, vertices: 0, casts: 0, pinging: false, frames: 0, cameraDepthM: 0, underwater: false, flying: false };
+    const state = { exaggeration: exag, vertices: 0, casts: 0, pinging: false, frames: 0, cameraDepthM: 0, underwater: false, flying: false, boundaryLines: 0 };
     let flight = null, lastCamEvent = 0, lastCamKey = '';
     const keys = new Set();
 
@@ -147,6 +148,36 @@ export function createStage(host, { onPick = null, onCamera = null, ambient = nu
             markGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xff9a5c })));
             const s = new THREE.Mesh(new THREE.SphereGeometry(1.4, 14, 10), new THREE.MeshBasicMaterial({ color: 0xff9a5c })); s.position.copy(b); markGroup.add(s);
         }
+    }
+
+    /**
+     * The plate boundary inside this block, DRAPED on the sea floor, and one arrow on the sea surface for the
+     * downgoing plate's motion. Numbers are handed in (trench-model.js); the arrow's LENGTH is symbolic.
+     */
+    function buildPlates() {
+        clear(plateGroup);
+        if (!plateData || !grid) return;
+        let n = 0;
+        for (const g of plateData.segments) {
+            const pts = [];
+            for (let k = 0; k <= 6; k++) {
+                const f = k / 6, lat = g.lat1 + (g.lat2 - g.lat1) * f; let dl = g.lon2 - g.lon1; dl -= 360 * Math.round(dl / 360);
+                const lon = g.lon1 + dl * f, d = sampleDepth(grid, lat, lon);
+                if (d == null) { if (pts.length >= 6) flush(pts, g); pts.length = 0; continue; }
+                const v = toScene(lat, lon, Math.max(d, 0)); pts.push(v.x, v.y + 0.35, v.z);
+            }
+            if (pts.length >= 6) flush(pts, g);
+        }
+        function flush(pts, g) {
+            const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts.slice(), 3));
+            plateGroup.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: new THREE.Color(plateData.styles[g.family].hex), depthTest: false, transparent: true, opacity: 0.9 }))); n++;
+        }
+        if (plateData.arrow) {
+            const a = plateData.arrow, b = a.bearingDeg * D2R, from = toScene(a.lat, a.lon, 0), len = Math.min(extent.x, extent.z) * 0.16;
+            const arrow = new THREE.ArrowHelper(new THREE.Vector3(Math.sin(b), 0, -Math.cos(b)), from.setY(1.2), len, 0xffffff, len * 0.28, len * 0.14);
+            plateGroup.add(arrow);
+        }
+        state.boundaryLines = n;
     }
 
     function frameAll(preset = 'oblique') {
@@ -275,8 +306,9 @@ export function createStage(host, { onPick = null, onCamera = null, ambient = nu
 
     return {
         state,
-        setGrid(g, o) { grid = g; origin = o; buildTerrain(); buildCasts(); buildMarks(); frameAll(); },
-        setExaggeration(x) { exag = x; state.exaggeration = x; if (grid) { buildTerrain(); buildCasts(); buildMarks(); controls.target.y = -3 * exag * 0.6; } dirty = true; },
+        setGrid(g, o) { grid = g; origin = o; buildTerrain(); buildCasts(); buildMarks(); buildPlates(); frameAll(); },
+        setPlates(d) { plateData = d; if (grid) buildPlates(); dirty = true; },
+        setExaggeration(x) { exag = x; state.exaggeration = x; if (grid) { buildTerrain(); buildCasts(); buildMarks(); buildPlates(); controls.target.y = -3 * exag * 0.6; } dirty = true; },
         setCasts(list) { casts = list || []; if (grid) buildCasts(); dirty = true; },
         setMarks(m) { marks = m; if (grid) buildMarks(); dirty = true; },
         view(preset) { flight = null; state.flying = false; frameAll(preset); },

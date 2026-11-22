@@ -3,7 +3,8 @@
 #   seafloor-kernels.mjs   equation of state vs python-seawater's output (and TEOS-10, loosely);
 #                          the sounder vs closed forms; the beam vs a V-trench; the bathymetry
 #                          grids vs their index; the adiabat vs REAL withheld casts with two
-#                          controls that must lose; the page model; "no physics in the renderer".
+#                          controls that must lose; the page model; "no physics in the renderer";
+#                          the trench model on Bird's plates + Slab2 (planted-plate recovery, rejections).
 #
 # The browser gate (tests/sea-floor.spec.js) reads only baked files and is run locally.
 # The bakes (scripts/build-seafloor-*.py) need the network and are run by hand.
@@ -14,6 +15,11 @@ on:
     paths:
       - 'js/seafloor/**'
       - 'data/seafloor/**'
+      - 'js/earth-interior/plates.js'
+      - 'js/earth-interior/plates-model.js'
+      - 'js/earth-interior/slabs.js'
+      - 'data/earth-interior/plates-pb2002.json.gz'
+      - 'data/earth-interior/slab2.json.gz'
       - 'tests/seafloor-kernels.mjs'
       - 'tests/fixtures/seafloor/**'
       - 'sea-floor.html'
@@ -22,6 +28,11 @@ on:
     paths:
       - 'js/seafloor/**'
       - 'data/seafloor/**'
+      - 'js/earth-interior/plates.js'
+      - 'js/earth-interior/plates-model.js'
+      - 'js/earth-interior/slabs.js'
+      - 'data/earth-interior/plates-pb2002.json.gz'
+      - 'data/earth-interior/slab2.json.gz'
       - 'tests/seafloor-kernels.mjs'
       - 'tests/fixtures/seafloor/**'
       - 'sea-floor.html'

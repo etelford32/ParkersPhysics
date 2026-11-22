@@ -19,6 +19,16 @@
     </image>
 
     <item>
+      <title>Sea Floor: the plates behind the trenches</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-plates</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-plates</guid>
+      <pubDate>Sun, 22 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;The Sea Floor page now shows why each trench is where it is: the plate boundaries on the globe, which plate sinks under which and how fast, where the sunken plate goes, and a first model of the plate bending as it goes down.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Plate boundaries are drawn on the globe and on each 3D block, coloured by whether the plates there are colliding, spreading or sliding. They are Peter Bird&amp;#39;s 2003 plate model.&lt;/li&gt;&lt;li&gt;Each trench names its plates and their speed. At Tonga the Pacific plate goes under at 109 mm a year, the width of a hand; at the Mariana Trench it is 25 mm a year, coming in at a 42° slant.&lt;/li&gt;&lt;li&gt;A true-scale section shows the sunken plate from the USGS Slab2 model. Under Japan it goes down at 26°, under the Marianas at 56°, and at true scale the deepest trench on Earth is a notch.&lt;/li&gt;&lt;li&gt;New model: seaward of a trench the plate bends like a stiff sheet and pushes up a low outer rise. The page fits that curve to the sea floor and reads a plate thickness from it: about 15 km at the Izu–Bonin Trench, from a rise 257 m high.&lt;/li&gt;&lt;li&gt;The fit is shown with its tests. At most trenches it fails them on this grid (seamounts or a missing rise), and the page then draws the rejected curve and quotes no thickness.&lt;/li&gt;&lt;li&gt;The Romanche, Cayman and Puerto Rico deeps are shown as what Bird&amp;#39;s model says they are: places where plates slide past each other, with no sinking plate.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=izu-bonin&quot;&gt;Open Sea Floor: Izu–Bonin Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
       <title>Sea Floor: a 3D globe of the ocean floor you can dive beneath</title>
       <link>https://parkersphysics.com/recent-development.html#sea-floor</link>
       <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor</guid>
