@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T18:43:21.939Z",
+  "generatedAt": "2026-11-22T22:21:38.410Z",
   "slides": [
     {
       "id": "earth",
@@ -8,12 +8,12 @@
       "clip": "assets/home/showcase/earth.webm",
       "width": 1920,
       "height": 1150,
-      "source": "/earth.html?verdict=0",
-      "capturedAt": "2026-11-09T17:46:43.378Z",
+      "source": "/earth.html?verdict=0&at=18,-78,7000",
+      "capturedAt": "2026-11-22T22:21:38.387Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 286295,
-        "clip": 194085
+        "poster": 73171,
+        "clip": 77800
       }
     },
     {
@@ -23,11 +23,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/sun.html",
-      "capturedAt": "2026-11-09T17:48:38.122Z",
+      "capturedAt": "2026-11-22T22:13:25.231Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 152561,
-        "clip": 170835
+        "poster": 166778,
+        "clip": 74074
       }
     },
     {
@@ -93,11 +93,11 @@
       "width": 1042,
       "height": 650,
       "source": "/launch-planner.html?lpfx=low",
-      "capturedAt": "2026-11-09T17:44:43.992Z",
+      "capturedAt": "2026-11-22T22:14:26.039Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 79802,
-        "clip": 431551
+        "poster": 87400,
+        "clip": 453032
       }
     },
     {
@@ -107,11 +107,11 @@
       "width": 1860,
       "height": 886,
       "source": "/glacier-watch.html",
-      "capturedAt": "2026-11-09T17:49:15.454Z",
+      "capturedAt": "2026-11-22T22:15:00.582Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 100001,
-        "clip": 154396
+        "poster": 104910,
+        "clip": 205465
       }
     },
     {
@@ -135,11 +135,11 @@
       "width": 1366,
       "height": 938,
       "source": "/earth-interior.html",
-      "capturedAt": "2026-11-22T18:43:21.900Z",
+      "capturedAt": "2026-11-22T22:15:29.884Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 76767,
-        "clip": 140254
+        "poster": 94542,
+        "clip": 223628
       }
     },
     {
@@ -177,11 +177,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/mars.html",
-      "capturedAt": "2026-11-09T17:36:13.128Z",
+      "capturedAt": "2026-11-22T22:16:03.765Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 112482,
-        "clip": 73609
+        "poster": 110217,
+        "clip": 116922
       }
     },
     {
@@ -191,11 +191,11 @@
       "width": 1920,
       "height": 1200,
       "source": "/solar-system.html",
-      "capturedAt": "2026-11-09T17:37:00.575Z",
+      "capturedAt": "2026-11-22T22:16:47.516Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 106828,
-        "clip": 109918
+        "poster": 125909,
+        "clip": 181293
       }
     },
     {
@@ -219,11 +219,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/galactic-map.html",
-      "capturedAt": "2026-11-09T17:49:58.701Z",
+      "capturedAt": "2026-11-22T22:17:29.291Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 173140,
-        "clip": 193043
+        "poster": 201273,
+        "clip": 408684
       }
     },
     {

@@ -1,0 +1,11 @@
+{
+  "earth": [34, 44],
+  "sun": [60, 42],
+  "mars": [60, 46],
+  "solar-system": [50, 50],
+  "galactic-map": [50, 46],
+  "glacier-watch": [56, 42],
+  "launch-planner": [50, 46],
+  "earth-interior": [47, 52],
+  "volcanoes": [50, 42]
+}

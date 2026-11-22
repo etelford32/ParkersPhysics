@@ -191,7 +191,7 @@ img{display:block}
 .lp-slide.lp-active .lp-media img{animation:lp-push 16s ease-in-out infinite alternate}
 @keyframes lp-push{from{transform:scale(1.03)}to{transform:scale(1.13)}}
 .lp-slide .lp-media::after{content:'';position:absolute;inset:0;pointer-events:none;
-  background:radial-gradient(ellipse 120% 105% at 50% 45%,transparent 52%,rgba(2,0,10,.42) 100%),linear-gradient(180deg,rgba(2,0,10,.22) 0%,transparent 22%)}
+  background:radial-gradient(ellipse 120% 105% at 50% 45%,transparent 58%,rgba(2,0,10,.34) 100%)}
 .lp-plate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--lp-acc,#9a85ff);overflow:hidden;
   background:
     radial-gradient(circle at 72% 36%,color-mix(in srgb,var(--lp-acc,#9a85ff) 30%,transparent) 0,transparent 34%),
@@ -202,7 +202,7 @@ img{display:block}
    photograph: its own glyph on range rings in its section colour. It is
    visibly a diagram, which is the honest thing for it to be. */
 .lp-plate svg{width:min(26%,190px);height:auto;opacity:.9;filter:drop-shadow(0 0 26px currentColor);transform:translate(88%,-30%)}
-.lp-slide::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,.05) 20%,rgba(2,0,10,.62) 58%,rgba(2,0,10,.94) 100%)}
+.lp-slide::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,0) 32%,rgba(2,0,10,.5) 60%,rgba(2,0,10,.92) 100%)}
 .lp-slide-body{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:20px 24px 46px}
 .lp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
 .lp-chip{font-family:var(--font-mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;padding:3px 9px;border-radius:999px;color:rgba(245,240,255,.86);background:rgba(2,0,10,.6);border:1px solid rgba(245,240,255,.22);backdrop-filter:blur(4px)}
@@ -248,7 +248,7 @@ img{display:block}
 .lp-fix:hover{transform:translateY(-3px);border-color:var(--lp-acc,#9a85ff);box-shadow:0 14px 34px rgba(2,0,10,.5),0 0 0 1px var(--lp-acc,transparent)}
 .lp-fix>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform 5s cubic-bezier(.2,.7,.2,1)}
 .lp-fix:hover>img{transform:scale(1.07)}
-.lp-fix::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,.12) 0%,rgba(2,0,10,.55) 45%,rgba(2,0,10,.93) 100%)}
+.lp-fix::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,0) 0%,rgba(2,0,10,.3) 42%,rgba(2,0,10,.9) 100%)}
 .lp-fix .lp-plate svg{width:54px;transform:translateY(-30%)}
 .lp-live{position:absolute;top:9px;left:9px;z-index:1;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(245,240,255,.9);background:rgba(2,0,10,.6);padding:3px 8px;border-radius:4px;backdrop-filter:blur(4px)}
 .lp-live::before{content:'';width:6px;height:6px;border-radius:50%;background:#2eff9e;box-shadow:0 0 6px #2eff9e;animation:pulse-dot 1.8s ease-in-out infinite}

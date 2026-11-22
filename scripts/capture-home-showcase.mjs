@@ -149,7 +149,9 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
         if (!local) return route.fulfill({ status: 404, body: '' });
         return route.fulfill({ status: 200, contentType: 'image/webp', headers: { 'access-control-allow-origin': '*' }, body: await readFile(path.join(ROOT, 'assets/earth', local)) });
     });
-    await page.goto(BASE + c.url, { waitUntil: 'load', timeout: 90_000 });
+    // `waitUntil` per recipe: EarthView's `load` can outlast 90 s on a software
+    // rasteriser (its ready condition below is the real gate).
+    await page.goto(BASE + c.url, { waitUntil: c.waitUntil || 'load', timeout: 120_000 });
     const hide = ['nav', '.pp-consent-banner', '.skip-link', ...(c.hide || [])];
     await page.addStyleTag({ content: `${hide.join(',')}{display:none!important;visibility:hidden!important}` +
         `html,body{overflow:hidden!important}*{cursor:none!important}` });

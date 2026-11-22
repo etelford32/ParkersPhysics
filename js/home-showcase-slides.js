@@ -84,7 +84,11 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         verb: 'Fly to your sky',
         accent: '#2eff9e',
         capture: {
-            url: '/earth.html?verdict=0',
+            // ?at= faces the Americas from 7,000 km. WHICH side is lit is the real
+            // Sun's doing: shoot between ~14 and 24 UT for daylight there (the
+            // 2026-11-22 still is 21:50 UT — dusk crossing the Atlantic).
+            url: '/earth.html?verdict=0&at=18,-78,7000',
+            waitUntil: 'domcontentloaded',
             crop: '#c',
             ready: 'typeof window.__evCloudMode === "function"',
             hide: ['nav', '#hud', '#loc-panel', '#layer-panel', '#info-panel', '#sat-status', '#verdict-host',
@@ -96,7 +100,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // present that as weather. What is left is real — NASA's surface
             // map, the city lights and today's terminator from the real Sun.
             shots: [{ eval: 'for (const id of ["lyr-clouds","lyr-wind","lyr-isobars","lyr-obs-sst","lyr-cities","lyr-rotate","lyr-volcanoes-active","lyr-volcanoes-dormant","lyr-volcanoes-inactive","lyr-glacier-flow"]) { const c=document.getElementById(id); if (c && c.checked) c.click(); }', wait: 2500 },
-                    { wheel: -240, n: 3 }, { drag: [0.5, 0.5, 0.66, 0.56], wait: 800 }],
+                    { wait: 6000 }],
             settleMs: 10000,
             clipMs: 7000,
         },

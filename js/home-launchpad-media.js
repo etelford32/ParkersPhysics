@@ -8,22 +8,22 @@
 export const LAUNCHPAD_MEDIA_DIR = 'assets/home/launchpad/';
 export const LAUNCHPAD_THUMB_WIDTHS = Object.freeze([480, 1280]);
 export const LAUNCHPAD_MEDIA = Object.freeze({
-    "earth": { capturedAt: "2026-11-09T17:46:43.378Z", renderer: "swiftshader", focus: [50, 50] },
-    "sun": { capturedAt: "2026-11-09T17:48:38.122Z", renderer: "swiftshader", focus: [50, 50] },
+    "earth": { capturedAt: "2026-11-22T22:21:38.387Z", renderer: "swiftshader", focus: [34, 44] },
+    "sun": { capturedAt: "2026-11-22T22:13:25.231Z", renderer: "swiftshader", focus: [60, 42] },
     "flux-rope-live": { capturedAt: "2026-11-09T17:14:27.372Z", renderer: "swiftshader", focus: [50, 50] },
     "upper-atmosphere": { capturedAt: "2026-11-09T17:41:45.900Z", renderer: "swiftshader", focus: [50, 50] },
     "ring-current": { capturedAt: "2026-11-09T17:42:45.497Z", renderer: "swiftshader", focus: [50, 50] },
     "tiga": { capturedAt: "2026-11-09T17:43:23.760Z", renderer: "swiftshader", focus: [50, 50] },
-    "launch-planner": { capturedAt: "2026-11-09T17:44:43.992Z", renderer: "swiftshader", focus: [50, 50] },
-    "glacier-watch": { capturedAt: "2026-11-09T17:49:15.454Z", renderer: "swiftshader", focus: [50, 50] },
-    "volcanoes": { capturedAt: "2026-11-09T17:33:56.988Z", renderer: "swiftshader", focus: [50, 50] },
-    "earth-interior": { capturedAt: "2026-11-22T18:43:21.900Z", renderer: "swiftshader", focus: [50, 50] },
+    "launch-planner": { capturedAt: "2026-11-22T22:14:26.039Z", renderer: "swiftshader", focus: [50, 46] },
+    "glacier-watch": { capturedAt: "2026-11-22T22:15:00.582Z", renderer: "swiftshader", focus: [56, 42] },
+    "volcanoes": { capturedAt: "2026-11-09T17:33:56.988Z", renderer: "swiftshader", focus: [50, 42] },
+    "earth-interior": { capturedAt: "2026-11-22T22:15:29.884Z", renderer: "swiftshader", focus: [47, 52] },
     "pollution": { capturedAt: "2026-11-09T17:34:24.754Z", renderer: "swiftshader", focus: [50, 50] },
     "moon": { capturedAt: "2026-11-09T17:35:17.232Z", renderer: "swiftshader", focus: [50, 50] },
-    "mars": { capturedAt: "2026-11-09T17:36:13.128Z", renderer: "swiftshader", focus: [50, 50] },
-    "solar-system": { capturedAt: "2026-11-09T17:37:00.575Z", renderer: "swiftshader", focus: [50, 50] },
+    "mars": { capturedAt: "2026-11-22T22:16:03.765Z", renderer: "swiftshader", focus: [60, 46] },
+    "solar-system": { capturedAt: "2026-11-22T22:16:47.516Z", renderer: "swiftshader", focus: [50, 50] },
     "neo-watch": { capturedAt: "2026-11-09T17:37:32.212Z", renderer: "swiftshader", focus: [50, 50] },
-    "galactic-map": { capturedAt: "2026-11-09T17:49:58.701Z", renderer: "swiftshader", focus: [50, 50] },
+    "galactic-map": { capturedAt: "2026-11-22T22:17:29.291Z", renderer: "swiftshader", focus: [50, 46] },
     "star-collider": { capturedAt: "2026-11-09T17:39:14.984Z", renderer: "swiftshader", focus: [50, 50] },
     "bootes-void": { capturedAt: "2026-11-09T17:39:48.071Z", renderer: "swiftshader", focus: [50, 50] }
 });
