@@ -91,6 +91,12 @@ export const SHOWCASE_ENTRIES = Object.freeze([
                    '#models-panel-host', '#probability-picker-host', '#renewables-panel-host', '#ct-readouts',
                    // These hold canvases (legends, the time strip), so the generic stripper keeps them.
                    '#wx-panel', '#probe-panel', '#time-controls'],
+            // The weather layers are OFF for the still: without the live feeds
+            // they fall back to a synthetic circulation, and a poster must not
+            // present that as weather. What is left is real — NASA's surface
+            // map, the city lights and today's terminator from the real Sun.
+            shots: [{ eval: 'for (const id of ["lyr-clouds","lyr-wind","lyr-isobars","lyr-obs-sst","lyr-cities","lyr-rotate","lyr-volcanoes-active","lyr-volcanoes-dormant","lyr-volcanoes-inactive","lyr-glacier-flow"]) { const c=document.getElementById(id); if (c && c.checked) c.click(); }', wait: 2500 },
+                    { wheel: -240, n: 3 }, { drag: [0.5, 0.5, 0.66, 0.56], wait: 800 }],
             settleMs: 10000,
             clipMs: 7000,
         },
@@ -113,6 +119,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // Default framing leaves the disc a third of the frame; close in
             // so the photosphere and the loop arcades carry the card.
             prep: 'const S=window.__sun; if(S&&S.camera){S.camera.position.multiplyScalar(0.72); S.controls?.update?.();}',
+            shots: [{ wheel: -240, n: 5 }, { drag: [0.5, 0.5, 0.42, 0.44], wait: 600 }],
             settleMs: 12000,
             clipMs: 7000,
         },
@@ -204,6 +211,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             crop: '#lh-vehicle-canvas',
             ready: '!!(window.__lpVehicle3d && window.__lpVehicle3d.renderStats)',
             hide: ['nav'],
+            shots: [{ wheel: -240, n: 2 }, { drag: [0.5, 0.5, 0.4, 0.46], wait: 600 }],
             settleMs: 12000,
             clipMs: 7000,
         },
@@ -223,6 +231,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // The in-stage overlays (legend, layer chips, tools) are absolute
             // children of the stage host, which the stripper keeps for its canvas.
             hide: ['nav', '#gw-stage .gw-ov'],
+            shots: [{ wheel: -240, n: 2 }, { drag: [0.5, 0.5, 0.58, 0.42], wait: 600 }],
             settleMs: 10000,
             clipMs: 7000,
         },
@@ -260,6 +269,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // The structure view: the live-earthquake view draws nothing without the USGS feed.
             prep: 'document.querySelector(\'#ei-views [data-view="cutaway"]\').click()',
             hide: ['nav'],
+            shots: [{ wheel: -240, n: 2 }, { drag: [0.5, 0.5, 0.44, 0.54], wait: 600 }],
             settleMs: 9000,
             clipMs: 6000,
         },
@@ -316,6 +326,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             hide: ['nav', '#landmark-card', '.loader-status', '#climate-controls', '.mars-header', '.mission-strip',
                    '.camera-dock', '.mission-panel', '.layers-panel', '.data-dock', '.feature-index', '#climate-legend',
                    '#climate-readout'],
+            shots: [{ wheel: -160, n: 3 }, { drag: [0.5, 0.5, 0.62, 0.42], wait: 800 }],
             settleMs: 10000,
             clipMs: 7000,
         },
@@ -336,6 +347,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // The default framing shows the whole system small; close in so
             // the inner orbits and the Sun fill the frame.
             prep: 'const R=window.__solarRender; if(R&&R.camera){R.camera.position.multiplyScalar(0.55); R.camera.updateProjectionMatrix();}',
+            shots: [{ drag: [0.5, 0.35, 0.56, 0.72] }, { wheel: -240, n: 3, wait: 600 }],
             settleMs: 12000,
             clipMs: 7000,
         },
@@ -373,6 +385,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             ready: '!!document.querySelector("#canvas-wrap canvas")',
             // The toggle row and camera buttons sit inside the canvas wrap.
             hide: ['nav', '.tog-row', '#cam-controls'],
+            shots: [{ drag: [0.5, 0.4, 0.44, 0.66] }, { wheel: -240, n: 3, wait: 600 }],
             settleMs: 9000,
             clipMs: 7000,
         },

@@ -72,6 +72,9 @@ function poster(sim, width, { eager = false } = {}) {
         src: `${LAUNCHPAD_MEDIA_DIR}${sim.id}-${width}.jpg`, alt: '', width: String(width), height: String(Math.round(width * 9 / 16)),
         decoding: 'async', loading: eager ? 'eager' : 'lazy', ...(eager ? { fetchpriority: 'high' } : {}),
     });
+    const [fx, fy] = LAUNCHPAD_MEDIA[sim.id].focus || [50, 50];
+    img.style.objectPosition = `${fx}% ${fy}%`;
+    img.style.transformOrigin = `${fx}% ${fy}%`;          // the slow push-in closes on the subject
     img.addEventListener('error', () => { img.remove(); box.append(plate(sim.icon)); }, { once: true });
     box.append(img);
     return box;
@@ -97,7 +100,7 @@ function slideNode({ sim, entry, href, fresh }, i, n) {
             el('a', { class: 'lp-open', href, 'data-funnel-cta': 'launchpad_recent_' + sim.id, text: `Open ${sim.title} →` }),
             el('a', { class: 'lp-changed', href: 'recent-development.html#' + entry.id,
                       'data-funnel-cta': 'launchpad_changed_' + sim.id, text: 'What changed' })));
-    node.append(poster(sim, 960, { eager: i === 0 }), body);
+    node.append(poster(sim, 1280, { eager: i === 0 }), body);
     return node;
 }
 
@@ -133,6 +136,12 @@ export function mountHomeLaunchpad(root, opts = {}) {
         if (!slot || !f.latest) continue;
         slot.textContent = `Updated ${formatDate(f.latest.date, { year: false })} · ${f.latest.title}`;
         slot.hidden = false;
+    }
+    // Compose each permanent tile's picture around its subject (the tile is
+    // static markup; only its crop point comes from the media table).
+    for (const tile of root.querySelectorAll('[data-lp-fixture]')) {
+        const img = tile.querySelector('img'), m = LAUNCHPAD_MEDIA[tile.dataset.lpFixture];
+        if (img && m?.focus) { img.style.objectPosition = `${m.focus[0]}% ${m.focus[1]}%`; img.style.transformOrigin = img.style.objectPosition; }
     }
 
     // ── The log strip ───────────────────────────────────────────────────────

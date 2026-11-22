@@ -151,7 +151,7 @@ section('thumbnails are current with the showcase manifest and every referenced 
         }
     }
     for (const s of M.recentSlides()) {
-        if (LAUNCHPAD_MEDIA[s.sim.id] && !existsSync(path.join(ROOT, `assets/home/launchpad/${s.sim.id}-960.jpg`))) fail(`carousel thumbnail for ${s.sim.id} missing`);
+        if (LAUNCHPAD_MEDIA[s.sim.id] && !existsSync(path.join(ROOT, `assets/home/launchpad/${s.sim.id}-1280.jpg`))) fail(`carousel thumbnail for ${s.sim.id} missing`);
     }
 });
 

@@ -183,9 +183,25 @@ img{display:block}
 .lp-slide{position:relative;flex:0 0 100%;min-width:0;scroll-snap-align:start;scroll-snap-stop:always;color:#fff}
 .lp-media{position:absolute;inset:0;background:#070b1c}
 .lp-media img{width:100%;height:100%;object-fit:cover;display:block}
-.lp-plate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--lp-acc,#9a85ff);
-  background:radial-gradient(ellipse 70% 80% at 70% 30%,color-mix(in srgb,var(--lp-acc,#9a85ff) 22%,transparent),transparent 70%),linear-gradient(160deg,#0b1030,#05030f)}
-.lp-plate svg{width:min(30%,170px);height:auto;opacity:.75;filter:drop-shadow(0 0 22px currentColor);transform:translate(70%,-34%)}
+/* CINEMA (2026-11-22): the active slide's picture pushes in slowly toward its
+   subject (transform-origin = the capture's focus point, set by the renderer)
+   and every picture carries a lens vignette. Presentation only — the pixels
+   are the capture's; nothing is graded or retouched. Off under reduced motion. */
+.lp-slide .lp-media img{transform:scale(1.03);transition:transform 1.2s ease}
+.lp-slide.lp-active .lp-media img{animation:lp-push 16s ease-in-out infinite alternate}
+@keyframes lp-push{from{transform:scale(1.03)}to{transform:scale(1.13)}}
+.lp-slide .lp-media::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 120% 105% at 50% 45%,transparent 52%,rgba(2,0,10,.42) 100%),linear-gradient(180deg,rgba(2,0,10,.22) 0%,transparent 22%)}
+.lp-plate{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--lp-acc,#9a85ff);overflow:hidden;
+  background:
+    radial-gradient(circle at 72% 36%,color-mix(in srgb,var(--lp-acc,#9a85ff) 30%,transparent) 0,transparent 34%),
+    repeating-radial-gradient(circle at 72% 36%,transparent 0 46px,color-mix(in srgb,var(--lp-acc,#9a85ff) 16%,transparent) 46px 47px),
+    linear-gradient(color-mix(in srgb,var(--lp-acc,#9a85ff) 7%,transparent) 1px,transparent 1px) 0 0/100% 44px,
+    linear-gradient(160deg,#0b1030,#05030f)}
+/* A simulation with no capture gets an INSTRUMENT PLATE, not a stand-in
+   photograph: its own glyph on range rings in its section colour. It is
+   visibly a diagram, which is the honest thing for it to be. */
+.lp-plate svg{width:min(26%,190px);height:auto;opacity:.9;filter:drop-shadow(0 0 26px currentColor);transform:translate(88%,-30%)}
 .lp-slide::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(2,0,10,.05) 20%,rgba(2,0,10,.62) 58%,rgba(2,0,10,.94) 100%)}
 .lp-slide-body{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:20px 24px 46px}
 .lp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
@@ -281,6 +297,7 @@ img{display:block}
 @media (prefers-reduced-motion:reduce){
   .hero-badge::before,.lp-live::before,.lp-recent[aria-busy="true"]::before{animation:none}
   .lp-fix,.lp-fix>img,.lp-open,.lp-google,.hero-h1,.hero-sub{transition:none}
+  .lp-slide.lp-active .lp-media img{animation:none}
 }
 
 /* ── LIVE DEMO EMBEDS (EarthView + flux-rope stage) ──────────────────────── */
@@ -548,7 +565,11 @@ html.theme-light .lp-arrow{background:var(--pl-card);border-color:var(--pl-borde
 html.theme-light .lp-arrow:hover{background:var(--pl-blue-soft);border-color:var(--pl-blue)}
 html.theme-light .lp-dot::before{background:rgba(11,31,58,.2)}
 html.theme-light .lp-dot[aria-current="true"]::before{background:var(--pl-blue)}
-html.theme-light .lp-plate{color:var(--pl-blue);background:radial-gradient(ellipse 70% 80% at 70% 30%,rgba(21,96,212,.14),transparent 70%),linear-gradient(160deg,#eaf2fe,#f8fbff)}
+html.theme-light .lp-plate{color:var(--pl-blue);background:
+    radial-gradient(circle at 72% 40%,rgba(21,96,212,.18) 0,transparent 36%),
+    repeating-radial-gradient(circle at 72% 40%,transparent 0 46px,rgba(21,96,212,.14) 46px 47px),
+    linear-gradient(160deg,#eaf2fe,#f8fbff)}
+html.theme-light .lp-slide .lp-plate svg{transform:translate(88%,-4%)}
 html.theme-light .lp-plate svg{filter:none;opacity:.7}
 /* — tile: picture left, light copy right — */
 html.theme-light .lp-fix{color:var(--pl-text-2)}

@@ -55,7 +55,10 @@ const flag = (n) => argv.includes(n);
 const opt  = (n, d) => { const i = argv.indexOf(n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const ONLY   = opt('--only', '').split(',').map(s => s.trim()).filter(Boolean);
 const GPU    = flag('--gpu');
-const NOCLIP = flag('--no-clip');
+// --preview <dir>: posters only, written to <dir>, manifest untouched — the
+// loop for composing a shot (edit the recipe's `shots`, look, repeat).
+const PREVIEW = opt('--preview', '');
+const NOCLIP = flag('--no-clip') || !!PREVIEW;
 const PORT   = Number(opt('--port', '8765'));
 let   BASE   = opt('--base', '');
 // 16:10 at 1920 — the card's aspect (js/home-showcase.js .hs-media) so a
@@ -113,6 +116,8 @@ async function ensureServer() {
     throw new Error('dev server did not come up on ' + BASE);
 }
 
+const EARTH_LOCAL = { 'earth-blue-marble.jpg': 'day-4k.webp', 'earth-night.jpg': 'lights-2k.webp', 'earth-water.png': 'water-2k.webp', 'earth-topology.png': 'relief-2k.webp' };
+
 // ── capture one slide ──────────────────────────────────────────────────────
 async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
     const c = slide.capture;
@@ -131,6 +136,18 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
         // keeps the banner out of every shot.
         try { localStorage.setItem('pp_consent_v1', JSON.stringify({ strict: true, functional: false, analytics: false, ts: Date.now(), version: 1 })); } catch {}
         window.addEventListener('message', (e) => { if (e.data?.type === 'preview-ready') window.__previewReady = true; });
+    });
+    // EarthView (and every page sharing js/earth-skin.js) loads its NASA
+    // surface maps from unpkg. Where that CDN is unreachable the globe renders
+    // BLACK — so the CDN is probed ONCE per run (CDN_OK) and, when it is down,
+    // the maps are served from the repo's own copies
+    // of the same images (assets/earth, see its SOURCES.md; the test fixtures
+    // do the same). The night map falls back to the lights-only extract, so an
+    // offline capture's night side is darker than production's.
+    if (!CDN_OK) await page.route('https://unpkg.com/three-globe@*/example/img/*', async (route) => {
+        const local = EARTH_LOCAL[route.request().url().split('/').pop().split('?')[0]];
+        if (!local) return route.fulfill({ status: 404, body: '' });
+        return route.fulfill({ status: 200, contentType: 'image/webp', headers: { 'access-control-allow-origin': '*' }, body: await readFile(path.join(ROOT, 'assets/earth', local)) });
     });
     await page.goto(BASE + c.url, { waitUntil: 'load', timeout: 90_000 });
     const hide = ['nav', '.pp-consent-banner', '.skip-link', ...(c.hide || [])];
@@ -165,6 +182,42 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
         try { await page.evaluate(new Function(c.prep)); }
         catch (err) { console.warn(`   [${slide.id}] prep failed: ${err.message.slice(0, 120)}`); }
     }
+    // COMPOSE THE SHOT (2026-11-22). `shots` is a list of real input gestures
+    // on the crop element — the page's own camera controls, driven the way a
+    // visitor would: no page-specific hooks, so a recipe survives a refactor.
+    // Coordinates are fractions of the crop box.
+    //   { wheel: dy, at: [fx, fy], n: 1 }        zoom (dy < 0 = in), n pushes
+    //   { drag: [fx0, fy0, fx1, fy1], button }   orbit ('left') / pan ('right')
+    //   { dblclick: [fx, fy] } · { click: [fx, fy] } · { key: 'Escape' }
+    //   { eval: 'js' } · { wait: ms }
+    if (Array.isArray(c.shots) && c.shots.length) {
+        let b = null;
+        try { b = await page.locator(c.crop).first().boundingBox(); } catch {}
+        if (!b) b = { x: 0, y: 0, width: VIEW.width, height: VIEW.height };
+        const pt = (fx, fy) => [b.x + b.width * fx, b.y + b.height * fy];
+        for (const sh of c.shots) {
+            try {
+                if (sh.wheel != null) {
+                    const [x, y] = pt(...(sh.at || [0.5, 0.5]));
+                    await page.mouse.move(x, y);
+                    for (let i = 0; i < (sh.n || 1); i++) { await page.mouse.wheel(0, sh.wheel); await page.waitForTimeout(sh.gap ?? 260); }
+                } else if (sh.drag) {
+                    const [x0, y0] = pt(sh.drag[0], sh.drag[1]), [x1, y1] = pt(sh.drag[2], sh.drag[3]);
+                    await page.mouse.move(x0, y0);
+                    await page.mouse.down({ button: sh.button || 'left' });
+                    for (let i = 1; i <= 8; i++) { await page.mouse.move(x0 + (x1 - x0) * i / 8, y0 + (y1 - y0) * i / 8); await page.waitForTimeout(60); }
+                    await page.mouse.up({ button: sh.button || 'left' });
+                } else if (sh.dblclick) { await page.mouse.dblclick(...pt(...sh.dblclick)); }
+                else if (sh.click) { await page.mouse.click(...pt(...sh.click)); }
+                else if (sh.key) { await page.keyboard.press(sh.key); }
+                else if (sh.eval) { await page.evaluate(new Function(sh.eval)); }
+                if (sh.wait) await page.waitForTimeout(sh.wait);
+            } catch (err) { console.warn(`   [${slide.id}] shot step failed: ${err.message.split('\n')[0].slice(0, 120)}`); }
+        }
+    }
+    // Park the pointer off the scene: a cursor left where the last gesture
+    // ended leaves a hover tooltip in the shot.
+    if (Array.isArray(c.shots) && c.shots.length) await page.mouse.move(2, 2).catch(() => {});
     await page.waitForTimeout(c.settleMs ?? 8000);
 
     // Crop box: the sim's own element, else the viewport. Even-sized, clamped.
@@ -214,7 +267,7 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
 }
 
 // ── main ───────────────────────────────────────────────────────────────────
-const outDir = path.join(ROOT, MEDIA_DIR);
+const outDir = PREVIEW ? path.resolve(PREVIEW) : path.join(ROOT, MEDIA_DIR);
 await mkdir(outDir, { recursive: true });
 const tmpDir = path.join(os.tmpdir(), 'pp-carousel-' + process.pid);
 await mkdir(tmpDir, { recursive: true });
@@ -229,6 +282,10 @@ let manifest = { version: 1, generatedAt: null, slides: [] };
 try { manifest = JSON.parse(await readFile(manifestPath, 'utf8')); } catch {}
 
 await ensureServer();
+// One probe decides for the whole run (per-request fallbacks stalled page load for minutes).
+let CDN_OK = false;
+try { const r = await fetch('https://unpkg.com/three-globe@2.31.0/example/img/earth-water.png', { method: 'HEAD', signal: AbortSignal.timeout(5000) }); CDN_OK = r.ok; } catch {}
+if (!CDN_OK) console.log('unpkg unreachable — EarthView maps served from assets/earth');
 const args = GPU ? ['--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await chromium.launch({ headless: true, args });
 const todo = CAPTURED_SLIDES.filter(s => !ONLY.length || ONLY.includes(s.id));
