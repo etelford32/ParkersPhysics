@@ -1,0 +1,50 @@
+# chicxulub-kernels — the Chicxulub reconstruction (chicxulub.html)
+#
+#   chicxulub.mjs   the evidence table (every row sourced + flagged), the
+#                   forward scaling identities, ballistic flight, the impactor
+#                   inversion and its controls, the escape hyperbola against a
+#                   numerical integration, the heliocentric sign conventions,
+#                   and the climate box.
+#
+# The browser gate (tests/chicxulub-page.spec.js) is not run here.
+name: chicxulub-kernels
+
+on:
+  pull_request:
+    paths:
+      - 'js/chicxulub/**'
+      - 'js/chicxulub-page.js'
+      - 'js/volcano-engine.js'
+      - 'js/neo-space.js'
+      - 'tests/chicxulub.mjs'
+      - '.github/workflows/chicxulub-kernels.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'js/chicxulub/**'
+      - 'js/chicxulub-page.js'
+      - 'js/volcano-engine.js'
+      - 'js/neo-space.js'
+      - 'tests/chicxulub.mjs'
+      - '.github/workflows/chicxulub-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicxulub-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Chicxulub kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: reconstruction kernels
+        run: node tests/chicxulub.mjs
