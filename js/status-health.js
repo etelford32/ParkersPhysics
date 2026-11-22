@@ -39,6 +39,10 @@ const LEVEL_RANK = { crit: 0, warn: 1, info: 2, ok: 3 };
 export const REASON_HINTS = [
     [/^no_run_published/, 'no ingest run is in R2 yet — run the climalytix-ingest GitHub Action (and check its R2_* secrets)'],
     [/^r2_not_configured/, 'the R2_* secrets are not set on this deployment'],
+    [/^usgs_slow/, 'USGS answered too slowly; the ground rung was built from the stations that came back in time'],
+    [/^no_archive_yet/, 'the Bz archive cron (/api/cron/bz-archive, every 6 h, production only) has not written a day yet'],
+    [/^archive_run_overdue/, 'the Bz archive cron has missed at least one 6-hourly run — see the Bz Minute Archive heartbeat'],
+    [/^archive_read_failed/, 'the Bz archive index in R2 could not be read'],
     [/^manifest_read_failed/, 'the run manifest in R2 could not be read'],
     [/^tile_read_failed/, 'a tile byte-range read from R2 failed'],
     [/^fallback-source/, 'the primary upstream failed; a coarser fallback is being served'],
