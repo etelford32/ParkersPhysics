@@ -33,8 +33,14 @@ import {
     calibrateOffLimb, offLimbLabel, OFFLIMB_FRAG, OFFLIMB_VERT,
     displayStretch, STRETCH_GAMMA, DEFAULT_GAIN,
     OFFLIMB_SOURCES, DEFAULT_SOURCE, offLimbSource, sourceCoverage,
+    EDGE_FEATHER, frameEdgeWeight,
+    REF_SHELL_LEGACY, BLACK_POINT, REF_OK_MIN, STRETCH_GAMMA_LEGACY, DEFAULT_GAIN_LEGACY,
+    CAPTION_V, CAPTION_FEATHER, captionWeight,
 } from '../js/sun-offlimb.js';
-import { linearToSrgb, solarEphemeris } from '../js/sun-observed.js';
+import { readFileSync } from 'node:fs';
+import { decodePng } from '../scripts/lib/sdo-synth.mjs';
+import { linearToSrgb, solarEphemeris, DISK_FRACTION } from '../js/sun-observed.js';
+const srgbLin = (v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
 
 let passed = 0;
 function ok(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -174,7 +180,7 @@ function synthFrame(size, geom, { diskI = 0.75, coronaI = 0.06, scale = 1, promi
 
 const GEOM = { cx: 0.5, cy: 0.5, r: 0.39 };
 
-ok('the reference shell measures the low corona, not the disk', () => {
+ok('the reference shell measures the limb glow, not the disk', () => {
     const size = 256;
     const rgba = synthFrame(size, GEOM, { diskI: 0.75, coronaI: 0.06 });
     const cal = calibrateOffLimb(rgba, size, size, GEOM);
@@ -183,12 +189,13 @@ ok('the reference shell measures the low corona, not the disk', () => {
     // Expected: the luminance of the synthetic corona at the shell midpoint.
     const rhoMid = (REF_SHELL.lo + REF_SHELL.hi) / 2;
     const Imid = 0.06 * Math.exp(-(rhoMid - 1) * 4);
-    const lumMid = 0.2126 * Imid + 0.7152 * Imid * 0.45 + 0.0722 * Imid * 0.22;
+    const lumMid = 0.2126 * Imid + 0.7152 * Imid * 0.45 + 0.0722 * Imid * 0.22 - BLACK_POINT;
     assert.ok(Math.abs(cal.ref - lumMid) / lumMid < 0.20,
         `ref ${cal.ref.toExponential(3)} ≈ shell luminance ${lumMid.toExponential(3)}`);
     // And it is nowhere near the disk's level — that is the whole point.
     const lumDisk = 0.2126 * 0.75 + 0.7152 * 0.75 * 0.45 + 0.0722 * 0.75 * 0.22;
     assert.ok(cal.ref < lumDisk * 0.2, 'the disk did not leak into the shell');
+    assert.deepEqual([REF_SHELL.lo, REF_SHELL.hi], [1.00, 1.05], 'the reference is the limb glow (header, REAL FRAMES)');
 });
 
 ok('a bright prominence does not move the reference (median, not mean)', () => {
@@ -208,8 +215,9 @@ ok('a frame with no off-limb signal is REFUSED, not amplified', () => {
     // convincing corona — the exact failure the honesty rules forbid.
     const rgba = synthFrame(size, GEOM, { coronaI: 0 });
     const cal = calibrateOffLimb(rgba, size, size, GEOM);
-    assert.equal(cal.ok, false, 'a black shell is not a quiet corona');
-    assert.ok(cal.ref < REF_FLOOR);
+    assert.equal(cal.ok, false, 'a black limb is not a quiet Sun');
+    assert.ok(cal.ref < REF_OK_MIN);
+    assert.equal(BLACK_POINT, REF_FLOOR, 'the black point is the two-code-value floor, derived once');
     // And a frame we cannot read at all degrades rather than throwing.
     assert.equal(calibrateOffLimb(null, size, size, GEOM).ok, false);
     assert.equal(calibrateOffLimb(rgba, size, size, { cx: 0.5, cy: 0.5, r: 0 }).ok, false);
@@ -234,7 +242,7 @@ ok('normalising by the reference shell is invariant to the browse byte-scaling',
         const s = (v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
         return 0.2126 * s(buf[o]) + 0.7152 * s(buf[o + 1]) + 0.0722 * s(buf[o + 2]);
     };
-    const na = lin(a) / ca.ref, nb = lin(b) / cb.ref;
+    const na = (lin(a) - BLACK_POINT) / ca.ref, nb = (lin(b) - BLACK_POINT) / cb.ref;
     assert.ok(Math.abs(na - nb) / na < 0.06,
         `normalised levels must agree across a re-scale: ${na.toFixed(4)} vs ${nb.toFixed(4)}`);
     // Sanity: without the normalisation they would NOT agree — the guard is
@@ -244,35 +252,99 @@ ok('normalising by the reference shell is invariant to the browse byte-scaling',
 
 // ── Display stretch ────────────────────────────────────────────────────────
 
-ok('the display stretch is monotone — it cannot reorder two brightnesses', () => {
-    // A stretch is legitimate only because it preserves ORDER: whichever of
-    // two off-limb points is brighter in the frame is brighter on screen. If
-    // it ever stopped being monotone the layer would be lying about structure.
-    let prev = -1;
-    for (let v = 0; v <= 100; v += 0.25) {
-        const d = displayStretch(v);
-        assert.ok(d >= prev, `monotone at ${v}`);
-        prev = d;
+ok('the display stretch is monotone, and is the IDENTITY by default (as published)', () => {
+    // A browse JPEG is already display-stretched by the instrument team; the
+    // layer draws its profile as published (header, "REAL FRAMES"). The
+    // exponent stays a parameter, and stays monotone at any value.
+    assert.equal(STRETCH_GAMMA, 1);
+    for (const g of [STRETCH_GAMMA, STRETCH_GAMMA_LEGACY]) {
+        let prev = -1;
+        for (let v = 0; v <= 100; v += 0.25) { const d = displayStretch(v, g); assert.ok(d >= prev, `monotone at ${v}`); prev = d; }
     }
     assert.equal(displayStretch(0), 0);
-    assert.equal(displayStretch(1), 1, 'the quiet corona (=1 by construction) is the fixed point');
-    assert.ok(Math.abs(displayStretch(4) - 2) < 1e-12, 'square root');
+    assert.equal(displayStretch(1), 1, 'the limb glow (=1 by construction) is the fixed point');
+    assert.equal(displayStretch(4), 4, 'identity');
+    assert.ok(Math.abs(displayStretch(4, STRETCH_GAMMA_LEGACY) - 2) < 1e-12, 'the fixture-era square root is one argument away');
     assert.equal(displayStretch(-3), 0, 'a negative never comes back as NaN');
 });
 
-ok('the stretch actually fits the 70:1 field into a drawable range', () => {
-    // The problem it exists to solve, stated as a test: the normalised field
-    // spans ~70:1 (quiet shell = 1 by construction, a bright prominence ~70).
-    // Linear, no single gain holds both. Stretched, one does.
-    const quiet = displayStretch(1) * DEFAULT_GAIN;
-    const prom  = displayStretch(72) * DEFAULT_GAIN;
-    assert.ok(quiet > 0.05, `the quiet corona is visible (${quiet.toFixed(3)})`);
-    assert.ok(prom < 2.0, `a prominence does not run away (${prom.toFixed(3)})`);
-    assert.ok(prom / quiet > 5, 'and a prominence is still obviously brighter');
-    // The linear alternative, for the record: one gain cannot do both.
-    const linQuiet = 1 * DEFAULT_GAIN, linProm = 72 * DEFAULT_GAIN;
-    assert.ok(linProm > 5, `linear would clip hard (${linProm.toFixed(1)})`);
-    assert.ok(linQuiet < prom / 4, 'and turning the gain down to fix that buries the corona');
+// ── REAL FRAMES ────────────────────────────────────────────────────────────
+// tests/fixtures/sdo/real_*_256.png are 256² lossless copies of real NASA /
+// NOAA browse frames (scripts/fetch-sdo-fixtures.mjs + bake-sdo-real-thumbs.py)
+// — the same readback size the page calibrates on. Never hand-edit them.
+const REAL = JSON.parse(readFileSync(new URL('./fixtures/sdo/real-manifest.json', import.meta.url), 'utf8'));
+const realFrame = (ch) => decodePng(readFileSync(new URL(`./fixtures/sdo/${REAL.frames[ch].thumb}`, import.meta.url)));
+const sLin = (v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+/** Drawn linear level (before the off-axis and ring weights) of every pixel in a ρ band, under a given rule. */
+function drawnLevels(img, geom, { shell, black, gamma, gain, okMin }, lo, hi) {
+    const { width: w, height: h, rgba } = img;
+    const cal = calibrateOffLimb(rgba, w, h, geom, { shell, black, okMin });
+    const R = geom.r * w, cx = geom.cx * w, cy = geom.cy * h, out = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const rho = Math.hypot(x - cx, y - cy) / R;
+        if (rho < lo || rho >= hi) continue;
+        if (captionWeight(1 - (y + 0.5) / h) < 1) continue;                    // the caption strip is masked separately
+        const o = (y * w + x) * 4;
+        const L = Math.max(0.2126 * sLin(rgba[o]) + 0.7152 * sLin(rgba[o + 1]) + 0.0722 * sLin(rgba[o + 2]) - black, 0);
+        out.push(displayStretch(L / cal.ref, gamma) * gain);
+    }
+    out.sort((a, b) => a - b);
+    return { cal, med: out[out.length >> 1], p95: out[Math.floor(out.length * 0.95)], p999: out[Math.floor(out.length * 0.999)], n: out.length };
+}
+const NOW = { shell: REF_SHELL, black: BLACK_POINT, gamma: STRETCH_GAMMA, gain: DEFAULT_GAIN, okMin: REF_OK_MIN };
+const WAS = { shell: REF_SHELL_LEGACY, black: 0, gamma: STRETCH_GAMMA_LEGACY, gain: DEFAULT_GAIN_LEGACY, okMin: REF_FLOOR };
+
+ok('REAL AIA FRAMES: the limb glow is drawn at the gain, the sky is black — and the old rule blows out', () => {
+    const was = {};
+    for (const ch of ['304', '131']) {
+        const img = realFrame(ch), geom = { cx: 0.5, cy: 0.5, r: DISK_FRACTION.aia };
+        const limbNow = drawnLevels(img, geom, NOW, 1.00, 1.05), skyNow = drawnLevels(img, geom, NOW, 1.25, 1.60);
+        const limbWas = drawnLevels(img, geom, WAS, 1.00, 1.05), skyWas = drawnLevels(img, geom, WAS, 1.20, 1.60);
+        console.log(`    ${ch}: ref now ${limbNow.cal.ref.toExponential(2)} (was ${limbWas.cal.ref.toExponential(2)}) · limb med ${limbNow.med.toFixed(2)} p95 ${limbNow.p95.toFixed(2)} (was med ${limbWas.med.toFixed(2)} p95 ${limbWas.p95.toFixed(2)}) · sky p95 ${skyNow.p95.toFixed(4)} (was ${skyWas.p95.toFixed(3)})`);
+        assert.ok(limbNow.cal.ok, `${ch}: a real frame calibrates`);
+        assert.ok(limbNow.cal.ref > 20 * BLACK_POINT, `${ch}: the limb reference is well above the display floor (${limbNow.cal.ref})`);
+        assert.ok(Math.abs(limbNow.med - DEFAULT_GAIN) < 1e-6, `${ch}: the limb glow is the unit`);
+        assert.ok(limbNow.p95 < 1.6, `${ch}: the bright limb does not saturate (p95 ${limbNow.p95})`);
+        assert.ok(skyNow.p95 < 0.02, `${ch}: the sky beyond 1.25 R☉ is black (p95 ${skyNow.p95})`);
+        assert.ok(limbWas.cal.ref < limbNow.cal.ref / 4, `${ch}: the legacy shell is far fainter than the limb`);
+        was[ch] = { limb: limbWas, sky: skyWas, skyNow };
+    }
+    // NEGATIVE CONTROL — the rule that shipped, on the same real frames. The
+    // two channels are ADDED on screen, so the limb zone is their sum:
+    //   • 304's own MEDIAN limb pixel is above display white (its reference
+    //     shell is at the product's display floor);
+    //   • the pair together sit near twice display white — the white band;
+    //   • and 131's sky carries a haze of amplified JPEG floor where the new
+    //     rule draws nothing.
+    assert.ok(was['304'].limb.med > 1.0, `legacy 304 limb median ${was['304'].limb.med} should exceed display white`);
+    assert.ok(was['304'].limb.med + was['131'].limb.med > 1.6, 'legacy 304 + 131 limb should be far above display white');
+    assert.ok(was['131'].sky.p95 > 0.03 && was['131'].sky.p95 > 30 * Math.max(was['131'].skyNow.p95, 1e-4),
+        `legacy 131 sky haze ${was['131'].sky.p95} vs now ${was['131'].skyNow.p95}`);
+    // 304 is the hard case: its legacy reference is two code values above black.
+    const was304 = calibrateOffLimb(realFrame('304').rgba, 256, 256, { cx: 0.5, cy: 0.5, r: DISK_FRACTION.aia }, { shell: REF_SHELL_LEGACY, black: 0, okMin: REF_FLOOR });
+    assert.ok(was304.ref < srgbLin(4), `the legacy 304 reference is under four code values (${was304.ref})`);
+});
+
+ok('REAL FRAMES: the burned-in caption is inside the ring and is masked', () => {
+    // Find the caption the way a viewer does: near-white text in the bottom rows of a frame whose sky is black.
+    for (const [ch, frac] of [['304', DISK_FRACTION.aia], ['131', DISK_FRACTION.aia], ['suvi304', DISK_FRACTION.suvi]]) {
+        const { width: w, height: h, rgba } = realFrame(ch);
+        let top = 1, rhoMin = Infinity, n = 0;
+        for (let y = Math.floor(h * 0.90); y < h; y++) for (let x = 0; x < w; x++) {
+            const o = (y * w + x) * 4;
+            if (Math.min(rgba[o], rgba[o + 1], rgba[o + 2]) < 110) continue;            // white-ish: text, not corona
+            const v = 1 - (y + 0.5) / h; n++;
+            top = Math.min(top, y / h);
+            rhoMin = Math.min(rhoMin, Math.hypot(x - w / 2, y - h / 2) / (frac * w));
+            assert.equal(captionWeight(v), 0, `${ch}: caption pixel at v=${v.toFixed(3)} is masked`);
+        }
+        assert.ok(n > 20, `${ch}: the frame really carries a caption (${n} px)`);
+        assert.ok(rhoMin < 1.6, `${ch}: and it sits inside the 1.6 R☉ ring (ρ ≥ ${rhoMin.toFixed(2)})`);
+        assert.ok(1 - top < CAPTION_V, `${ch}: the caption's top row (${(1 - top).toFixed(3)} from the bottom) is below CAPTION_V`);
+    }
+    assert.equal(captionWeight(CAPTION_V + CAPTION_FEATHER), 1);
+    assert.ok(OFFLIMB_FRAG.includes(CAPTION_V.toFixed(4)) && OFFLIMB_FRAG.includes((CAPTION_V + CAPTION_FEATHER).toFixed(4)), 'GLSL caption mask is interpolated from the constants');
+    assert.ok(OFFLIMB_FRAG.includes(BLACK_POINT.toExponential(6)), 'GLSL black point is interpolated from BLACK_POINT');
 });
 
 ok('the shader stretches LUMINANCE, not the channels separately', () => {
@@ -398,6 +470,34 @@ ok('the chip prints the BAND, not the proxy channel name', () => {
     });
     assert.ok(!label.includes('suvi304'), `leaked the proxy name: ${label}`);
     assert.match(label, /304\+131/);
+});
+
+ok('THE DETECTOR EDGE IS FEATHERED: the layer never ends on a line where the frame ends', () => {
+    // AIA's frame stops at 1.28 R☉ on axis, inside the 1.0–1.6 ring.
+    const geom = { cx: 0.5, cy: 0.5, r: DISK_FRACTION.aia };      // R☉ as a fraction of the frame width
+    const reach = (1 - geom.cx) / geom.r;                       // R☉ to the frame edge along +x
+    assert.ok(reach > 1.27 && reach < 1.29, `on-axis reach ${reach}`);
+    assert.equal(frameEdgeWeight(reach, 0, geom), 0, 'zero AT the edge');
+    assert.equal(frameEdgeWeight(reach + 0.01, 0, geom), 0, 'nothing outside the frame (no clamp-extend)');
+    assert.equal(frameEdgeWeight(reach - EDGE_FEATHER, 0, geom), 1, 'full weight one feather inside');
+    assert.equal(frameEdgeWeight(1.02, 0, geom), 1, 'the low corona is untouched');
+    // Monotone and continuous across the feather — no step anywhere.
+    let prev = 0, maxStep = 0;
+    for (let i = 0; i <= 200; i++) {
+        const w = frameEdgeWeight(reach - EDGE_FEATHER * (i / 200), 0, geom);
+        assert.ok(w >= prev - 1e-12, 'monotone');
+        maxStep = Math.max(maxStep, w - prev); prev = w;
+    }
+    assert.ok(maxStep < 0.02, `largest step across the feather ${maxStep}`);
+    // NEGATIVE CONTROL — what it replaced: a hard cut is a full-weight step at the edge.
+    const hard = (x) => (planeOfSkyUV(x, 0, geom).u <= 1 ? 1 : 0);
+    assert.equal(hard(reach - 1e-6) - hard(reach + 1e-6), 1);
+    // On the diagonal the frame reaches further, and the weight follows the FRAME, not the radius.
+    const d = 1.5 / Math.SQRT2;
+    assert.equal(frameEdgeWeight(d, d, geom), 1, '1.5 R☉ on the diagonal is well inside the frame');
+    // The shader carries the same number.
+    assert.ok(OFFLIMB_FRAG.includes(EDGE_FEATHER.toFixed(4)), 'GLSL feather is interpolated from EDGE_FEATHER');
+    assert.equal(EDGE_FEATHER, FEATHER_OUT, 'the frame edge and the ring edge fade alike');
 });
 
 console.log(`\n${passed} checks passed (off-limb)`);

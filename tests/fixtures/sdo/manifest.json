@@ -470,6 +470,166 @@
           "sigma": 0.06
         }
       ]
+    },
+    "c2": {
+      "file": "synthetic_c2.png",
+      "size": 512,
+      "synthetic": true,
+      "channel": "c2",
+      "instrument": "lasco",
+      "label": "SOHO/LASCO C2",
+      "epoch": "2026-09-06T12:00:00Z",
+      "geom": {
+        "cx": 0.5046,
+        "cy": 0.5071,
+        "r": 0.07891861494026131
+      },
+      "occulterRsun": 2.12,
+      "pylonPaDeg": null,
+      "timestampBox": {
+        "x0": 0.012,
+        "y0": 0.962,
+        "x1": 0.3,
+        "y1": 0.99
+      },
+      "streamers": [
+        {
+          "id": "STREAMER-E",
+          "paDeg": 82,
+          "halfWidthDeg": 7,
+          "amp": 1.6
+        },
+        {
+          "id": "STREAMER-W",
+          "paDeg": 263,
+          "halfWidthDeg": 9,
+          "amp": 1.9
+        },
+        {
+          "id": "STREAMER-SW",
+          "paDeg": 215,
+          "halfWidthDeg": 5,
+          "amp": 1.1
+        }
+      ],
+      "cmes": [
+        {
+          "id": "CME-NW",
+          "paDeg": 318,
+          "rho": 4.4,
+          "sigmaRho": 0.22,
+          "halfWidthDeg": 24,
+          "amp": 2.4
+        },
+        {
+          "id": "CME-NE",
+          "paDeg": 48,
+          "rho": 13.5,
+          "sigmaRho": 0.9,
+          "halfWidthDeg": 30,
+          "amp": 3
+        }
+      ]
+    },
+    "c3": {
+      "file": "synthetic_c3.png",
+      "size": 512,
+      "synthetic": true,
+      "channel": "c3",
+      "instrument": "lasco",
+      "label": "SOHO/LASCO C3",
+      "epoch": "2026-09-06T12:00:00Z",
+      "geom": {
+        "cx": 0.5063,
+        "cy": 0.5189,
+        "r": 0.01677020567480553
+      },
+      "occulterRsun": 3.95,
+      "pylonPaDeg": 135,
+      "timestampBox": {
+        "x0": 0.012,
+        "y0": 0.962,
+        "x1": 0.3,
+        "y1": 0.99
+      },
+      "streamers": [
+        {
+          "id": "STREAMER-E",
+          "paDeg": 82,
+          "halfWidthDeg": 7,
+          "amp": 1.6
+        },
+        {
+          "id": "STREAMER-W",
+          "paDeg": 263,
+          "halfWidthDeg": 9,
+          "amp": 1.9
+        },
+        {
+          "id": "STREAMER-SW",
+          "paDeg": 215,
+          "halfWidthDeg": 5,
+          "amp": 1.1
+        }
+      ],
+      "cmes": [
+        {
+          "id": "CME-NW",
+          "paDeg": 318,
+          "rho": 4.4,
+          "sigmaRho": 0.22,
+          "halfWidthDeg": 24,
+          "amp": 2.4
+        },
+        {
+          "id": "CME-NE",
+          "paDeg": 48,
+          "rho": 13.5,
+          "sigmaRho": 0.9,
+          "halfWidthDeg": 30,
+          "amp": 3
+        }
+      ]
     }
+  },
+  "plantedCorona": {
+    "streamers": [
+      {
+        "id": "STREAMER-E",
+        "paDeg": 82,
+        "halfWidthDeg": 7,
+        "amp": 1.6
+      },
+      {
+        "id": "STREAMER-W",
+        "paDeg": 263,
+        "halfWidthDeg": 9,
+        "amp": 1.9
+      },
+      {
+        "id": "STREAMER-SW",
+        "paDeg": 215,
+        "halfWidthDeg": 5,
+        "amp": 1.1
+      }
+    ],
+    "cmes": [
+      {
+        "id": "CME-NW",
+        "paDeg": 318,
+        "rho": 4.4,
+        "sigmaRho": 0.22,
+        "halfWidthDeg": 24,
+        "amp": 2.4
+      },
+      {
+        "id": "CME-NE",
+        "paDeg": 48,
+        "rho": 13.5,
+        "sigmaRho": 0.9,
+        "halfWidthDeg": 30,
+        "amp": 3
+      }
+    ]
   }
 }

@@ -133,6 +133,61 @@ nav {
 #sun-provenance::before { content:'●'; margin-right:7px; font-size:9px; vertical-align:1px; }
 @media (max-width: 768px) { #sun-provenance { top:auto; bottom:64px; max-width:calc(100vw - 24px); font-size:11px; } }
 #btn-sw  { top:12px; right:215px; }
+/* Bottom-right, beside Center: the top row is full (the provenance chip owns its middle). */
+#btn-cine { bottom:16px; right:104px; }
+#btn-cine[aria-pressed="true"] { background:rgba(255,140,0,.26); border-color:#ffb830; }
+
+/* ── Flare caption (js/sun-flare-director.js) ─────────────────────────────── */
+#flare-caption {
+    position:absolute; z-index:61; top:48px; left:50%; transform:translateX(-50%);
+    max-width:min(880px, calc(100vw - 32px)); display:flex; gap:10px; align-items:center;
+    padding:5px 12px; border-radius:7px; font-size:11.5px; letter-spacing:.2px;
+    font-variant-numeric:tabular-nums; color:#ffe2c2;
+    background:rgba(20,6,0,.78); border:1px solid rgba(255,120,40,.55); backdrop-filter:blur(8px);
+}
+#flare-caption[hidden] { display:none; }          /* an author display beats the UA [hidden] rule */
+#flare-caption .fc-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#flare-caption button {
+    flex:none; font:inherit; font-size:11px; cursor:pointer; padding:3px 9px; border-radius:5px;
+    color:#ffd9a8; background:rgba(255,140,0,.16); border:1px solid rgba(255,160,0,.45);
+}
+#flare-caption button[hidden] { display:none; }
+#flare-caption button:hover { background:rgba(255,140,0,.32); }
+@media (max-width: 768px) { #flare-caption { top:auto; bottom:104px; } #flare-caption .fc-text { white-space:normal; } }
+
+/* ── Cinematic mode ───────────────────────────────────────────────────────
+   body.sun-cine: the stage takes the whole viewport, the instrument chrome
+   stands down, two thin bars carry one caption line. The provenance chip is
+   NOT hidden — plan honesty rule 1: what is observed and what is modelled is
+   on screen in every mode. */
+#cine-bars { position:absolute; inset:0; z-index:55; pointer-events:none; opacity:0; transition:opacity .6s ease; }
+.cine-bar { position:absolute; left:0; right:0; height:var(--cine-bar, 7vh); background:#000; }
+.cine-top { top:0; } .cine-bottom { bottom:0; }
+#cine-hud {
+    position:absolute; z-index:62; left:0; right:0; bottom:0; height:var(--cine-bar, 7vh);
+    display:flex; align-items:center; gap:16px; padding:0 18px; color:#e9d9bd; font-size:12px;
+}
+#cine-hud[hidden] { display:none; }
+#cine-shot { font-weight:700; letter-spacing:1.6px; text-transform:uppercase; font-size:11px; color:#ffb830; white-space:nowrap; }
+#cine-note { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#b9a88c; font-variant-numeric:tabular-nums; }
+#cine-controls { display:flex; gap:6px; flex:none; }
+#cine-controls button {
+    font:inherit; font-size:12px; cursor:pointer; padding:4px 10px; border-radius:6px; min-height:28px;
+    color:#ffcf8a; background:rgba(255,140,0,.10); border:1px solid rgba(255,160,0,.35);
+}
+#cine-controls button:hover { background:rgba(255,140,0,.28); }
+body.sun-cine { overflow:hidden; }
+body.sun-cine #app { position:fixed; inset:0; height:100vh; height:100dvh; z-index:5000; }
+body.sun-cine #cine-bars { opacity:1; }
+body.sun-cine #hud, body.sun-cine #sun-watch-dock, body.sun-cine #panel, body.sun-cine #scroll-hint,
+body.sun-cine #smart-tour-overlay, body.sun-cine #sdo-drawer, body.sun-cine #sun-analysis-popup,
+body.sun-cine #btn-panel-open, body.sun-cine #btn-center, body.sun-cine #btn-sdo, body.sun-cine #btn-sw,
+body.sun-cine #btn-cine, body.sun-cine #doppler-legend, body.sun-cine #sw-ribbon, body.sun-cine #sun-daily-summary,
+body.sun-cine #flare-alert-banner, body.sun-cine .pp-consent-banner { display:none !important; }
+body.sun-cine #sun-provenance { top:calc((var(--cine-bar, 7vh) - 28px) / 2); z-index:63; background:transparent; border-color:transparent; }
+body.sun-cine #flare-caption { top:calc(var(--cine-bar, 7vh) + 10px); bottom:auto; }
+@media (max-width: 768px) { #cine-note { display:none; } body.sun-cine #sun-provenance { bottom:auto; } }
+@media (prefers-reduced-motion: reduce) { #cine-bars { transition:none; } }
 
 /* ─── SDO Live Imagery drawer ──────────────────────────────── */
 #sdo-drawer {
@@ -793,6 +848,25 @@ import './js/telemetry.js';
         <button class="cv-btn" id="btn-sdo" title="Live SDO imagery">🔭 SDO Live</button>
         <button class="cv-btn prov-model" id="sun-provenance" title="Observed (SDO frame on the near side) ↔ Model (procedural photosphere). Click to toggle." aria-live="polite">MODEL · procedural photosphere · loading</button>
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
+        <button class="cv-btn" id="btn-cine" title="Cinematic mode — hides the panels and flies the camera through the live Sun (C). Any drag or scroll takes the camera back." aria-pressed="false">🎬 Cinematic</button>
+        <!-- Flare caption: what is on screen, from the flare director. Shown only while a flare plays. -->
+        <div id="flare-caption" hidden aria-live="polite">
+            <span class="fc-text"></span>
+            <button type="button" id="fc-view" hidden></button>
+            <button type="button" id="fc-watch" hidden>▶ Watch</button>
+        </div>
+        <!-- Cinematic chrome: two thin bars + one caption line. The provenance chip stays on screen. -->
+        <div id="cine-bars" aria-hidden="true"><div class="cine-bar cine-top"></div><div class="cine-bar cine-bottom"></div></div>
+        <div id="cine-hud" hidden>
+            <div id="cine-shot"></div>
+            <div id="cine-note"></div>
+            <div id="cine-controls">
+                <button type="button" id="cine-prev" title="Previous shot (←)">⏮</button>
+                <button type="button" id="cine-pause" title="Pause / resume the camera (Space)">⏸</button>
+                <button type="button" id="cine-next" title="Next shot (→)">⏭</button>
+                <button type="button" id="cine-exit" title="Leave Cinematic mode (Esc)">✕ Exit</button>
+            </div>
+        </div>
         <div id="backdrop"></div>
 
         <!-- SDO Live Imagery Drawer ────────────────────────────── -->
@@ -1084,7 +1158,7 @@ import './js/telemetry.js';
                         <label for="tog-offlimb">
                             <span class="layer-dot tr"></span>
                             <span class="layer-name">Off-limb (observed)</span>
-                            <span class="layer-meta">SDO 304 + 131 · plane of sky</span>
+                            <span class="layer-meta">304 + 131 Å · plane of sky</span>
                         </label>
                     </div>
                     <!-- SOURCE. Both entries draw the same two lines from the
@@ -1095,12 +1169,24 @@ import './js/telemetry.js';
                          supplies all of it, at 2.5"/px instead of 0.6". The
                          meta text is written from the LIVE coverage figure, not
                          typed. js/suvi-geometry.js. -->
-                    <div class="toggle-row layer-row" id="lr-offlimb-suvi">
-                        <input type="checkbox" id="tog-offlimb-suvi">
+                    <div class="toggle-row layer-row on" id="lr-offlimb-suvi">
+                        <input type="checkbox" id="tog-offlimb-suvi" checked>
                         <label for="tog-offlimb-suvi">
                             <span class="layer-dot tr"></span>
                             <span class="layer-name">· GOES/SUVI source</span>
                             <span class="layer-meta" id="lm-offlimb-suvi">wider field · fills the ring</span>
+                        </label>
+                    </div>
+                    <!-- The OUTER corona, observed: SOHO/LASCO's two white-light
+                         coronagraphs on the same plane of sky. Zoom out to see
+                         them — the camera's range is extended while this is on.
+                         js/sun-coronagraph.js. -->
+                    <div class="toggle-row layer-row on" id="lr-coronagraph">
+                        <input type="checkbox" id="tog-coronagraph" checked>
+                        <label for="tog-coronagraph">
+                            <span class="layer-dot co"></span>
+                            <span class="layer-name">Outer corona (observed)</span>
+                            <span class="layer-meta" id="lm-coronagraph">SOHO/LASCO C2 + C3 · 2.2–30 R☉ · zoom out</span>
                         </label>
                     </div>
                     <div class="toggle-row layer-row" id="lr-offlimb-diff">
@@ -1778,7 +1864,8 @@ import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
 import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } from './js/sun-observed.js';
-import { SunOffLimb, offLimbLabel, sourceCoverage } from './js/sun-offlimb.js';   // Phase 3b observed off-limb annulus (304 + 131 on the plane of sky); 3e adds the GOES/SUVI source
+import { SunOffLimb, offLimbLabel, sourceCoverage, EDGE_FEATHER, observerBasis } from './js/sun-offlimb.js';
+import { SunCoronagraph } from './js/sun-coronagraph.js';   // the OBSERVED outer corona: SOHO/LASCO C2 (2.2–6 R☉) + C3 (4–30 R☉) on the plane of sky   // Phase 3b observed off-limb annulus (304 + 131 on the plane of sky); 3e adds the GOES/SUVI source
 import {
     nanoflareState, nanoflareUniform, sampleEnergy, peakLogT, meanEnergy,
     AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
@@ -1788,8 +1875,13 @@ import {
 // rotation on this page — sunFS, the AR slots, the marker groups, the flash
 // rings, the arcade — reads the same accumulator through it. See the
 // FLARE SITE section below and tests/sun-flare-geometry.spec.js.
+import { LIMB_GLSL, CHROMO_MESH_R, TR_MESH_R } from './js/sun-limb.js';
+import { DISC_GLSL, detailWeight, screenScaleAt, frameScale, farTextureGain, MODEL_TEXTURE_MEAN } from './js/sun-disc.js';   // the limb's colour, the palette decode, sub-frame granulation (PURE)   // the analytic limb — ONE copy for the chromosphere + TR shells
+import * as CAM from './js/sun-camera.js';                 // framing, one-shot flights, shots (PURE)
+import * as DIRECTOR from './js/sun-flare-director.js';   // ONE flare event from any feed, and where it is in its life (PURE)
 import * as FG from './js/flare-geometry.js';
-import { createFlareArcade } from './js/flare-arcade.js';
+import { createFlareArcade, AEC_TARGET as ARCADE_AEC_TARGET, AEC_FLOOR as ARCADE_AEC_FLOOR, HOT_FUZZ as ARCADE_HOT_FUZZ } from './js/flare-arcade.js';
+import { createFlareRope } from './js/flare-rope.js';
 // The flare's COOLING DEM (js/flare-dem.js, node-gated): GOES class → peak T
 // → RTV density → conduction+radiation cooling, so 131/94 light first and the
 // 171 post-flare arcade tens of minutes later. Read that header before touching
@@ -2359,6 +2451,17 @@ const uniforms = {
     // be re-measured on hardware without touching the shader. Verified at 1.0
     // by tests/sun-visual.spec.js's terminator-continuity gate.
     u_obsLevel:          { value: 1.0 },
+    u_obsDetail:         { value: 0.0 },   // synthesised sub-frame granulation weight — set per frame, 0 unless the view magnifies the frame
+    // THE UNOBSERVED HEMISPHERE THROUGH THE SAME INSTRUMENT (js/sun-disc.js
+    // section 4). u_farFuse 1 = while a calibrated frame is drawn, the model
+    // half carries the frame's own measured contrast instead of the model's
+    // display granulation (0 = the look shipped until 2026-11-22: the gate's
+    // negative control and ?farfuse=0). u_farTex is that contrast ratio, set
+    // per frame from the frame's measured sigma (farTextureGain).
+    u_farFuse:           { value: 1.0 },
+    u_farTex:            { value: 1.0 },
+    u_farMean:           { value: MODEL_TEXTURE_MEAN },
+    u_obsQuiet:          { value: -1.0 },  // the frame's robust quiet-disc contrast (calibrateDisk sigmaQuiet); −1 = no measurement. JS-side only.
     u_obsGrid:           { value: 1.0 },   // faint 15° graticule on the UNOBSERVED hemisphere
     u_kcorona:           { value: 1.0 },   // Phase 3 — white-light Thomson K + dust F corona (coronaFS); 0 disables
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
@@ -2382,6 +2485,14 @@ const uniforms = {
     // north (js/flare-geometry.js pilAngleRad — the Joy's-law PRIOR; the
     // atlas polylines override it when t_flare_ribbons is active).
     u_flare_pil:         { value: 0.0  },
+    // The ribbons' SHAPE at this instant — written every frame from the flare model
+    // (js/flare-geometry.js, _syncFlareShape). The shader holds no law of its own.
+    u_flare_sep:         { value: 0.02 },    // half-separation across the PIL, rad
+    u_flare_wid:         { value: 0.005 },   // ribbon width (Gaussian scale), rad
+    u_flare_alongVar:    { value: 0.01 },    // along-PIL envelope variance σ², rad²
+    u_flare_decay:       { value: 0.0 },     // ribbon brightness envelope, 0..1
+    u_flare_hook:        { value: new THREE.Vector3(0, 0, 0) },   // J hook: (straight-part end, radius, sweep), rad
+    u_flare_chi:         { value: 1.0 },     // the flare's handedness (which ribbon ends hook, and the shear's sense)
     // THE ONE ROTATION ACCUMULATOR. Equatorial angle (radians) the sim frame
     // has turned since page load, advanced in animate() at
     // FG.SIM_ROT_RATE · u_rot per sim unit and mirrored into `solarRotAngle`.
@@ -2429,7 +2540,12 @@ const uniforms = {
     // u_trIso:     1.0 when transition region is visible but both photosphere
     //   and chromosphere are hidden — TR shader lifts on-disk emission so
     //   the EUV moss + footpoint network reads as a coherent disk shell.
+    u_dpr:                  { value: 1.0 },   // device pixel ratio (set in resize) — point sprites are sized in CSS px
     u_chromoIso:            { value: 0.0 },
+    // 0..1 — how strongly the OBSERVED off-limb layer (js/sun-offlimb.js) is
+    // being drawn this frame. The model chromosphere/TR fringe fades by it:
+    // where the live He II 304 limb is on screen, that IS the limb.
+    u_limbObs:              { value: 0.0 },
     u_photIso:              { value: 0.0 },
     u_trIso:                { value: 0.0 },
 
@@ -2467,8 +2583,12 @@ const uniforms = {
 
 // SCENE
 const scene    = new THREE.Scene();
-const camera   = new THREE.PerspectiveCamera(50, 1, 0.001, 2000);
-camera.position.set(0, 0, 6);
+// THE LENS IS 30°, NOT 50° (js/sun-camera.js "The lens"): the same disc from
+// further back, so the sphere's silhouette hides 1.4 % of the plane-of-sky
+// off-limb ring instead of 4.6 %. Distances written for the old lens go
+// through CAM.equivalentDistance(d, LEGACY_FOV_DEG, camera.fov).
+const camera   = new THREE.PerspectiveCamera(CAM.HERO_FOV_DEG, 1, 0.001, 4000);
+camera.position.set(0, 0, CAM.equivalentDistance(3.5, CAM.LEGACY_FOV_DEG, CAM.HERO_FOV_DEG));
 
 const renderer = new THREE.WebGLRenderer({
     antialias: true, powerPreference: 'high-performance',
@@ -2484,6 +2604,8 @@ canvasWrap.appendChild(renderer.domElement);
 
 // ── Post-processing pipeline: Bloom + Radial diffusion ────────────────────────
 let composer, sunPost;
+let _spaceOcclPass = null;
+let _occlRelax = 0;     // set by the coronagraph layer's drawn weight
 {
     const W = canvasWrap.clientWidth  || 1280;
     const H = canvasWrap.clientHeight || 720;
@@ -2551,6 +2673,18 @@ let composer, sunPost;
             tDiffuse:   { value: null },
             resolution: { value: new THREE.Vector2(W, H) },
             center:     { value: new THREE.Vector2(0.5, 0.5) },
+            // The zones FOLLOW THE SUN (2026-11): `center` is its projected
+            // centre and `sunR` its projected radius in viewport heights, both
+            // set per frame by _tickSpaceOcclusion. They were a fixed 0.14 /
+            // 0.50 of the frame about the frame's own centre, which is the same
+            // thing only at the old default camera — zoom, a view offset or a
+            // shot that looks at the limb put the "deep space" dimming across
+            // the Sun itself. 0.773 / 2.76 R☉ are those two numbers at that
+            // camera (disc radius 0.1812 heights), so the default is unchanged.
+            sunR:       { value: 0.1812 },
+            // 0..1 — an OBSERVED outer-corona layer (the coronagraph) is on
+            // screen: it is data, not additive residue, and is not dimmed.
+            relax:      { value: 0.0 },
         },
         vertexShader: /* glsl */`
             varying vec2 vUv;
@@ -2561,6 +2695,8 @@ let composer, sunPost;
             uniform sampler2D tDiffuse;
             uniform vec2      resolution;
             uniform vec2      center;
+            uniform float     sunR;
+            uniform float     relax;
             varying vec2      vUv;
 
             void main() {
@@ -2573,9 +2709,9 @@ let composer, sunPost;
 
                 // ── Zone boundaries (in aspect-corrected UV space) ──
                 // Inner: solar disk + tight corona (fully preserved)
-                float inner = 0.14;
+                float inner = 0.773 * sunR;
                 // Outer: beyond this, only the brightest features survive
-                float outer = 0.50;
+                float outer = 2.76 * sunR;
 
                 // Base distance falloff: smooth ramp from 1.0 to ~0.0
                 float distFade = 1.0 - smoothstep(inner, outer, dist);
@@ -2590,12 +2726,129 @@ let composer, sunPost;
 
                 // Deep space floor: allow a whisper so background stars survive
                 keep = max(keep, 0.005);
+                keep = mix(keep, 1.0, relax);
 
                 gl_FragColor = vec4(col.rgb * keep, col.a);
             }
         `,
     };
-    composer.addPass(new ShaderPass(spaceOcclusionShader));
+    _spaceOcclPass = new ShaderPass(spaceOcclusionShader);
+    composer.addPass(_spaceOcclPass);
+}
+/**
+ * Sub-frame detail (js/sun-disc.js §3): how far the view magnifies the
+ * observed frame past its own resolution. Zero at the hero framing; the chip
+ * gains "+ synthesised granulation" while it is drawn. `?detail=0` turns it off.
+ */
+const _obsDetailOn = new URLSearchParams(location.search).get('detail') !== '0';
+if (new URLSearchParams(location.search).get('farfuse') === '0') uniforms.u_farFuse.value = 0;   // A/B: the model half keeps its own display granulation beside a frame
+let _obsDetailShown = false;
+function _tickObsDetail() {
+    let w = 0;
+    if (_obsDetailOn && sunObserved && uniforms.u_obsOn.value > 0.5 && uniforms.u_viewMode.value < 0.5) {
+        const frame = frameScale(uniforms.u_obsGeom.value.z, sunObserved.res || 1024);
+        w = detailWeight(screenScaleAt(camera.position.length(), camera.fov, canvasWrap.clientHeight || 720), frame);
+    }
+    uniforms.u_obsDetail.value = w;
+    // The unobserved half's quiet texture, at the contrast THIS frame was measured to have (sun-disc.js section 4).
+    uniforms.u_farTex.value = farTextureGain(uniforms.u_obsQuiet.value);
+    const shown = w > 0.05;
+    if (shown !== _obsDetailShown) { _obsDetailShown = shown; _renderProvChip(); }
+}
+const EV_MAX_WHOLE_SUN = 0.4;   // exposure ceiling (EV) while the whole disc is in frame
+let _coroWasDrawn = false;
+let _coroGain0 = null;       // the layer's own gain, read once
+let _coroReveal = -1;        // 0 at the disc's exposure, 1 once the camera has pulled back (−1: not applied yet — the first tick must set the gain)
+/**
+ * THE CORONAGRAPH IS A DIFFERENT EXPOSURE. The outer corona is 10⁻⁶–10⁻¹⁰ of
+ * the disc: no camera holds both, which is why the instrument has an occulter.
+ * At the hero framing the page is exposed for the disc, and C2's inner edge
+ * (2.2 R☉) is already inside a wide frame — drawn there at full gain it rings
+ * the Sun with a dark hole and an orange wall (measured on the first mount).
+ * So the layer fades in as the camera pulls back: nothing while 2.2 R☉ is
+ * still outside the frame's half-HEIGHT, everything by 1.5× that distance.
+ */
+function _coroRevealAt(d) {
+    const d0 = 2.2 / Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
+    return THREE.MathUtils.smoothstep(d, d0, d0 * 1.5);
+}
+/** Per frame: the observed outer corona, and the three things that have to follow it. */
+function _tickCoronagraph() {
+    if (!sunCoronagraph) return;
+    sunCoronagraph.update(camera.position);
+    const drawn = _coroDrawn();
+    if (_coroGain0 == null) _coroGain0 = sunCoronagraph.gain;
+    const reveal = _coroRevealAt(camera.position.length());
+    if (Math.abs(reveal - _coroReveal) > 1e-3) {
+        const crossed = (reveal > 0.05) !== (_coroReveal > 0.05);
+        _coroReveal = reveal;
+        sunCoronagraph.setGain(_coroGain0 * reveal);
+        if (crossed) _renderProvChip();          // the chip lists the layer only while it is on screen
+    }
+    // (1) It is data: the space-occlusion pass must not dim it as residue.
+    _occlRelax += ((drawn ? (_coroState.axisWeight ?? 1) * _coroReveal : 0) - _occlRelax) * 0.15;
+    // (2) There is something to zoom out to: extend the camera's range to C3's
+    //     field while a frame is drawn, and give it back when there is not.
+    if (drawn !== _coroWasDrawn) {
+        _coroWasDrawn = drawn;
+        controls.maxDistance = drawn ? CAM.MAX_DISTANCE_CORONAGRAPH : Math.max(CAM.MAX_DISTANCE, Math.min(controls.maxDistance, camera.position.length()));
+    }
+    // (3) EXPOSURE. Far out the frame is mostly black sky, and the controller
+    //     would open up to its +4 EV ceiling (×16) — which blows the disc and
+    //     the inner corona to white (measured on the first render). The ceiling
+    //     is for flights INSIDE the corona, where the disc has left the frame;
+    //     with the whole Sun in view it is held at +0.4 EV. (It was +1.5 for
+    //     a few hours; on real frames that still burned the observed disc to
+    //     white at 20 R☉. The outer corona has its own gain — it does not need
+    //     the disc's exposure raised to be seen.)
+    if (sunPost?.exposure) {
+        const d = camera.position.length();
+        const k = THREE.MathUtils.smoothstep(d, 1.8, 3.2);
+        sunPost.exposure.p.evMax = THREE.MathUtils.lerp(4.0, EV_MAX_WHOLE_SUN, k);
+    }
+}
+// ── EXPOSURE: A BRIGHTER FRAME IS NOT A BRIGHTER SUN (js/sun-post.js header) ──
+// The exposure controller meters the frame MEAN, and the mean rises ~2.5 EV
+// between the hero frame (mostly black sky) and a close-up (all disc) with
+// nothing on the Sun having changed. Until 2026-11-22 that pinned every
+// close-up at the −2 EV floor, and the flare shot — the close-up most
+// visitors see — played out over a disc at a quarter of its exposure. The
+// controller now accommodates a brighter frame; what it needs from the page
+// is to be told when the FRAMING changed, so it can tell a camera move from
+// a flash: the camera's pose or lens, the channel, an observed frame that has
+// just loaded. Motion is held for a short tail after it stops (the controls'
+// damping, and the corona's re-accumulation, keep changing the image).
+const EXPO_MOTION_TAIL_S = 0.6;
+const _expoPos = new THREE.Vector3(), _expoQuat = new THREE.Quaternion();
+let _expoFov = 0, _expoMoveUntil = 0;
+/** The framing is changing for a reason the page knows about (not the Sun): accommodate at once for `seconds`. */
+function _expoNoteFraming(seconds = 1.0) { _expoMoveUntil = Math.max(_expoMoveUntil, performance.now() + seconds * 1000); }
+function _tickExposureFraming() {
+    if (!sunPost?.exposure) return;
+    const d = camera.position.length();
+    const moved = _expoPos.distanceTo(camera.position) > 1e-4 * Math.max(d, 1)
+               || _expoQuat.angleTo(camera.quaternion) > 1e-4
+               || Math.abs(_expoFov - camera.fov) > 1e-3;
+    if (moved) {
+        _expoPos.copy(camera.position); _expoQuat.copy(camera.quaternion); _expoFov = camera.fov;
+        _expoNoteFraming(EXPO_MOTION_TAIL_S);
+    }
+    // Sticky until the pass's next luminance readback consumes it (it reads every few frames).
+    if (performance.now() < _expoMoveUntil) sunPost.framingMoved = true;
+    // The calibration is "the whole Sun in view" — the same distance at which
+    // the coronagraph rule above treats the disc as fully in frame.
+    sunPost.calibrateOK = d >= 3.2;
+}
+const _occlV = new THREE.Vector3();
+/** Per frame: where the Sun is on screen, and how big (the space-occlusion pass's zones ride it). */
+function _tickSpaceOcclusion() {
+    if (!_spaceOcclPass) return;
+    const u = _spaceOcclPass.uniforms;
+    _occlV.set(0, 0, 0).project(camera);
+    if (_occlV.z < 1) u.center.value.set(_occlV.x * 0.5 + 0.5, _occlV.y * 0.5 + 0.5);
+    const d = Math.max(camera.position.length(), 1.0001);
+    u.sunR.value = Math.tan(Math.asin(1 / d)) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5));
+    u.relax.value = _occlRelax;
 }
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -2725,6 +2978,10 @@ const sunFS = /* glsl */`
     uniform vec3      u_obsChroma;   // the frame's own colour LUT, unit luminance
     uniform float     u_obsFuse;     // 1 = photometric fusion, 0 = legacy tint
     uniform float     u_obsLevel;    // model↔observation level trim (1.0 = matched)
+    uniform float     u_obsDetail;   // 0..1 — synthesised sub-frame granulation (js/sun-disc.js detailWeight)
+    uniform float     u_farFuse;     // 1 = the unobserved hemisphere is drawn as the observing instrument would record it
+    uniform float     u_farTex;      // the frame's measured contrast / the model texture's own (js/sun-disc.js farTextureGain)
+    uniform float     u_farMean;     // the model texture's mean level, as a fraction of baseCol (js/sun-disc.js MODEL_TEXTURE_MEAN)
 
     // Below this Earth-μ the browse frame's own limb law is too steep to
     // divide by (2-term laws fall to a few % and the JPEG floor takes over),
@@ -2740,6 +2997,13 @@ const sunFS = /* glsl */`
     uniform float u_flare_lon;       // heliographic longitude (radians) — CURRENT frame (JS rotates it each frame)
     uniform float u_flare_t;         // simulation-time elapsed since flare onset (0 = just fired)
     uniform float u_flare_pil;       // PIL angle at the flare site, from local east toward north (radians)
+    // The ribbon's shape NOW, from the flare model (no law is typed in this shader):
+    uniform float u_flare_sep;       // half-separation across the PIL (radians)
+    uniform float u_flare_wid;       // ribbon width, Gaussian scale (radians)
+    uniform float u_flare_alongVar;  // along-PIL envelope variance (radians squared)
+    uniform float u_flare_decay;     // ribbon brightness envelope, 0..1
+    uniform vec3  u_flare_hook;      // the ribbons' J hook: (where the straight part ends, arc radius, sweep) — radians
+    uniform float u_flare_chi;       // +1 / -1: which way the flare is handed (js/flare-geometry.js helicityChirality)
     uniform float u_rotAngle;        // equatorial rotation of the sim frame since load (radians) — THE accumulator
 
     // Phase 4.4 — per-AR sunspot slots. xyz = rotated unit-sphere AR
@@ -2761,6 +3025,8 @@ const sunFS = /* glsl */`
     // to the polyline encoded in row 'rowI' of t_flare_ribbons. Each
     // segment treated as a 3D chord; cheap and visually indistinguishable
     // from a true great-circle arc at the small angular widths we use.
+    // Distance to / arc length along a J-shaped ribbon — the kernel's own function (js/flare-geometry.js ribbonJ).
+    ${FG.RIBBON_J_GLSL}
     float ribbonDist(vec3 p, float rowI) {
         float minD = 1e6;
         int N = int(u_flare_ribbons_count);
@@ -2899,18 +3165,22 @@ const sunFS = /* glsl */`
 
     // ── Blackbody colour (Planck peak approximation) ───────────────────────────
     // Correct G-star colours: T 4000–7000 K
+    ${DISC_GLSL}
     vec3 blackbody(float T) {
-        // Piecewise linear fit through sRGB primaries at 1000 K intervals
+        // Piecewise linear fit through sRGB primaries at 1000 K intervals.
+        // These are sRGB PICKS and the composer encodes linear -> sRGB at the
+        // end, so each is DECODED here (js/sun-disc.js section 2). Undecoded,
+        // the pick named "golden" was displayed as pale yellow (255, 235, 168).
         float t = clamp((T - 3000.0) / 5000.0, 0.0, 1.0);
         vec3 c0 = vec3(1.00, 0.28, 0.02);   // ~3000 K — orange-red
         vec3 c1 = vec3(1.00, 0.60, 0.12);   // ~4500 K — deep yellow
         vec3 c2 = vec3(1.00, 0.83, 0.40);   // ~5800 K — golden (G2V)
         vec3 c3 = vec3(0.98, 0.96, 0.72);   // ~7000 K — pale yellow-white
         vec3 c4 = vec3(0.90, 0.93, 1.00);   // ~8000 K — blue-white
-        if (t < 0.3) return mix(c0, c1, t / 0.3);
-        if (t < 0.56)return mix(c1, c2, (t-0.3)/0.26);
-        if (t < 0.8) return mix(c2, c3, (t-0.56)/0.24);
-        return mix(c3, c4, (t-0.8)/0.2);
+        if (t < 0.3) return discDecode(mix(c0, c1, t / 0.3));
+        if (t < 0.56)return discDecode(mix(c1, c2, (t-0.3)/0.26));
+        if (t < 0.8) return discDecode(mix(c2, c3, (t-0.56)/0.24));
+        return discDecode(mix(c3, c4, (t-0.8)/0.2));
     }
 
     // ── ACES filmic tonemap (Narkowicz 2015 approximation) ────────────────────
@@ -3006,11 +3276,13 @@ const sunFS = /* glsl */`
         float obsRel = 1.0;   // dimensionless observed contrast; 1 = quiet Sun
         float obsMuE = 1.0;
         float gridLon = lon;
+        vec3  obsP0 = normalize(vPosition);     // the fragment in the FRAME's (de-rotated) coordinates
         if (u_obsOn > 0.5) {
             float ra = u_rotAngle * diffRot;
             float cr = cos(ra), sr = sin(ra);
             vec3  pN = normalize(vPosition);
             vec3  p0 = vec3(cr * pN.x - sr * pN.z, pN.y, sr * pN.x + cr * pN.z);
+            obsP0 = p0;
             gridLon  = atan(p0.x, p0.z);
             float cb = cos(u_obsB0), sb = sin(u_obsB0);
             vec3  q  = vec3(p0.x, p0.y * cb - p0.z * sb, p0.y * sb + p0.z * cb);
@@ -3040,10 +3312,25 @@ const sunFS = /* glsl */`
                 float stretch = clamp(abs(mu - q.z) * 2.0, 0.0, 1.0);
                 obsW   = smoothstep(0.01, mix(0.14, 0.55, stretch), q.z);
                 if (u_obsFuse > 0.5) {
-                    // Strip the browse LUT, then normalise by the measured
-                    // envelope at THIS fragment's Earth-μ.
-                    vec3  lin = obsRGB / max(u_obsChroma, vec3(1e-3));
-                    float L   = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+                    // Normalise by the measured envelope at THIS fragment's
+                    // Earth-μ. L MUST BE THE LUMINANCE calibrateDisk FITTED —
+                    // the plain Rec.709 luminance of the linear pixel — or the
+                    // quotient is not 1 on the quiet disc. Until 2026-11-22 the
+                    // pixel was first divided by the frame's mean chroma ("strip
+                    // the browse LUT"), which is not a no-op for a scalar: it
+                    // re-weights the channels, and a browse LUT's hue changes
+                    // with level. On the real gold HMIIC frame red is clipped
+                    // disc-wide, green carries the limb darkening and blue
+                    // falls 21 → 1 code values centre to limb, with a mean
+                    // chroma of (2.16, 0.75, 0.0045): the division weighted
+                    // BLUE sixteen-fold and obsRel read 0.89 at μ = 0.95, 0.71
+                    // at 0.6, 0.59 at 0.31 (measured on the fixture) — the
+                    // observed disc was drawn up to 40 % too dark away from
+                    // its centre, i.e. limb-darkened twice. The model's
+                    // over-dark display granulation happened to hide that at
+                    // the terminator. The palette is applied once regardless:
+                    // obsRel is a scalar on the model's own colour.
+                    float L   = dot(obsRGB, vec3(0.2126, 0.7152, 0.0722));
                     float xE  = 1.0 - clamp(max(obsMuE, OBS_MU_FLOOR), 0.0, 1.0);
                     float ldE = max(0.02, 1.0 - u_obsCal.y * xE - u_obsCal.z * xE * xE);
                     obsRel    = clamp(L / max(u_obsCal.x * ldE, 1e-4), 0.0, 6.0);
@@ -3448,11 +3735,36 @@ const sunFS = /* glsl */`
         // interiors read whiter and lanes redder.
         vec3 granCol = blackbody(u_teff + (laneD - 0.5) * 500.0);
 
+        // ── THE UNOBSERVED HEMISPHERE THROUGH THE SAME INSTRUMENT ─────────────
+        // The model's granulation is a DISPLAY pattern: cells 15 Mm across
+        // (vPosition * 46 — ten times a granule) at +/-34 % contrast, tuned as
+        // the look of the model Sun. Beside an observed frame it is a claim the
+        // instrument contradicts: at HMI browse resolution (2.6 Mm a pixel) the
+        // quiet disc is smooth to a few per cent, so orbiting showed a hard
+        // seam between a smooth half and a speckled one (measured 2026-11-21:
+        // pixel-to-pixel texture 23 on the model half against 5 on the
+        // observed). While a calibrated frame is drawn, the model half's
+        // quiet-Sun texture is therefore scaled to the contrast the frame was
+        // MEASURED to have (u_farTex), about its smooth photosphere — which is
+        // baseCol, the very level the observed half is drawn on (obsPhoto
+        // below), so the two levels now agree by construction as well. Spots,
+        // plage, faculae and flares are added on top at full strength, as
+        // before. In MODEL mode (no frame) texKeep is exactly 1.
+        float farFuse = (u_obsOn > 0.5 && u_obsFuse > 0.5 && u_viewMode < 0.5) ? u_farFuse : 0.0;
+        float texKeep = mix(1.0, u_farTex, farFuse);
+
         // ── Compose surface brightness ────────────────────────────────────────
-        vec3 col = granCol * granLight + baseCol * (fineTurb + superGran);
+        // Scaled about the pattern's own MEAN (u_farMean x baseCol), not about
+        // baseCol with the pattern left un-centred: the display pattern's mean
+        // is well below baseCol (dark lanes and filaments outweigh the bright
+        // cells), so an un-centred mix dimmed the half by ~28 % x the gain —
+        // 2 % on the real frame, 8 % on a rougher one, and the seam was back
+        // in level. Centred, the half sits on baseCol at every gain.
+        vec3 quietTex = granCol * granLight + baseCol * (fineTurb + superGran);
+        vec3 col = mix(quietTex, baseCol * (1.0 - u_farTex * u_farMean) + quietTex * u_farTex, farFuse);
 
         // Magnetic bright points — intensely white
-        col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
+        col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots * texKeep;
 
         // NANOFLARES ARE NOT DRAWN IN WHITE LIGHT, ON PURPOSE. They used to be
         // (a hot white-yellow pop added right here) and that was wrong: a
@@ -3479,10 +3791,17 @@ const sunFS = /* glsl */`
         vec3 plageColor = mix(baseCol * 1.25, vec3(1.12, 1.00, 0.82), 0.60);
         float arPulse = 0.70 + 0.30 * sin(u_time * 2.3 + plage * 8.0)
                       + 0.14 * sin(u_time * 5.7 + plage * 3.0);
-        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots;
+        // (Beside an observed CONTINUUM frame this is the wrong picture: bright
+        // pulsing plage is the Ca / EUV look, and in the continuum faculae are
+        // invisible at disc centre and reach only ~10 % near the limb. On the
+        // unobserved half of a fused disc the term is therefore scaled to that
+        // — DISC_FACULA_LIMB x (1 - mu) — or the model half is strewn with
+        // bright dots the instrument beside it would not record.)
+        float wlFac = mix(1.0, DISC_FACULA_LIMB * (1.0 - mu), farFuse);
+        col += plageColor * plage * (0.95 + u_f107_norm * 0.6) * arPulse * u_showSpots * wlFac;
         // Hot EUV core glow at the brightest plage (the active-region cores).
         float arCore = smoothstep(0.45, 1.15, plage);
-        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots;
+        col += vec3(1.25, 0.80, 0.45) * arCore * (0.55 + 0.6 * arPulse) * u_showSpots * wlFac;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -3514,6 +3833,10 @@ const sunFS = /* glsl */`
         // ── Active-region UV/EUV brightening (hot blue-white arcade) ─────────
         col += mix(vec3(1.3, 0.95, 0.40), vec3(0.80, 0.90, 1.50),
                    flareActive) * flareActive * 0.75 * u_showFlares;
+        // What the EVENT alone adds from here on (kernel, ribbons, arcade glow,
+        // wave) — without the standing active-region glow above, which an
+        // observed EUV frame already contains.
+        vec3 colPreEvent = col;
 
         // ── Flare ribbons — chromospheric UV footpoints of reconnecting loops ─
         // During and after a solar flare, the chromosphere brightens in two
@@ -3524,15 +3847,18 @@ const sunFS = /* glsl */`
         //  u_flare_t → ∞ : ribbons widen, fade, and the post-flare arcade cools
         //
         // Angular scale: 1 R_sun ≈ 696 000 km → 0.001 rad ≈ 696 km (1 Mm)
-        // Ribbon separation starts at ~15 Mm (0.022 rad), grows to ~50 Mm.
-        // e-folding decay ≈ 175 sim-time units (~5 min at 60fps / dt=0.010).
+        // HOW FAR APART, HOW WIDE, HOW LONG and HOW BRIGHT the ribbons are at
+        // this instant are UNIFORMS, written each frame from the flare model
+        // (js/flare-geometry.js makeFlareModel → _syncFlareShape). This shader
+        // draws them; it does not decide them. tests/flare-geometry.mjs fails
+        // if a law is typed back in here.
         {
             float cos_df = sin(lat) * sin(u_flare_lat)
                          + cos(lat) * cos(u_flare_lat) * cos(lon - u_flare_lon);
             float df = acos(clamp(cos_df, -1.0, 1.0));
 
             // Decay envelope — fast for UV continuum, slower for Hα cooling
-            float fDecay = exp(-u_flare_t / 175.0);
+            float fDecay = u_flare_decay;
 
             // ── UV/EUV hard kernel (AIA 1600/1700 Å proxy) ─────────────────
             // Compact bright kernel at the reconnection site itself.
@@ -3573,7 +3899,7 @@ const sunFS = /* glsl */`
                 // js/flare-geometry.js tangentFrame): 'along' runs down the
                 // inversion line, 'across' crosses it. u_flare_pil = 0 is the
                 // old straight E-W pair exactly (along = east, across = north).
-                // The four literals below are MIRRORED by RIBBON in the kernel
+                // The literals below are MIRRORED by RIBBON in the kernel
                 // and pinned by tests/flare-geometry.mjs — change both.
                 float cfl = cos(u_flare_lat), sfl = sin(u_flare_lat);
                 float cfo = cos(u_flare_lon), sfo = sin(u_flare_lon);
@@ -3585,12 +3911,20 @@ const sunFS = /* glsl */`
                 vec3  pF     = normalize(vPosition);
                 float along  = dot(pF, pilAx);
                 float across = dot(pF, loopAx);
-                float alongVar = 0.10 + u_flare_t * 4.0e-5;   // along-PIL envelope variance
-                float lonEnv = exp(-along * along / alongVar);
-                float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
-                float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows
-                rib1 = exp(-pow((across - sep) / rWid, 2.0)) * lonEnv;
-                rib2 = exp(-pow((across + sep) / rWid, 2.0)) * lonEnv;
+                float alongVar = u_flare_alongVar;
+                float sep    = u_flare_sep;
+                float rWid   = u_flare_wid;
+                // Each ribbon is a J: straight along the PIL, then a hook that turns away from it. The two are a
+                // 180-degree rotation of each other; u_flare_chi (the region's handedness) picks which ends hook.
+                // .x is the distance to the curve, .y the arc length along it — the envelope dims the hook as it
+                // does the ribbon's end. A sweep of 0 is the straight pair exactly.
+                vec2 j1 = ribbonJ( u_flare_chi * along,  across, sep, u_flare_hook.x, u_flare_hook.y, u_flare_hook.z);
+                vec2 j2 = ribbonJ(-u_flare_chi * along, -across, sep, u_flare_hook.x, u_flare_hook.y, u_flare_hook.z);
+                float q1 = j1.x / rWid, q2 = j2.x / rWid;
+                // The tangent-plane coordinates repeat on the far hemisphere; a ribbon is on the flare's own side.
+                float nearSide = smoothstep(0.0, 0.3, dot(pF, cross(fEast, fNorth)));
+                rib1 = exp(-q1 * q1) * exp(-j1.y * j1.y / alongVar) * nearSide;
+                rib2 = exp(-q2 * q2) * exp(-j2.y * j2.y / alongVar) * nearSide;
             }
             float ribMask = (rib1 + rib2) * fDecay * 1.25;   // brighter, more defined two-ribbon arcs
             // Colour: UV white at onset → Hα red as it cools
@@ -3627,6 +3961,7 @@ const sunFS = /* glsl */`
             }
         }
         vec3 flareAdd = max(col - colPreFlare, vec3(0.0));
+        vec3 flareEvt = max(col - colPreEvent, vec3(0.0));
 
         // ── Pores — small dark magnetic concentrations in network lanes ────
         // Pores are tiny sunspot-like features (<3500 km) without a
@@ -3636,17 +3971,21 @@ const sunFS = /* glsl */`
         float poreNoise = vnoise(vPosition * 80.0 + vec3(u_time * 0.005));
         float pore = smoothstep(0.94, 0.97, poreNoise) * laneMask
                    * (1.0 - umbra) * (1.0 - penumbra) * 0.55;
-        col *= 1.0 - pore * u_showSpots;
+        col *= 1.0 - pore * u_showSpots * texKeep;
 
         // ── 5-minute p-mode oscillations — global photospheric ringing ─────
         // Acoustic standing waves trapped beneath the photosphere modulate
         // brightness at ~5 minutes (~3.5 sim-sec). Very subtle — just enough
         // to make the surface "ring" when zoomed in.
         float pmode = sin(u_time * (6.2832 / 3.5));
-        col *= 1.0 + pmode * 0.025;
+        col *= 1.0 + pmode * 0.025 * (1.0 - farFuse);   // (a whole-disc pulse the observed half does not share)
 
         // ── Limb darkening ─────────────────────────────────────────────────────
-        col *= limb;
+        // The limb is REDDER as well as darker (js/sun-disc.js): the measured
+        // Neckel & Labs law sets the luminance, a grey-atmosphere
+        // Eddington-Barbier ratio sets the hue, and the tint is luminance-
+        // preserving by construction so the photometry above is untouched.
+        col *= limb * limbChroma(mu, baseCol, u_teff);
 
         // ── Photosphere isolation: when chromosphere is hidden, reveal a bit ──
         // more of the upper-altitude colouring (warmer rim, brighter spicule
@@ -3664,14 +4003,17 @@ const sunFS = /* glsl */`
         // Kept moderate so granulation contrast and sunspot detail remain visible.
         // Only flare impulsive phase pushes significantly above bloom threshold.
         // Pre-exposure for ACES tonemap below.
-        col *= 1.00 + u_flare_intensity * 0.12;   // only a subtle global lift; the flare
+        // (The global lifts below are the MODEL Sun's display level. Beside an
+        // observed frame the level is the observation's — I0-normalised, drawn
+        // on baseCol — so the unobserved half does not take them: farFuse.)
+        col *= 1.00 + u_flare_intensity * 0.12 * (1.0 - farFuse);   // only a subtle global lift; the flare
                                                   // brightness is localized (kernel/ribbons/arcade)
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
         // Higher radio flux index → more magnetic heating → brighter surface
-        col *= 1.0 + u_f107_norm * 0.30;
+        col *= 1.0 + u_f107_norm * 0.30 * (1.0 - farFuse);
         // Shift slightly toward blue-white at solar maximum (hotter effective temperature)
-        col = mix(col, col * vec3(0.98, 0.99, 1.04), u_f107_norm * 0.18);
+        col = mix(col, col * vec3(0.98, 0.99, 1.04), u_f107_norm * 0.18 * (1.0 - farFuse));
 
         // ── SEP / energetic electron impact — brief UV brightening during radiation storms ──
         // Energetic electrons precipitating along open field lines produce
@@ -3738,9 +4080,31 @@ const sunFS = /* glsl */`
         // back to the legacy tint so a degraded frame still draws.
         if (u_obsOn > 0.5 && u_viewMode < 0.5) {
             vec3 obsPhoto = (u_obsFuse > 0.5)
-                ? baseCol * limb * obsRel * u_obsLevel
+                ? baseCol * limb * limbChroma(mu, baseCol, u_teff) * obsRel * u_obsLevel
                 : obsRGB * u_obsTint;
+            float quietObs = smoothstep(0.55, 0.85, obsRel);
             col = mix(col, obsPhoto, obsW);
+            // BELOW THE FRAME'S SAMPLE SPACING THE DISC IS SYNTHESISED, AND SAYS
+            // SO (js/sun-disc.js section 3; the chip prints it while this is on).
+            // A true-scale granulation pattern, SHADING ONLY: it multiplies the
+            // radiance by 1 +/- a few per cent, never moves or recolours a
+            // feature, is absent inside sunspots, is damped toward the limb by
+            // foreshortening, and fades in only once the view magnifies the
+            // frame past its own resolution (u_obsDetail) AND a granule spans
+            // a few screen pixels (pxFade). It is drawn on BOTH hemispheres
+            // (farFuse): the unobserved half is the same Sun through the same
+            // instrument, so below that instrument's resolution it gets the
+            // same synthesis — one pattern, continuous across the terminator.
+            if (u_obsDetail > 0.002 && u_obsFuse > 0.5) {
+                vec3  gp     = obsP0 * DISC_GRAN_FREQ;
+                vec2  vg     = voronoi(gp + vec3(0.0, 0.0, u_time * 0.004));
+                float cell   = smoothstep(0.02, 0.30, vg.y - vg.x);          // bright cell interiors, dark lanes
+                float foot   = fwidth(obsP0.x) + fwidth(obsP0.y) + fwidth(obsP0.z);
+                float pxFade = clamp((1.0 / (DISC_GRAN_FREQ * max(foot, 1e-7)) - 1.0) * 0.5, 0.0, 1.0);
+                float quietFar = (1.0 - umbra) * (1.0 - penumbra) * farFuse;
+                float quiet  = mix(quietFar, quietObs, obsW);
+                col *= 1.0 + (cell - 0.60) * 2.0 * DISC_GRAN_AMP * u_obsDetail * pxFade * quiet * mu;
+            }
         }
 
         // ── ACES filmic tonemap — Tier-A HDR roll-off ─────────────────────────
@@ -3846,6 +4210,24 @@ const sunFS = /* glsl */`
                 }
                 euv = mix(euv, obsCh, obsW);
             }
+            // THE FLARE EVENT IN AN EUV VIEW. Until 2026-11-20 the kernel,
+            // ribbons and wave were overlaid in white light only, so in the
+            // channel views — where the flare director sends the viewer — the
+            // 3D arcade stood over an undisturbed surface. Ribbons are
+            // footpoint / transition-region emission and are bright in every
+            // AIA EUV band, so the marker is drawn in the CHANNEL's own colour
+            // (a single-band image has no other) and rolls to white where a
+            // detector would saturate. An event overlay, as in white light: no
+            // observed pixel is recoloured.
+            if (u_viewMode < 5.5) {
+                vec3 chTint = u_viewMode < 1.5 ? vec3(1.00, 0.42, 0.16)
+                            : u_viewMode < 2.5 ? vec3(0.92, 0.68, 0.20)
+                            : u_viewMode < 3.5 ? vec3(0.80, 0.72, 0.28)
+                            : u_viewMode < 4.5 ? vec3(0.72, 0.38, 0.95)
+                            :                    vec3(0.18, 0.78, 0.80);
+                float fl = dot(flareEvt, vec3(0.2126, 0.7152, 0.0722));
+                euv += (chTint * fl + vec3(max(fl - 0.9, 0.0) * 0.8)) * 0.8;
+            }
             col = euv;
         }
 
@@ -3940,7 +4322,10 @@ try {
 // ═══════════════════════════════════════════════════════════════════════════
 let sunObserved = null;
 let sunOffLimb  = null;                      // js/sun-offlimb.js — observed 304+131 annulus
+let sunCoronagraph = null;                   // js/sun-coronagraph.js — observed SOHO/LASCO C2 + C3 outer corona
 let _offLimbUserOn = true;                   // the layer toggle (?offlimb=0 starts off)
+let _coroUserOn = true;                      // the coronagraph layer toggle (?coronagraph=0 starts off)
+let _coroState = null;
 let _obsUserOn = true;                       // the chip toggle (?observed=0 starts off)
 const _obsSuspenders = new Set();            // 'cutaway' | 'doppler' — model-only views
 let _obsRotSaved = null;                     // slider rate to restore on Model
@@ -3957,9 +4342,11 @@ function _obsApply(reason) {
         // The annulus is the same observation as the disk: it lives and dies
         // with it, and Model mode must not leave an observed ring in the sky.
         sunOffLimb?.setEnabled(_offLimbUserOn);
+        sunCoronagraph?.setEnabled(_coroUserOn);
     } else {
         sunObserved.setEnabled(false, reason);
         sunOffLimb?.setEnabled(false);
+        sunCoronagraph?.setEnabled(false);       // Model mode must not leave an observed corona in the sky
         if (_obsRotSaved != null) { uniforms.u_rot.value = _obsSliderRot(); _obsRotSaved = null; }
         if (hudRot) hudRot.textContent = (25.4 / _obsSliderRot()).toFixed(1);
     }
@@ -3974,14 +4361,23 @@ let _obsState = null;
 let _offLimbState = null;
 function _obsRenderChip(state) { _obsState = state; _renderProvChip(); }
 function _offLimbChip(state)   { _offLimbState = state; _renderProvChip(); }
+function _coroChip(state)      { _coroState = state; _renderProvChip(); }
+/** Is the observed outer corona actually on screen? (drawn, not merely enabled) */
+function _coroDrawn() { return !!(_coroState && _coroState.enabled && (_coroState.instruments || []).some(i => i.drawn)); }
 function _renderProvChip() {
     const el = document.getElementById('sun-provenance');
     const state = _obsState;
     if (!el || !state) return;
     // The off-limb suffix only ever rides an OBSERVED disk — in Model mode the
     // layer is off, so there is nothing to append and nothing to imply.
-    const suffix = state.mode === 'observed' ? offLimbLabel(_offLimbState) : '';
-    el.textContent = state.label + suffix;
+    // The coronagraph suffix is printed only while that layer is IN FRAME (the
+    // camera is far enough out to see its inner edge) — at the hero distance it
+    // is off-screen, and a chip that lists what is not on screen is noise.
+    const coroSeen = state.mode === 'observed' && _coroState?.enabled && _coroReveal > 0.05;
+    const suffix = state.mode === 'observed' ? offLimbLabel(_offLimbState) + (coroSeen ? (_coroState.label ?? '') : '') : '';
+    // …and so is anything SYNTHESISED on the observed disc (js/sun-disc.js §3).
+    const synth = state.mode === 'observed' && _obsDetailShown ? ' · + synthesised granulation' : '';
+    if (el.textContent !== state.label + suffix + synth) el.textContent = state.label + suffix + synth;
     el.classList.remove('prov-observed', 'prov-stale', 'prov-model');
     const stale = state.mode === 'observed' && /stale|expired|refresh failed/.test(state.label);
     el.classList.add(state.mode === 'observed' ? (stale ? 'prov-stale' : 'prov-observed') : 'prov-model');
@@ -3996,13 +4392,13 @@ function _renderProvChip() {
     const olCovTxt = olCov
         ? (olCov.fraction > 0.999
             ? ` ${olSrc}'s frame covers the whole annulus (reaching ${olCov.reach.axis.toFixed(2)} R☉ on axis).`
-            : ` ${olSrc}'s frame reaches only ${olCov.reach.axis.toFixed(2)} R☉ on axis, so it supplies ${(olCov.fraction * 100).toFixed(0)}% of this annulus — the rest is outside the frame and is drawn as nothing, never invented.`)
+            : ` ${olSrc}'s frame reaches only ${olCov.reach.axis.toFixed(2)} R☉ on axis, so it supplies ${(olCov.fraction * 100).toFixed(0)}% of this annulus — the rest is outside the frame and is drawn as nothing, never invented; the layer fades over the last ${EDGE_FEATHER.toFixed(2)} R☉ before the detector edge so the frame's boundary is not read as a feature.`)
         : '';
     const ol = _offLimbState && _offLimbState.enabled
-        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live ${olSrc} 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere.${olCovTxt} Level is normalised by each frame's own 1.05–1.15 R☉ shell, then square-root stretched for display (the field spans ~70:1 — no linear mapping shows both the quiet corona and a prominence); colour is the browse product's own. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
+        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live ${olSrc} 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere.${olCovTxt} Level is normalised to each frame's own limb glow (the 1.00–1.05 R☉ shell) after subtracting the product's two-code-value black point; above the limb the profile and the colour are the browse product's own, as published. The frame's burned-in caption strip is not drawn. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
         : '';
     el.title = state.mode === 'observed'
-        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid).${ol} Click for Model.`
+        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid). Colour is the model's: the limb's red shift is a grey-atmosphere Eddington–Barbier ratio, luminance-preserving. When the view magnifies the frame past its own resolution a synthesised true-scale granulation (~1.4 Mm cells, ±7 %) is shaded onto the disc — it is not in the observation, and the chip says so while it is drawn.${ol}${_coroState?.enabled ? ' ' + (_coroState.note ?? '') : ''} Click for Model.`
         : 'Model: procedural photosphere on the whole sphere. Click for Observed (live SDO frame).';
 }
 {
@@ -4012,12 +4408,13 @@ function _renderProvChip() {
         THREE, uniforms,
         base: qp.get('aiaBase') || '/api/solar/aia',
         res:  (window.devicePixelRatio || 1) >= 1.5 ? 2048 : 1024,
-        onState: _obsRenderChip,
+        onState: (...a) => { _expoNoteFraming(1.0); return _obsRenderChip(...a); },   // a frame that just loaded is a framing change, not a flare
     });
     // Look from Earth's direction: disk centre sits at heliographic lat B0, so
     // the visible limb and the observed/model terminator coincide on load.
     const b0 = solarEphemeris(new Date()).b0Deg * Math.PI / 180;
-    camera.position.set(0, Math.sin(b0) * 6, Math.cos(b0) * 6);
+    if (sunCam) sunCam.setB0(b0);
+    else camera.position.set(0, Math.sin(b0) * camera.position.length(), Math.cos(b0) * camera.position.length());
     controls.update();
     document.getElementById('sun-provenance')?.addEventListener('click', () => {
         _obsUserOn = !_obsUserOn;
@@ -4092,15 +4489,61 @@ function _renderProvChip() {
             }
             document.getElementById('lr-offlimb-suvi')?.classList.toggle('on', id === 'suvi');
         };
-        togSuvi.checked = qp.get('offlimbSource') === 'suvi';
+        // GOES/SUVI IS THE DEFAULT SOURCE FOR THE RING (2026-11-20). Its upstream
+        // was settled by one production request (swpc-animation-primary-png →
+        // 200; js/suvi-geometry.js SOURCE_CANDIDATES), and on real frames it is
+        // the one that shows a corona: the SUVI composite carries signal to its
+        // frame edge at 1.67 R☉, where an AIA browse frame is black past ~1.1 R☉
+        // and stops at 1.28 on axis. The DISC stays SDO. `?offlimbSource=sdo`
+        // (or the row) forces AIA; and if SUVI does not answer, the ring FALLS
+        // BACK to AIA once and the row says so — a dead SWPC image host must
+        // not take the limb's atmosphere with it.
+        const want = qp.get('offlimbSource');
+        let userChose = want === 'sdo' || want === 'suvi';
+        togSuvi.checked = want !== 'sdo';
         togSuvi.addEventListener('change', (e) => {
+            userChose = true;
             paint(sunOffLimb.setSource(e.target.checked ? 'suvi' : 'sdo'));
         });
         if (togSuvi.checked) sunOffLimb.setSource('suvi');
         paint(togSuvi.checked ? 'suvi' : 'sdo');
+        // One-way, once: SUVI was the page's choice (not the user's) and both of
+        // its channels failed their first two refreshes.
+        let suviMisses = 0;
+        sunOffLimb.onState = ((prev) => (st) => {
+            prev(st);
+            if (userChose || st.sourceId !== 'suvi' || !st.enabled) return;
+            const any = (st.channels || []).some(c => c.ok);
+            if (any) { suviMisses = 0; return; }
+            if (st.feedDown && ++suviMisses >= 2) {
+                userChose = true;                      // do not flap back
+                togSuvi.checked = false;
+                paint(sunOffLimb.setSource('sdo'));
+                if (meta) { meta.textContent = 'GOES/SUVI did not answer — using SDO/AIA'; }
+            }
+        })(sunOffLimb.onState);
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunOffLimb?.refresh(); });
     sunOffLimb.setEnabled(_offLimbUserOn && _obsShouldBeOn());
+    // ── The observed OUTER corona: SOHO/LASCO C2 + C3 (js/sun-coronagraph.js) ──
+    // Same plane of sky, same vantage (SOHO is at L1), same honesty rules as the
+    // ring above: level from each frame's own reference, colour as published,
+    // nothing inside the occulter, nothing invented, feed down ⇒ draws nothing.
+    if (qp.get('coronagraph') === '0') _coroUserOn = false;
+    sunCoronagraph = new SunCoronagraph({ THREE, scene, base: qp.get('aiaBase') || '/api/solar/aia', res: 1024, onState: _coroChip });
+    sunCoronagraph.mount();
+    sunCoronagraph.start();
+    const togCoro = document.getElementById('tog-coronagraph');
+    if (togCoro) {
+        togCoro.checked = _coroUserOn;
+        document.getElementById('lr-coronagraph')?.classList.toggle('on', _coroUserOn);
+        togCoro.addEventListener('change', (e) => {
+            _coroUserOn = e.target.checked;
+            document.getElementById('lr-coronagraph')?.classList.toggle('on', _coroUserOn);
+            sunCoronagraph.setEnabled(_coroUserOn && _obsShouldBeOn());
+        });
+    }
+    sunCoronagraph.setEnabled(_coroUserOn && _obsShouldBeOn());
     sunOffLimb.start();
 }
 
@@ -4928,9 +5371,11 @@ function _stepNeutrinos() {
 // ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
 const glowVS = /* glsl */`
     varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vObjDir;
+    varying vec3 vWorldPos;             // scene-space fragment position — the analytic limb's sightline (js/sun-limb.js)
     void main() {
         vNormal  = normalize(normalMatrix * normal);
         vObjDir  = normalize(normal);   // object-space radial dir (sun mesh = identity)
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
         vec4 mv  = modelViewMatrix * vec4(position,1.0);
         vViewDir = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -4982,6 +5427,13 @@ const chromoFS = /* glsl */`
     varying vec3 vViewDir;
     varying vec3 vObjDir;
     uniform float u_rot;
+    uniform float u_rotAngle;     // THE rotation accumulator — co-rotates the mottle with the photosphere
+    uniform float u_obsOn;        // 1 while the observed disc is drawn
+    uniform float u_obsB0;
+    uniform float u_obsFuse;
+    uniform float u_farFuse;
+    uniform float u_viewMode;
+    ${LIMB_GLSL}
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
     float vn(vec3 p){
@@ -5025,10 +5477,29 @@ const chromoFS = /* glsl */`
     }
 
     void main() {
-        vec3  n3d = normalize(vNormal);
-        vec3  vd  = normalize(vViewDir);
-        float mu  = max(dot(n3d, vd), 0.0);
+        // THE SIGHTLINE, not the canvas (js/sun-limb.js). n3d is the point ON
+        // THE SUN this ray is about, in the scene frame — it used to be the
+        // VIEW-space normal of the r = 1.06 shell, which pinned every plage
+        // halo and flare ribbon below to the screen instead of to the Sun.
+        sightline();
+        vec3  n3d = sightN;
+        float mu  = sightMu;          // mu at the photosphere; 0 off the limb
         float rim = 1.0 - mu;
+        // Co-rotating copy for the procedural textures (the sunFS de-rotation).
+        float crS = cos(u_rotAngle), srS = sin(u_rotAngle);
+        vec3  nS  = vec3(crS * n3d.x - srS * n3d.z, n3d.y, srS * n3d.x + crS * n3d.z);
+        // OBSERVATION BEATS MODEL: on the hemisphere the live frame covers, the
+        // shell's procedural on-disc terms stand down (plan honesty rule 2).
+        float obsNear = 0.0;
+        if (u_obsOn > 0.5 && u_chromoIso < 0.5) {
+            obsNear = smoothstep(0.0, 0.18, nS.y * sin(u_obsB0) + nS.z * cos(u_obsB0));
+        }
+        // ...and beside an observed CONTINUUM frame they stand down on the
+        // unobserved half as well: that half is drawn as the same instrument
+        // would record it (sunFS, "the unobserved hemisphere through the same
+        // instrument"), and H-alpha network, plage and fibrils are not
+        // continuum features.
+        if (u_obsOn > 0.5 && u_obsFuse > 0.5 && u_viewMode < 0.5 && u_chromoIso < 0.5) obsNear = max(obsNear, u_farFuse);
 
         // ── Heliographic coordinates (used for plage + flare ribbons) ─────────
         float lat_c = asin(clamp(n3d.y, -1.0, 1.0));
@@ -5040,7 +5511,7 @@ const chromoFS = /* glsl */`
         //  5-min (k-omega) periods. Map sim-time so each cycle reads at
         //  ~2 and ~3.5 sim-seconds with small spatial coherence pattern.
         // ══════════════════════════════════════════════════════════════════
-        float pmodePhase = vn(n3d * 1.8) * 6.2832;   // spatial coherence patches
+        float pmodePhase = vn(nS * 1.8) * 6.2832;   // spatial coherence patches
         float pmode3 = sin(u_time * (6.2832 / 2.0) + pmodePhase) * 0.06;
         float pmode5 = sin(u_time * (6.2832 / 3.5) + pmodePhase * 1.7) * 0.10;
         float pmode  = pmode3 + pmode5;
@@ -5050,17 +5521,17 @@ const chromoFS = /* glsl */`
         //  Hα filtergrams show a "salt and pepper" carpet: bright network
         //  on cell boundaries, dark internetwork inside.
         // ══════════════════════════════════════════════════════════════════
-        float sg = vn(n3d * 7.0 + vec3(u_time * 0.010));      // fine Ha texture
-        float mg = vn(n3d * 22.0 + vec3(u_time * 0.025));     // mesogranules
-        float mottle  = worley(n3d * 14.0 + vec3(u_time * 0.018));
+        float sg = vn(nS * 7.0 + vec3(u_time * 0.010));      // fine Ha texture
+        float mg = vn(nS * 22.0 + vec3(u_time * 0.025));     // mesogranules
+        float mottle  = worley(nS * 14.0 + vec3(u_time * 0.018));
         // Network anchored to the SAME supergranule Voronoi the photosphere
         // and convective zone use (object-space dir + matching diff-rotation
         // drift), so the chromospheric network sits on the real supergranule
         // boundaries and all the layers read as one coupled system.
-        float latO     = asin(clamp(vObjDir.y, -1.0, 1.0));
+        float latO     = asin(clamp(n3d.y, -1.0, 1.0));
         float s2o      = sin(latO) * sin(latO);
         float diffRotO = 1.0 - 0.19 * s2o - 0.09 * s2o * s2o;
-        vec2  sgCell   = voronoi(vObjDir * 2.2 + vec3(u_time * 0.0008 * u_rot * diffRotO));
+        vec2  sgCell   = voronoi(n3d * 2.2 + vec3(u_time * 0.0008 * u_rot * diffRotO));
         float sgNet    = smoothstep(0.06, 0.34, sgCell.y - sgCell.x);
         float network  = sgNet * (0.55 + 0.45 * smoothstep(0.30, 0.55, mottle));
         // Internetwork: dark cell interiors.
@@ -5072,10 +5543,10 @@ const chromoFS = /* glsl */`
         //  flux concentrations, fanning out along magnetic field lines.
         // ══════════════════════════════════════════════════════════════════
         // Direction field: derivative-style swirly bias from low-freq noise.
-        vec3 dir = vec3(vn(n3d * 4.0), vn(n3d * 4.0 + 11.0), vn(n3d * 4.0 + 23.0));
+        vec3 dir = vec3(vn(nS * 4.0), vn(nS * 4.0 + 11.0), vn(nS * 4.0 + 23.0));
         dir = normalize(dir - 0.5 + 0.001);
         // Stretch the sample coord along that direction → coherent threads.
-        vec3 fibCoord = n3d * 30.0 + dir * 14.0;
+        vec3 fibCoord = nS * 30.0 + dir * 14.0;
         float fibrils = warpedFBM(fibCoord, u_time);
         float fibThreads = smoothstep(0.42, 0.62, fibrils) - smoothstep(0.62, 0.82, fibrils);
         // Fibrils show as DARK threads on disk (absorption), faint at limb.
@@ -5086,8 +5557,8 @@ const chromoFS = /* glsl */`
         //  Use very low-freq directional noise + sharp threshold for elongated
         //  features distinct from fibrils.
         // ══════════════════════════════════════════════════════════════════
-        float fil1 = vn(n3d * 2.2 + dir * 3.0 + vec3(u_time * 0.005, 0.0, 0.0));
-        float fil2 = vn(n3d * 5.0 + vec3(0.0, u_time * 0.008, 0.0));
+        float fil1 = vn(nS * 2.2 + dir * 3.0 + vec3(u_time * 0.005, 0.0, 0.0));
+        float fil2 = vn(nS * 5.0 + vec3(0.0, u_time * 0.008, 0.0));
         float filMask = smoothstep(0.66, 0.74, fil1) * smoothstep(0.40, 0.62, fil2);
         // Filaments only appear on disk, not at limb (where they'd be prominences).
         float filDark = filMask * (1.0 - rim * 1.5) * 0.55;
@@ -5115,22 +5586,39 @@ const chromoFS = /* glsl */`
         //  6. Spicule forest — radial-stretched noise, limb-dominant
         //  Type II spicules concentrate at supergranule boundaries (high sg).
         // ══════════════════════════════════════════════════════════════════
-        vec3 radialCoord = n3d * 22.0 + n3d * mg * 4.0;
-        float sp_fine  = vn(radialCoord + vec3(u_time * 0.035, 0.0, 0.0));
-        float sp_ultra = vn(n3d * 50.0  + vec3(0.0, u_time * 0.055, 0.0));
-        float spicule  = sp_fine * 0.40 + sp_ultra * 0.30 + sg * 0.30;
-        float jets     = smoothstep(0.45, 0.72, spicule);
+        // ANALYTIC (js/sun-limb.js). The fringe is read off the ray's impact
+        // parameter at TRUE scale: a 1.5 Mm chromosphere under a spicule forest
+        // that e-folds in ~4 Mm. It was pow(rim, 2.2) on a DoubleSide r = 1.06
+        // shell — identically 1 on the back faces, i.e. a flat 42 Mm plate.
+        // One noise cell per spicule width ALONG the limb; the sample direction
+        // does not change with height, so each hair is radial. Below a pixel
+        // per hair the forest relaxes to its mean instead of sparkling.
+        float hLimb    = sightB - 1.0;
+        float hairRes  = clamp(LIMB_SPIC_W / sightPix, 0.0, 1.0);
+        float sp_fine  = vn(nS * (LIMB_SPIC_FREQ * 0.37) + vec3(u_time * 0.035, 0.0, 0.0));
+        float sp_ultra = vn(nS * LIMB_SPIC_FREQ + vec3(0.0, u_time * 0.055, 0.0));
+        float spicule  = sp_fine * 0.45 + sp_ultra * 0.35 + sg * 0.20;
+        float jets     = smoothstep(0.38, 0.68, spicule);
         // Concentrate jets at supergranule boundaries (network zones).
         jets *= 0.6 + network * 0.6;
-        float limbSpicule = pow(rim, 2.2) * (0.45 + jets * 0.75 * u_activity);
+        jets  = mix(0.45, jets, hairRes);
+        // Each hair has its own height: the scale height rides the jet strength.
+        float fringe   = limbShell(LIMB_H_CHROMO) * 0.60
+                       + shellAA(hLimb, LIMB_H_SPICULE * (0.35 + 1.10 * jets))
+                         * (0.20 + 0.75 * jets) * (0.55 + 0.45 * u_activity);
+        // Envelope for EVENT terms off the limb — they follow the shell, never the canvas.
+        float fringeEnv = clamp(limbShell(LIMB_H_SPICULE), 0.0, 1.0);
+        float evt       = sightDisk + (1.0 - sightDisk) * fringeEnv;
+        // The observed 304 limb, when it is being drawn, IS this layer.
+        float limbSpicule = fringe * (1.0 - u_limbObs);
 
         // ══════════════════════════════════════════════════════════════════
         //  7. Compose alpha — limb-dominant + on-disk network/plage
         // ══════════════════════════════════════════════════════════════════
         float diskFactor = pow(1.0 - rim, 2.0);
-        float alpha = limbSpicule
-                    + (network * 0.18 + plageStruct * 0.32) * diskFactor
-                    - (fibDark + filDark) * diskFactor * 0.45;
+        float alphaDisk = ((network * 0.18 + plageStruct * 0.32) * diskFactor
+                        - (fibDark + filDark) * diskFactor * 0.45) * (1.0 - obsNear);
+        float alpha = sightDisk * alphaDisk + limbSpicule;
         alpha *= 1.0 + pmode * 0.6;
 
         // ── Isolation mode — render as a full Hα disk when photosphere off ──
@@ -5140,7 +5628,7 @@ const chromoFS = /* glsl */`
         if (u_chromoIso > 0.5) {
             float isoFloor = (0.42 + network * 0.20 + plageStruct * 0.30
                                   - fibDark * 0.55 - filDark * 0.70) * diskFactor;
-            alpha = max(alpha, isoFloor);
+            alpha = max(alpha, isoFloor * sightDisk);
             // Slight cooling of the disk colour to distinguish it from the
             // photosphere look — pulls toward deeper Hα red, then plage on top.
             // (isolation colour tweak relocated to after section 8 -- col,
@@ -5185,8 +5673,8 @@ const chromoFS = /* glsl */`
         // ══════════════════════════════════════════════════════════════════
         float cos_df  = sin(lat_c)*sin(u_flare_lat) + cos(lat_c)*cos(u_flare_lat)*cos(lon_c - u_flare_lon);
         float df_c    = acos(clamp(cos_df, -1.0, 1.0));
-        float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity;
-        float globalFl = u_flare_intensity * 0.15 * pow(rim, 1.5);
+        float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity * evt;
+        float globalFl = u_flare_intensity * 0.15 * (sightDisk * pow(rim, 1.5) + (1.0 - sightDisk) * fringeEnv);
         alpha = clamp(alpha + chromoFl * 0.70 + globalFl, 0.0, 0.92);
         col = mix(col, hAlpha * 1.6, chromoFl * 0.80);
         col = mix(col, vec3(1.00, 0.65, 0.45), globalFl * 0.5);
@@ -5195,19 +5683,21 @@ const chromoFS = /* glsl */`
         alpha = clamp(alpha * cycleBoost, 0.0, 0.92);
         col   = mix(col, col * vec3(1.05, 0.92, 0.82), u_f107_norm * 0.20);
         col  += vec3(0.80, 0.65, 0.50) * u_electron_norm * rim * 0.15;
-        alpha = clamp(alpha + u_electron_norm * rim * 0.06, 0.0, 0.92);
+        alpha = clamp(alpha + u_electron_norm * rim * 0.06 * evt, 0.0, 0.92);
         col *= 1.0 + u_kp_norm * u_kp_norm * 0.12;
 
         gl_FragColor = vec4(col, alpha);
     }
 `;
-// DoubleSide so isolation mode renders both the rim halo (back-facing geom)
-// and the disk shell (front-facing) cleanly. Alpha-rim falloff in the shader
-// keeps front-side disk emission subtle when the photosphere is also visible.
+// FrontSide: the mesh is only a CANVAS for the analytic limb (js/sun-limb.js) —
+// every off-limb sightline crosses its front face exactly once, so the fringe
+// is added once. It was DoubleSide, which drew the back faces' constant
+// pow(rim, n) = 1 as a flat band 0.06 R☉ wide around the whole disc.
 const chromoMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1.06, 48, 48),
+    new THREE.SphereGeometry(CHROMO_MESH_R, 96, 64),
     new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:chromoFS, uniforms,
-        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide })
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.FrontSide,
+        extensions: { derivatives: true } })
 );
 scene.add(chromoMesh);
 
@@ -5417,6 +5907,13 @@ const trFS = /* glsl */`
     varying vec3 vViewDir;
     varying vec3 vObjDir;
     uniform float u_rot;
+    uniform float u_rotAngle;
+    uniform float u_obsOn;
+    uniform float u_obsB0;
+    uniform float u_obsFuse;
+    uniform float u_farFuse;
+    uniform float u_viewMode;
+    ${LIMB_GLSL}
 
     float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
     float vn(vec3 p){
@@ -5461,10 +5958,24 @@ const trFS = /* glsl */`
     }
 
     void main() {
-        vec3  n3d = normalize(vNormal);
-        vec3  vd  = normalize(vViewDir);
-        float mu  = max(dot(n3d, vd), 0.0);
+        // The sightline, not the canvas — see chromoFS and js/sun-limb.js.
+        sightline();
+        vec3  n3d = sightN;
+        float mu  = sightMu;
         float rim = 1.0 - mu;
+        float crS = cos(u_rotAngle), srS = sin(u_rotAngle);
+        vec3  nS  = vec3(crS * n3d.x - srS * n3d.z, n3d.y, srS * n3d.x + crS * n3d.z);
+        float obsNear = 0.0;
+        if (u_obsOn > 0.5 && u_trIso < 0.5) {
+            obsNear = smoothstep(0.0, 0.18, nS.y * sin(u_obsB0) + nS.z * cos(u_obsB0));
+        }
+        // The TR is a thin sheath on the spicule tops: its limb profile is the
+        // analytic shell, at true scale (it was pow(rim, 5.0) on a DoubleSide
+        // r = 1.04 sphere — a flat 28 Mm plate; the comment beside it already
+        // said the layer is ~2 Mm thick).
+        float limbK = limbShell(LIMB_H_TR);
+        float limbEnv = clamp(limbShell(LIMB_H_SPICULE), 0.0, 1.0);
+        float evt = sightDisk + (1.0 - sightDisk) * limbEnv;
 
         float lat_t = asin(clamp(n3d.y, -1.0, 1.0));
         float lon_t = atan(n3d.x, n3d.z);
@@ -5475,15 +5986,15 @@ const trFS = /* glsl */`
         //  edges (network lanes), dark interiors (internetwork). The TR
         //  is brightest where chromospheric Ca II network channels concentrate.
         // ══════════════════════════════════════════════════════════════════
-        float sg     = vn(n3d * 7.0 + vec3(u_time * 0.010));
-        float mottle = worley(n3d * 14.0 + vec3(u_time * 0.018));
+        float sg     = vn(nS * 7.0 + vec3(u_time * 0.010));
+        float mottle = worley(nS * 14.0 + vec3(u_time * 0.018));
         // Network anchored to the shared supergranule Voronoi (object space
         // + matching diff-rotation drift) so the EUV-moss footpoints sit on
         // the same supergranule boundaries as the photosphere/chromosphere.
-        float latO     = asin(clamp(vObjDir.y, -1.0, 1.0));
+        float latO     = asin(clamp(n3d.y, -1.0, 1.0));
         float s2o      = sin(latO) * sin(latO);
         float diffRotO = 1.0 - 0.19 * s2o - 0.09 * s2o * s2o;
-        vec2  sgCell   = voronoi(vObjDir * 2.2 + vec3(u_time * 0.0008 * u_rot * diffRotO));
+        vec2  sgCell   = voronoi(n3d * 2.2 + vec3(u_time * 0.0008 * u_rot * diffRotO));
         float sgNet    = smoothstep(0.06, 0.34, sgCell.y - sgCell.x);
         float network  = sgNet * (0.55 + 0.45 * smoothstep(0.30, 0.55, mottle));
         float intern  = 1.0 - smoothstep(0.10, 0.30, mottle);
@@ -5494,8 +6005,8 @@ const trFS = /* glsl */`
         //  visible in 171 Å as a dense bright "spongy" pattern. We use
         //  multi-octave Worley + threshold to get the mottled signature.
         // ══════════════════════════════════════════════════════════════════
-        float moss1 = worley(n3d * 26.0 + vec3(u_time * 0.020));
-        float moss2 = worley(n3d * 48.0 - vec3(u_time * 0.014, 0.0, 1.7));
+        float moss1 = worley(nS * 26.0 + vec3(u_time * 0.020));
+        float moss2 = worley(nS * 48.0 - vec3(u_time * 0.014, 0.0, 1.7));
         float mossPattern = smoothstep(0.18, 0.34, moss1) * smoothstep(0.10, 0.28, moss2);
         // Intensify moss in network lanes (where loops anchor)
         mossPattern *= 0.45 + network * 0.85;
@@ -5528,10 +6039,10 @@ const trFS = /* glsl */`
         //  bright TR background. Use a domain-warped low-freq pattern with
         //  sharp threshold for elongated thread structure.
         // ══════════════════════════════════════════════════════════════════
-        vec3 dirField = vec3(vn(n3d * 4.0), vn(n3d * 4.0 + 11.0), vn(n3d * 4.0 + 23.0));
+        vec3 dirField = vec3(vn(nS * 4.0), vn(nS * 4.0 + 11.0), vn(nS * 4.0 + 23.0));
         dirField = normalize(dirField - 0.5 + 0.001);
-        float fil1 = vn(n3d * 2.4 + dirField * 3.5 + vec3(u_time * 0.005, 0.0, 0.0));
-        float fil2 = vn(n3d * 5.6 + vec3(0.0, u_time * 0.008, 0.0));
+        float fil1 = vn(nS * 2.4 + dirField * 3.5 + vec3(u_time * 0.005, 0.0, 0.0));
+        float fil2 = vn(nS * 5.6 + vec3(0.0, u_time * 0.008, 0.0));
         float filMask = smoothstep(0.66, 0.74, fil1) * smoothstep(0.40, 0.62, fil2);
         // Filaments only on disk (off-limb they are prominences, handled separately)
         float filDark = filMask * (1.0 - rim * 1.5) * 0.65;
@@ -5539,7 +6050,7 @@ const trFS = /* glsl */`
         // ══════════════════════════════════════════════════════════════════
         //  5. p-mode oscillations — 3-min and 5-min TR ringing
         // ══════════════════════════════════════════════════════════════════
-        float pmodePhase = vn(n3d * 1.8) * 6.2832;
+        float pmodePhase = vn(nS * 1.8) * 6.2832;
         float pmode3 = sin(u_time * (6.2832 / 2.0) + pmodePhase) * 0.05;
         float pmode5 = sin(u_time * (6.2832 / 3.5) + pmodePhase * 1.7) * 0.08;
         float pmode  = pmode3 + pmode5;
@@ -5548,30 +6059,41 @@ const trFS = /* glsl */`
         //  6. Compose alpha — sharp rim ring + on-disk moss + flares
         // ══════════════════════════════════════════════════════════════════
         // Sharp rim ring — TR is ~2 Mm thick (~0.003 R☉)
-        float baseAlpha = pow(rim, 5.0) * (0.60 + u_activity * 0.30);
+        float baseAlpha = limbK * (0.60 + u_activity * 0.30) * (1.0 - u_limbObs);
 
         // On-disk moss + plage contribution (rim-attenuated)
         float diskFactor = pow(1.0 - rim, 2.0);
-        float diskAlpha  = (mossPattern * 0.18 + plageMoss * 0.32 + network * 0.10) * diskFactor;
+        // EUV MOSS IS NOT A CONTINUUM FEATURE. Beside an observed white-light
+        // frame the unobserved half is drawn as that instrument would record
+        // it (sunFS, "the unobserved hemisphere through the same instrument"),
+        // and a continuum imager records no transition-region moss — until
+        // 2026-11-22 this term strewed bright dots over the model half only
+        // (it was already masked on the observed half by obsNear), which was
+        // a third of the terminator seam's texture (measured: 5.2 against 2.3
+        // display levels with it off).
+        // The filament shadows below are EUV absorption and go with it.
+        if (u_obsOn > 0.5 && u_obsFuse > 0.5 && u_viewMode < 0.5 && u_trIso < 0.5) obsNear = max(obsNear, u_farFuse);
+        float diskAlpha  = (mossPattern * 0.18 + plageMoss * 0.32 + network * 0.10) * diskFactor
+                         * sightDisk * (1.0 - obsNear);
 
         // Flare brightening
         float cos_df = sin(lat_t)*sin(u_flare_lat) + cos(lat_t)*cos(u_flare_lat)*cos(lon_t - u_flare_lon);
         float df_t   = acos(clamp(cos_df, -1.0, 1.0));
-        float localFl  = exp(-df_t*df_t / 0.055) * exp(-u_flare_t / 30.0) * u_flare_intensity;
+        float localFl  = exp(-df_t*df_t / 0.055) * exp(-u_flare_t / 30.0) * u_flare_intensity * evt;
         float globalFl = exp(-u_flare_t / 60.0) * u_flare_intensity * 0.55;
 
         float alpha = baseAlpha
                     + diskAlpha
-                    - filDark * 0.45 * diskFactor
+                    - filDark * 0.45 * diskFactor * sightDisk * (1.0 - obsNear)
                     + localFl * 0.80
-                    + globalFl * pow(rim, 3.5);
+                    + globalFl * (sightDisk * pow(rim, 3.5) + (1.0 - sightDisk) * limbEnv);
         alpha *= 1.0 + pmode * 0.5;
 
         // ── Isolation lift: when only TR is visible, render full disk shell
         if (u_trIso > 0.5) {
             float isoFloor = (0.42 + mossPattern * 0.20 + plageMoss * 0.30
                                   - filDark * 0.50) * diskFactor;
-            alpha = max(alpha, isoFloor);
+            alpha = max(alpha, isoFloor * sightDisk);
         }
         alpha = clamp(alpha, 0.0, u_trIso > 0.5 ? 0.95 : 0.90);
 
@@ -5607,7 +6129,7 @@ const trFS = /* glsl */`
 
         // ── Energetic electron flux: EUV brightening at footpoints
         col  += vec3(0.60, 0.88, 1.20) * u_electron_norm * pow(rim, 3.0) * 0.35;
-        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
+        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12 * evt, 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
 
         // ── Kp storm: broader, brighter TR ring during geomagnetic activity
         alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, u_trIso > 0.5 ? 0.97 : 0.92);
@@ -5615,14 +6137,12 @@ const trFS = /* glsl */`
         gl_FragColor = vec4(col, alpha);
     }
 `;
-// DoubleSide so isolation mode renders both rim halo (back-facing geom)
-// and the disk shell (front-facing) cleanly. Rim-localised alpha falloff
-// in the shader keeps the front-side contribution subtle when other
-// atmospheric layers are co-rendered.
+// FrontSide canvas for the analytic limb — see the chromosphere mesh above.
 const trMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1.04, 48, 48),
+    new THREE.SphereGeometry(TR_MESH_R, 96, 64),
     new THREE.ShaderMaterial({ vertexShader: glowVS, fragmentShader: trFS, uniforms,
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+        extensions: { derivatives: true } })
 );
 scene.add(trMesh);
 
@@ -6336,6 +6856,8 @@ _outerGlowMesh.visible = false;   // removed: read as a giant glow circle
 // ─── SOLAR WIND PARTICLES ─────────────────────────────────────────────────────
 const N_SOLAR = 2500;
 const solarWindVS = /* glsl */`
+    uniform float u_dpr;          // device pixel ratio — point sizes are in CSS px
+    varying float vOffDisk;       // 0 where this particle's sightline meets the disc
     attribute vec3  aDir;    // unit radial direction at launch
     attribute float aPhase;  // staggered birth phase 0-1
     attribute float aSeed;   // per-particle variation
@@ -6451,14 +6973,25 @@ const solarWindVS = /* glsl */`
         vec3 pos = deflected * r;
         vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPos;
-        float sz = (1.6 + aSeed * 0.9) * (1.0 - s * 0.55) * (160.0 / max(-mvPos.z, 0.1));
-        gl_PointSize = clamp(sz, 0.4, 7.0);
+        // MOTES, NOT BLOBS (2026-11). The size was (1.6..2.5)·160/z clamped to
+        // 7 px — which is 43..67 px before the clamp at any distance the camera
+        // can reach, so every particle on the page drew at exactly 7 px and the
+        // wind read as a field of yellow discs. Now ~1.2–2.4 device-independent
+        // px at the hero distance, growing only when the camera is close.
+        float sz = (0.9 + aSeed * 0.9) * (1.0 - s * 0.45) * (9.0 / max(-mvPos.z, 0.1));
+        gl_PointSize = clamp(sz, 0.8, 4.0) * u_dpr;
+        // OBSERVATION BEATS MODEL: a model wind mote must not sit on top of an
+        // observed disc pixel. Fade by the impact parameter of its own
+        // sightline — gone where the ray meets the photosphere, back by 1.3 R.
+        vec3  rdW = normalize(pos - cameraPosition);
+        vOffDisk  = smoothstep(1.0, 1.3, length(cross(cameraPosition, rdW)));
     }
 `;
 const solarWindFS = /* glsl */`
     varying float vProgress;
     varying vec3  vColor;
     varying float vDensBoost;
+    varying float vOffDisk;
     void main() {
         vec2  uv = gl_PointCoord - 0.5;
         float d  = length(uv);
@@ -6468,7 +7001,7 @@ const solarWindFS = /* glsl */`
         float fade  = 1.0 - pow(vProgress, 2.2);   // fade out with distance
         // Live density boosts opacity: higher particle density → more visible stream
         float densOp = 0.82 + vDensBoost * 0.38;
-        float alpha  = (core * 0.62 + glow * 0.35) * fade * 0.60 * densOp;
+        float alpha  = (core * 0.62 + glow * 0.35) * fade * 0.60 * densOp * vOffDisk;
         gl_FragColor = vec4(vColor, alpha);
     }
 `;
@@ -6929,14 +7462,39 @@ const sepFS = /* glsl */`
 
 // ─── POSITION-ACCURATE FLARE FLASH POOL ──────────────────────────────────────
 // Bright expanding bloom rings that fire at the exact AR heliographic position.
+// THE FLASH IS A LIGHT, NOT A DISC (2026-11). It was an untextured white
+// RingGeometry that grew to 0.28 R☉ at opacity 0.5 — a flat pale plate over
+// the site, the largest thing in every flare frame. It is now a radial
+// falloff (tight core, long skirt) written ABOVE 1.0 into the HDR buffer, so
+// the post chain's bloom and exposure do the glowing; the mesh, the pool and
+// the per-frame placement (which the flare-geometry gate reads) are unchanged.
 const FLARE_POOL_SIZE = 3;
+const FLARE_FLASH_R = 0.11;                 // R☉ at scale 1 — the skirt's reach, not a hard edge
 const flareFlashes = [];
+function _flashFalloffTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0.00, 'rgba(255,255,255,1)');
+    g.addColorStop(0.06, 'rgba(255,255,255,0.90)');
+    g.addColorStop(0.16, 'rgba(255,255,255,0.36)');
+    g.addColorStop(0.36, 'rgba(255,255,255,0.10)');
+    g.addColorStop(0.66, 'rgba(255,255,255,0.022)');
+    g.addColorStop(1.00, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+}
 {
+    const flashTex = _flashFalloffTexture();
     for (let i = 0; i < FLARE_POOL_SIZE; i++) {
         const ring = new THREE.Mesh(
-            new THREE.RingGeometry(0.0, 0.06, 32),
+            new THREE.CircleGeometry(FLARE_FLASH_R, 48),
             new THREE.MeshBasicMaterial({
-                color: 0xffffff, transparent: true, opacity: 0,
+                color: 0xffffff, map: flashTex, transparent: true, opacity: 0,
                 depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
             })
         );
@@ -6953,8 +7511,10 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
     const flash   = flareFlashes.find(f => !f.userData.active) ?? flareFlashes[0];
     const peak    = cls === 'X' ? 1.2 : cls === 'M' ? 0.85 : 0.5;
     flash.userData = { active: true, t0: uniforms.u_time.value, lat: lat_deg || 0, lon: lon_deg || 0, peak, cls };
-    const col = cls === 'X' ? 0xffffff : cls === 'M' ? 0xffcc55 : 0xffee88;
-    flash.material.color.setHex(col);
+    // HDR emission: the core is several times display white so it blooms and
+    // pulls the exposure down, the way a flare kernel saturates a detector.
+    const hdr = cls === 'X' ? [5.2, 5.0, 5.6] : cls === 'M' ? [3.6, 2.9, 1.6] : [2.2, 2.0, 1.2];
+    flash.material.color.setRGB(hdr[0], hdr[1], hdr[2]);
     flash.visible = true;
 }
 
@@ -6974,7 +7534,41 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
 //       live-region / flare-list entry parsed at load).
 //   Returns { latDeg, lonDeg0 } for triggerPositionFlare / flyToRegion.
 const _Z_UP = new THREE.Vector3(0, 0, 1);
-const flareSite = { latRad: 0, lonRad0: 0, pilAngle: 0, cls: 'M', complex: false, set: false };
+const flareSite = { latRad: 0, lonRad0: 0, pilAngle: 0, cls: 'M', complex: false, chirality: 1, set: false };
+// ── THE FLARE'S SHAPE IS A MODEL (js/flare-geometry.js makeFlareModel) ──────
+// Every shape number on this page — the shader's ribbons, the 3D arcade, the
+// flare shot's framing — comes from `flareModel`. It is the shipped set unless
+// someone asks for another: `?flaremodel=v1` draws the laws shipped until
+// 2026-11-21 (the A/B, and the look gate's negative control), and
+// `__sun.setFlareModel({ shear: { onsetDeg: 70 } })` draws a candidate. How
+// good a model is, is measured by js/flare-realism.js — never judged here.
+let flareModel = FG.FLARE_MODEL;
+/** Upload the ribbons' shape at the flare's current age. The shader has no law of its own. */
+function _syncFlareShape() {
+    const t = uniforms.u_flare_t.value, cls = flareSite.cls;
+    uniforms.u_flare_sep.value      = flareModel.ribbonSeparation(t, cls);
+    uniforms.u_flare_wid.value      = flareModel.ribbonWidth(t);
+    uniforms.u_flare_alongVar.value = Math.pow(flareModel.ribbonAlongSigma(t, cls), 2);
+    uniforms.u_flare_decay.value    = flareModel.ribbonDecay(t);
+    const hk = flareModel.ribbonHook(t, cls);
+    uniforms.u_flare_hook.value.set(hk.s0, hk.rho, hk.sweep);
+    uniforms.u_flare_chi.value      = flareSite.chirality;
+}
+/** Swap the shape model: null → shipped, 'v1' / 'v2' → a named set, an object → overrides on the shipped set. */
+function setFlareModel(spec) {
+    flareModel = spec == null ? FG.FLARE_MODEL
+        : spec === 'v1' ? FG.makeFlareModel(null, FG.FLARE_SHAPE_V1)
+        : spec === 'v2' ? FG.makeFlareModel(null, FG.FLARE_SHAPE_V2)
+        : typeof spec.arcadeShells === 'function' ? spec
+        : FG.makeFlareModel({ id: 'candidate', ...spec });
+    flareArcade.setModel(flareModel);      // only ever called after the arcade exists (boot block below, or by hand)
+    flareRope.setModel(flareModel);
+    _ropePlumeOff = null;
+    _syncFlareShape();
+    return flareModel.id;
+}
+// A test / capture hook: hold BOTH flare clocks at one age (sim units), or null to release.
+let _flareHoldT = null;
 // Epoch-frame group for the site-anchored 3D layers (arcade, plume, HXR
 // kernels): animate() rotates it by FG.siteRotation(solarRotAngle, latRad).
 const _flareSiteGroup = new THREE.Group();
@@ -6982,8 +7576,35 @@ _flareSiteGroup.name = 'flare-site';
 scene.add(_flareSiteGroup);
 // The 3D post-flare arcade + eruptive plume (js/flare-arcade.js) — draws only
 // kernel numbers; PIL is the Joy's-law PRIOR unless the atlas supplies pairs.
-const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.0, heightScale: 1.0 });
+// 'ribbon': each loop is a camera-facing strand of physical width with an HDR
+// spine (js/flare-arcade.js header) — as 1 px lines the arcade read as a spring.
+const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.0, heightScale: 1.0,
+    style: 'ribbon', maxLoops: 23, plumeParticles: 420 });   // 23 stations along the PIL × the kernel's generations (nested arcade)
 _flareSiteGroup.add(flareArcade.group);
+// THE ERUPTING FLUX ROPE (js/flare-rope.js) — strands of the model's own field, feet inside the
+// ribbons' hooks, rising on the model's kinematics. Drawn only for a flare the director calls
+// eruptive (_flareEruption). NOT the owner-disabled spawnFluxRope tube / spawnEruptingProminence
+// bubble further down: those stay disabled; this was asked for on 2026-11-21.
+const flareRope = createFlareRope({ THREE, geometry: FG, sunRadius: 1.0, strands: 24, samples: 96 });
+_flareSiteGroup.add(flareRope.group);
+let _flareEruption = null;       // DIRECTOR.eruptionCall() for the flare on screen: { eruptive, basis, p }
+let _ropePlumeOff = null;        // last plume state this block set (it only writes on a change)
+/** How much of the rope's hot channel and of its filament material the current view shows. */
+function _ropeWeights() {
+    const vm = uniforms.u_viewMode.value;
+    if (vm < 0.5) return { hot: 0.35, cool: 1.0 };      // white light: the filament, in emission off the limb
+    if (vm < 1.5) return { hot: 0.15, cool: 1.0 };      // 304 Å: cool material
+    if (vm < 4.5) return { hot: 0.60, cool: 0.35 };     // 171 / 193 / 211 Å
+    if (vm < 5.5) return { hot: 1.00, cool: 0.10 };     // 131 Å: the hot channel
+    return { hot: 0, cool: 0 };                          // magnetogram: no emission to draw
+}
+// `?flow=0` — the A/B for plasma moving along the strands (loops filling and raining, the filament draining,
+// the current sheet under the rope): off = every strand lit end to end, as before 2026-11-22.
+if (new URLSearchParams(location.search).get('flow') === '0') { flareArcade.setFlowEnabled(false); flareRope.setFlowEnabled(false); }
+{   // `?flaremodel=v1|v2` — the shape model A/B (see flareModel above).
+    const want = (new URLSearchParams(location.search).get('flaremodel') || '').toLowerCase();
+    if (want === 'v1' || want === 'v2') setFlareModel(want);
+}
 
 // ── THE FLARE CLOCK (js/flare-dem.js) ─────────────────────────────────────
 //
@@ -7017,6 +7638,8 @@ function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {
     flareSite.latRad  = latRad;
     flareSite.lonRad0 = epoch ? lonRad : FG.epochLonFor(lonRad, solarRotAngle, latRad);
     flareSite.pilAngle = FG.pilAngleRad(latRad);
+    // Which way the flare is handed — the hemispheric helicity rule, a PRIOR like the PIL angle above.
+    flareSite.chirality = FG.helicityChirality(latRad);
     // A new site with a class is a new event: restart the cooling track.
     if (cls) _startFlareClock(cls);
     if (cls) flareSite.cls = String(cls)[0].toUpperCase();
@@ -7025,15 +7648,114 @@ function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {
     uniforms.u_flare_lat.value = latRad;
     uniforms.u_flare_lon.value = FG.siteLonAt(flareSite.lonRad0, solarRotAngle, latRad);
     uniforms.u_flare_pil.value = flareSite.pilAngle;
+    _syncFlareShape();
     flareArcade.setSite({
         latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle,
-        cls: flareSite.cls, complex: flareSite.complex, pairs: pairs ?? null,
+        cls: flareSite.cls, complex: flareSite.complex, chirality: flareSite.chirality, pairs: pairs ?? null,
     });
+    flareRope.setSite({ latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle, cls: flareSite.cls, chirality: flareSite.chirality });
     return { latDeg: latRad * 180 / Math.PI, lonDeg0: flareSite.lonRad0 * 180 / Math.PI };
+}
+
+// ── THE ONE WAY A FLARE STARTS (js/sun-flare-director.js) ──────────────────
+// The live SWPC handler (two branches), the flare list, the analysis popup
+// and the test hook each used to do their own subset of what follows. `ev` is
+// a DIRECTOR.normalizeFlare() event.
+//   lonIsEpoch — ev.lonDeg is already an EPOCH Stonyhurst longitude (a list /
+//                region entry parsed at load) rather than where it is NOW
+//   fromOnset  — re-run it from t = 0 (a REPLAY, captioned as one) instead of
+//                placing it at its real age
+//   rate       — how fast the flare's two clocks run against the wall clock
+//                (printed in the caption whenever it is not 1)
+// A flare with no reported location is never placed (returns null).
+let _flareEvent  = null;     // the event on screen
+let _flareClock  = null;     // when ITS cooling track peaks in the hot and cool channels
+let _flareReplay = false;
+let _flareRate   = 1;        // multiplier on BOTH flare clocks (ribbon sim-units and cooling seconds)
+function playFlare(ev, { lonIsEpoch = false, fromOnset = false, flash = true, fly = false, rate = 1 } = {}) {
+    if (!ev || !ev.located) return null;
+    const latRad = ev.latDeg * Math.PI / 180, lonRad = ev.lonDeg * Math.PI / 180;
+    const ageS = fromOnset ? 0 : Math.max(0, ev.ageS ?? 0);
+    const site = setFlareSite(latRad, lonRad, { epoch: lonIsEpoch, cls: ev.cls });   // also restarts the cooling track
+    // A flare reported late STARTS late on both clocks: NOAA's list runs
+    // minutes behind, and twenty minutes in the plasma is in 171, not 131.
+    _flareElapsedS = ageS;
+    uniforms.u_flare_t.value = DIRECTOR.simAgeFor(ageS);
+    _flareRate = Math.max(0, +rate || 1);
+    if (ageS < 180) {
+        const flashInt = ev.letter === 'X' ? 1.0 : ev.letter === 'M' ? 0.65 : 0.30;
+        uniforms.u_flare_intensity.value = Math.max(uniforms.u_flare_intensity.value, flashInt);
+    }
+    try { _refreshFlareRibbons(latRad, flareSite.lonRad0); } catch (e) {}
+    if (flash) { try { triggerPositionFlare(site.latDeg, site.lonDeg0, ev.letter); } catch (e) {} }
+    if (ageS < 600) {
+        try { eruptNearestProminence(latRad, flareSite.lonRad0); } catch (e) {}
+        try { spawnEruptingProminence(latRad, flareSite.lonRad0, ev.letter); } catch (e) {}
+    }
+    _flareEvent  = ev;
+    _flareEruption = DIRECTOR.eruptionCall(ev);      // is there a reason to draw an erupting rope? (and which)
+    _flareReplay = fromOnset && (ev.ageS ?? 0) > 120;
+    _flareClock  = DIRECTOR.channelClock(ev.flux, EUV_CHANNELS, channelResponseAt);
+    _flareCaptionAt = 0;
+    if (sunCam) sunCam.onFlare(ev, { fly });
+    return site;
+}
+/** Where the flare on screen is in its life — null when there is none, or it has faded. */
+function flarePhaseNow() {
+    if (!_flareEvent || !_flareClock) return null;
+    return DIRECTOR.phaseAt(_flareElapsedS, _flareClock,
+        { flux: _flareEvent.flux, channels: EUV_CHANNELS, response: channelResponseAt, track: _flareTrack });
+}
+let _flareCaptionAt = 0;
+/** 2 Hz: the caption under the provenance chip. Every clause is the director's. */
+function _tickFlareCaption(nowMs) {
+    if (nowMs - _flareCaptionAt < 500) return;
+    _flareCaptionAt = nowMs;
+    const el = document.getElementById('flare-caption');
+    if (!el) return;
+    const ph = flarePhaseNow();
+    if (!ph || ph.id === 'faded' || uniforms.u_showFlares.value < 0.5) {
+        if (ph && ph.id === 'faded') { _flareEvent = null; _flareRate = 1; if (sunCam) sunCam.onFlareEnd(); }
+        if (!el.hidden) el.hidden = true;
+        return;
+    }
+    // A non-shipped shape model is an A/B view: the caption says which one is drawn.
+    const txt = DIRECTOR.caption(_flareEvent, ph, _flareElapsedS, { replay: _flareReplay, simSpeed: +(simSpeed * _flareRate).toFixed(2), eruption: _flareEruption })
+        + (flareModel === FG.FLARE_MODEL ? '' : ` · shape model: ${flareModel.id}`);
+    const label = el.querySelector('.fc-text');
+    if (label.textContent !== txt) label.textContent = txt;
+    const btn = el.querySelector('#fc-view');
+    const mode = ph.channel ? _VIEW_MODE_FOR_CHANNEL[ph.channel] : null;
+    const cur = String(parseFloat(document.getElementById('view-mode')?.value) || 0);
+    const want = mode != null && String(mode) !== cur;
+    if (btn.hidden === want) btn.hidden = !want;
+    if (want) { btn.textContent = 'View ' + _VIEW_MODE_LABEL[mode]; btn.dataset.mode = String(mode); }
+    if (el.hidden) el.hidden = false;
+    if (sunCam) sunCam.onFlarePhase(ph, mode);
+}
+// channel → the #view-mode value that shows it. 94 Å has no view on this page;
+// its nearest neighbour in temperature that does is 131.
+const _VIEW_MODE_FOR_CHANNEL = Object.freeze({ '304': 1, '171': 2, '193': 3, '211': 4, '131': 5, '94': 5 });
+const _VIEW_MODE_LABEL = Object.freeze({ 0: 'white light', 1: '304 Å', 2: '171 Å', 3: '193 Å', 4: '211 Å', 5: '131 Å' });
+function _setViewMode(mode) {
+    const sel = document.getElementById('view-mode');
+    if (!sel || String(sel.value) === String(mode)) return;
+    sel.value = String(mode);
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 /** Per-frame: carry the site to the current frame and drive the arcade. */
 function _tickFlareSite() {
+    if (_flareHoldT != null) {
+        uniforms.u_flare_t.value = _flareHoldT;
+        _flareElapsedS = _flareHoldT / DIRECTOR.SIM_UNITS_PER_S;
+    } else if (_flareOnsetMs != null) {
+        // ONE FLARE CLOCK. The ribbon clock IS the cooling clock, in sim units. It used to advance by a fixed
+        // amount per FRAME (0.6 units/s at 60 fps, 0.02 at 2 fps) beside a cooling clock in wall seconds, so
+        // the two agreed at exactly one frame rate and a camera could not be timed against either.
+        uniforms.u_flare_t.value = Math.min(999, _flareElapsedS * DIRECTOR.SIM_UNITS_PER_S);
+    }
+    _syncFlareShape();
     if (!flareSite.set) return;
     uniforms.u_flare_lon.value = FG.siteLonAt(flareSite.lonRad0, solarRotAngle, flareSite.latRad);
     _flareSiteGroup.rotation.y = FG.siteRotation(solarRotAngle, flareSite.latRad);
@@ -7042,6 +7764,10 @@ function _tickFlareSite() {
         intensity: uniforms.u_flare_intensity.value,
         showFlares: uniforms.u_showFlares.value,
     });
+    const ropeOn = !!(_flareEruption && _flareEruption.eruptive) && flareModel.params.rope.speed > 0;
+    flareRope.update({ tFlare: uniforms.u_flare_t.value, showFlares: uniforms.u_showFlares.value, eruptive: ropeOn, weights: _ropeWeights() });
+    // The particle plume stood in for the eruption before there was a rope; with a rope drawn it stands down.
+    if (_ropePlumeOff !== ropeOn) { _ropePlumeOff = ropeOn; flareArcade.setPlumeEnabled(!ropeOn); }
 }
 
 // ─── CORONAL LOOPS ────────────────────────────────────────────────────────────
@@ -9342,6 +10068,7 @@ function _applyNanoChannel(m) {
 document.getElementById('view-mode')?.addEventListener('change', e => {
     const m = parseFloat(e.target.value) || 0;
     uniforms.u_viewMode.value = m;
+    _expoNoteFraming(2.0);     // another channel is another picture, not a brighter Sun
     _applyNanoChannel(m);
     _refreshNanoflares();      // the readout names the channel the population is drawn in
     sunObserved?.setChannel(VIEW_MODE_CHANNEL[m] || 'white');   // observed frame follows the channel
@@ -9367,10 +10094,12 @@ function resize() {
     const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
+    uniforms.u_dpr.value = renderer.getPixelRatio();
     composer.setSize(w, h);
     if (sunPost) sunPost.setSize(w, h);
     if (coronaAccum) coronaAccum.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
+    if (sunCam) sunCam.reframe();      // the safe frame is measured against the new size
 }
 new ResizeObserver(resize).observe(canvasWrap);
 resize();
@@ -9408,13 +10137,17 @@ function animate() {
     // been advanced to nowMs a few lines up, so reusing it gives dt = 0 and a
     // cascade that never advances.
     if (_flareOnsetMs != null) {
-        if (_flareLastMs != null) _flareElapsedS += Math.min(1.0, (nowMs - _flareLastMs) / 1000) * simSpeed;
+        if (_flareLastMs != null) _flareElapsedS += Math.min(1.0, (nowMs - _flareLastMs) / 1000) * simSpeed * _flareRate;
         _flareLastMs = nowMs;
     }
     if (sunObserved) sunObserved.tick();
     // The plane is pinned to the observer; only its off-axis weight tracks the
     // camera (js/sun-offlimb.js header, point 3).
     if (sunOffLimb) sunOffLimb.update(camera.position);
+    uniforms.u_limbObs.value = sunOffLimb ? sunOffLimb.limbWeight : 0.0;   // the model limb fringe yields to the observed one
+    _tickObsDetail();
+    _tickCoronagraph();
+    _tickExposureFraming();
 
     // Phase 2 prominence bundles — re-classify each frame so EP state machines
     // and class transitions evolve smoothly. Then tick uniforms (time, camera
@@ -9739,8 +10472,8 @@ function animate() {
         fr.mesh.scale.setScalar(growFactor);
     }
 
-    // Flare ribbon timer — increments each frame; capped at 999
-    if (uniforms.u_flare_t.value < 999) uniforms.u_flare_t.value += dt;
+    // (The ribbon clock is no longer advanced per frame here: _tickFlareSite slaves it to the cooling clock.)
+    _tickFlareCaption(nowMs);
 
     // Flare flashes — position-accurate bloom following photosphere rotation
     flareFlashes.forEach(ring => {
@@ -9761,13 +10494,20 @@ function animate() {
         ring.position.copy(pos);
         ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
         // Animate: fast expand, sharp fade
+        // A fast rise to peak, then a long exponential tail: the impulsive
+        // phase of a flare light curve, not a linear fade.
         const frac  = elapsed / duration;
-        const scale = 0.4 + frac * 3.5;
-        ring.scale.setScalar(scale * ring.userData.peak);
-        ring.material.opacity = Math.max(0, Math.pow(1 - frac, 1.6) * ring.userData.peak * 0.5);
+        const rise  = Math.min(1, elapsed / 0.18);
+        ring.scale.setScalar((0.75 + 0.55 * frac) * ring.userData.peak);
+        ring.material.opacity = Math.max(0, rise * Math.exp(-frac * 3.2) * (1 - frac) * Math.min(1, ring.userData.peak));
     });
 
+    // A flight, if one is running, sets the pose BEFORE the controls read it.
+    // One-shot: when it ends (or the user touches the controls) nothing holds
+    // the camera (js/sun-camera.js rule 2).
+    if (sunCam) sunCam.tick();
     controls.update();
+    _tickSpaceOcclusion();
     // Phase 4.5 — drive ambient + flare bloom independently.
     //
     //   Ambient: gentle breathing with activity + Kp. No flare component
@@ -9803,11 +10543,18 @@ document.querySelectorAll('.sec-hd').forEach(hd => {
 });
 
 // CAMERA
+// Distances written for the 50° lens, carried to the current one so each
+// preset frames the disc as it always did. `default` is the measured hero pose.
 const CAMS = {
     default: [0, 0, 6],
     close:   [0, 0, 2.0],
     wide:    [0, 3, 14],
 };
+function _camPreset(k) {
+    const v = new THREE.Vector3(...CAMS[k]);
+    const d = CAM.equivalentDistance(v.length(), CAM.LEGACY_FOV_DEG, CAM.HERO_FOV_DEG);
+    return v.setLength(Math.min(d, controls.maxDistance));
+}
 function setCam(k) {
     // If the smart tour is running, manual cam input cancels it.
     // smartTour is var-hoisted; guard with `&&` to avoid TDZ on early calls.
@@ -9818,7 +10565,9 @@ function setCam(k) {
     }
     document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
     document.getElementById('cam-' + k)?.classList.add('active');
-    camera.position.set(...CAMS[k]); controls.target.set(0,0,0); controls.update();
+    if (sunCam) { sunCam.cancel('preset'); sunCam.restoreLens(); }
+    if (k === 'default' && sunCam) { sunCam.goHero({ fly: false }); return; }
+    camera.position.copy(_camPreset(k)); controls.target.set(0,0,0); controls.update();
 }
 document.getElementById('cam-default').addEventListener('click', () => setCam('default'));
 document.getElementById('cam-close').addEventListener('click',   () => setCam('close'));
@@ -10337,25 +11086,14 @@ function flyToRegion(lat, lon, distR = 3.0, frame = 0.0, dur = 900) {
     // (lat, lon) are EPOCH Stonyhurst degrees (a live-region or flare-list
     // entry); carry them to the current frame at this latitude's own rate.
     const lnr = FG.siteLonAt(lon * Math.PI / 180, solarRotAngle, lr);
-    const dir = new THREE.Vector3(
-        Math.cos(lr) * Math.sin(lnr),
-        Math.sin(lr),
-        Math.cos(lr) * Math.cos(lnr)
-    ).normalize();
-    const arPos = dir.clone();                      // unit-sphere AR position
-    const dest  = dir.clone().multiplyScalar(distR);
-    const tgtAt = arPos.clone().multiplyScalar(frame);   // lerp(centre, AR)
-    const start = camera.position.clone();
-    const startTgt = controls.target.clone();
-    const t0    = performance.now();
-    (function step(now) {
-        const raw  = Math.min((now - t0) / dur, 1);
-        const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
-        camera.position.lerpVectors(start, dest, ease);
-        controls.target.lerpVectors(startTgt, tgtAt, ease);
-        controls.update();
-        if (raw < 1) requestAnimationFrame(step);
-    })(performance.now());
+    // `distR` was written for the 50° lens; frame the region the same way now.
+    const dist = CAM.equivalentDistance(distR, CAM.LEGACY_FOV_DEG, CAM.HERO_FOV_DEG);
+    const site = CAM.sphToVec(lnr, lr, 1);
+    // SPHERICAL, never a straight line between two camera positions: a hop to
+    // a far-side region used to lerp the camera THROUGH the Sun
+    // (js/sun-camera.js rule 1). az/el are Stonyhurst lon/lat in this scene.
+    const to = CAM.makePose({ az: lnr, el: lr, r: dist, target: site.map(x => x * frame), fov: CAM.HERO_FOV_DEG });
+    sunCam.fly(CAM.hop(sunCam.pose(), to, Math.max(0.35, dur / 1000)), { name: 'region' });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -10550,17 +11288,8 @@ var smartTour = (() => {
         hideOverlay();
         // Restore previous view
         if (savedCamPos) {
-            const start = camera.position.clone();
-            const startTgt = controls.target.clone();
-            const t0 = performance.now();
-            (function step(now) {
-                const raw = Math.min((now - t0) / 800, 1);
-                const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
-                camera.position.lerpVectors(start, savedCamPos, ease);
-                controls.target.lerpVectors(startTgt, savedTarget, ease);
-                controls.update();
-                if (raw < 1) requestAnimationFrame(step);
-            })(performance.now());
+            const back = CAM.poseFromCamera(savedCamPos.toArray(), savedTarget.toArray(), CAM.HERO_FOV_DEG);
+            sunCam.fly(CAM.hop(sunCam.pose(), back, 0.8), { name: 'tour-restore' });
         }
     }
 
@@ -10633,20 +11362,10 @@ function replayRecentFlares() {
     if (!recent.length) return;
 
     recent.forEach(f => {
-        const c = parseLoc(f.loc);
-        if (!c) return;
-        const clsCh = (f.cls || 'C')[0].toUpperCase();
-        const lat_r = c.lat * Math.PI / 180;
-        const lon_r = c.lon * Math.PI / 180;
-        const ageMs = Date.now() - new Date(f.time).getTime();
-        const ageSimUnits = Math.min(850, (ageMs / 1000) * 0.35);   // compress real time to sim-time
-
-        // Point every flare visual at this site (a NOAA location received
-        // now → stored in epoch coordinates) with appropriate aging; the 3D
-        // ring flash is visual-only (no intensity — it's historical).
-        const site = setFlareSite(lat_r, lon_r, { cls: clsCh });
-        triggerPositionFlare(site.latDeg, site.lonDeg0, clsCh);
-        uniforms.u_flare_t.value   = ageSimUnits;
+        // A NOAA location received now, placed at its real age through the
+        // one playFlare() (js/sun-flare-director.js).
+        const evt = DIRECTOR.normalizeFlare(f, { nowMs: Date.now() });
+        if (evt) playFlare(evt);
     });
 }
 
@@ -11287,23 +12006,24 @@ window.addEventListener('swpc-update', (ev) => {
             if (_shownFlareKeys.has(key)) return;
             _shownFlareKeys.add(key);
             if (_firstFlare) return;   // seed only: don't fire historical flares at load
-            const loc = parseLoc(f.location);
-            if (!loc) return;
-            const clsCh = (f.cls ?? f.parsed?.letter ?? 'C')[0]?.toUpperCase() ?? 'C';
-            const ageMs  = Date.now() - ft;
-            const simAge = Math.min(800, (ageMs / 1000) * 0.35);
-            // Place 3D ring flash at this exact NOAA location (received now →
-            // epoch coordinates so it co-rotates from here on)
-            const fLat = loc.lat * Math.PI / 180;
-            const fLon0 = FG.epochLonFor(loc.lon * Math.PI / 180, solarRotAngle, fLat);
-            triggerPositionFlare(loc.lat, fLon0 * 180 / Math.PI, clsCh);
-            // Also drive every flare visual to this site if it's the newest flare
-            if (!sw.new_major_flare && ft === Math.max(...sw.recent_flares.map(x => {
+            // ONE event shape, ONE way to start it (js/sun-flare-director.js).
+            // The location is where the site is NOW (just received) — playFlare
+            // converts it to epoch coordinates so it co-rotates from here on.
+            const evt = DIRECTOR.normalizeFlare(f, { nowMs: Date.now() });
+            if (!evt || !evt.located) return;
+            const newest = ft === Math.max(...sw.recent_flares.map(x => {
                 const xt = x.time instanceof Date ? x.time.getTime() : new Date(x.time).getTime();
                 return xt;
-            }))) {
-                setFlareSite(fLat, loc.lon * Math.PI / 180, { cls: clsCh });
-                uniforms.u_flare_t.value   = simAge;
+            }));
+            if (!sw.new_major_flare && newest) {
+                // The newest flare drives every flare visual, at its real age.
+                playFlare(evt);
+                _offerFlare(evt);
+            } else {
+                // Older ones in the same poll only mark their site.
+                const fLat = evt.latDeg * Math.PI / 180;
+                const fLon0 = FG.epochLonFor(evt.lonDeg * Math.PI / 180, solarRotAngle, fLat);
+                triggerPositionFlare(evt.latDeg, fLon0 * 180 / Math.PI, evt.letter);
             }
         });
     }
@@ -11321,22 +12041,11 @@ window.addEventListener('swpc-update', (ev) => {
             const latDeg = lat_r * 180 / Math.PI;
             const lonDeg = lon_r * 180 / Math.PI;
 
-            // ── Flare ribbon shader — reset timer to draw ribbons on surface ──
-            // (received now → epoch coordinates; drives shaders, arcade, ribbons)
-            const site = setFlareSite(lat_r, lon_r, { cls: clsCh });
-            uniforms.u_flare_t.value   = 0.0;   // reset: ribbons appear immediately
-            _refreshFlareRibbons(lat_r, flareSite.lonRad0);
-
-            // ── Position-accurate 3D ring flash ──────────────────────────────
-            triggerPositionFlare(site.latDeg, site.lonDeg0, clsCh);
-
-            // ── Erupting prominence near this flare site ──────────────────────
-            eruptNearestProminence(lat_r, lon_r);
-
-            // ── CME bubble rising from surface ────────────────────────────────
-            spawnEruptingProminence(lat_r, lon_r, clsCh);
-
-            // Brief bloom spike (already handled by flareBoost in animate loop)
+            // Received now ⇒ onset now. Site, both clocks, ribbons, flash,
+            // prominence and plume all come from the one playFlare().
+            const evt = DIRECTOR.normalizeFlare({ cls: sw.flare_class ?? cls, latDeg, lonDeg,
+                location: sw.flare_location, active_region: sw.flare_region }, { nowMs: Date.now() });
+            if (evt) { playFlare(evt, { fromOnset: true }); _offerFlare(evt); }
 
             // ── Smart tour: lock onto this flare (M/X only) ──────────────────
             try { smartTour.interruptOnFlare(latDeg, lonDeg, sw.flare_class, sw.flare_region); }
@@ -11804,10 +12513,10 @@ function showRegionAnalysis(regData) {
             const flat = +el.dataset.lat, flon = +el.dataset.lon;
             if (!isNaN(flat) && !isNaN(flon)) {
                 flyToRegion(flat, flon);
-                // Flare-list entries were parsed at load: epoch coordinates.
-                setFlareSite(flat * Math.PI / 180, flon * Math.PI / 180, { epoch: true, cls: el.dataset.cls || 'C' });
-                uniforms.u_flare_t.value   = 50;   // show ribbons at a partially-aged state
-                triggerPositionFlare(flat, flon, el.dataset.cls || 'C');
+                // Flare-list entries were parsed at load: epoch coordinates. A past
+                // flare, re-run from onset through the ONE entry point (REPLAY).
+                playFlare(DIRECTOR.normalizeFlare({ cls: el.dataset.cls || 'C', latDeg: flat, lonDeg: flon },
+                    { nowMs: Date.now(), source: 'region' }), { lonIsEpoch: true, fromOnset: true, rate: FLARE_REPLAY_RATE });
             }
         });
     });
@@ -11874,13 +12583,18 @@ function showFlareAnalysis(f) {
             <div class="sap-pot-fill" style="width:${barPct}%;background:${barCol}"></div>
         </div>
         <button class="sap-fly-btn" id="sap-fly">⊙ Fly to ${f.loc || 'flare site'}</button>
+        <button class="sap-fly-btn" id="sap-replay" title="Re-run this flare from onset at ×${FLARE_REPLAY_RATE} — ribbons, arcade and the cooling cascade — with the camera on it">▶ Replay from onset (×${FLARE_REPLAY_RATE})</button>
     `;
 
+    // (lat, lon) are EPOCH Stonyhurst degrees — a flare-list entry.
+    const evt = DIRECTOR.normalizeFlare({ ...f, latDeg: lat, lonDeg: lon }, { nowMs: Date.now() });
     document.getElementById('sap-fly').addEventListener('click', () => {
         flyToRegion(lat, lon);
-        setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: tc });   // flare-list entry: epoch
-        uniforms.u_flare_t.value   = ageMs != null ? Math.min(800, (ageMs / 1000) * 0.35) : 120;
-        triggerPositionFlare(lat, lon, tc);
+        if (evt) playFlare(evt, { lonIsEpoch: true });          // at its real age
+    });
+    document.getElementById('sap-replay')?.addEventListener('click', () => {
+        // Re-run it from onset, compressed, with the camera on it — captioned REPLAY.
+        if (evt) playFlare(evt, { lonIsEpoch: true, fromOnset: true, fly: true, rate: FLARE_REPLAY_RATE });
     });
 
     _sapEl.classList.add('show');
@@ -11944,12 +12658,10 @@ document.getElementById('flare-list').addEventListener('click', e => {
     }
     // Drive shader ribbon to this flare site with its real age
     const f = liveFlares[fidx];
-    if (f) {
-        const ageMs  = f.time ? Date.now() - new Date(f.time).getTime() : 0;
-        const simAge = Math.min(800, (ageMs / 1000) * 0.35);
-        setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: (f.cls ?? 'C')[0] });   // flare-list entry: epoch
-        uniforms.u_flare_t.value   = simAge;
-        triggerPositionFlare(lat, lon, (f.cls ?? 'C')[0].toUpperCase());
+    if (f && !isNaN(lat) && !isNaN(lon)) {
+        // flare-list entry: epoch coordinates, placed at its real age
+        const evt = DIRECTOR.normalizeFlare({ ...f, latDeg: lat, lonDeg: lon }, { nowMs: Date.now() });
+        if (evt) playFlare(evt, { lonIsEpoch: true });
     }
 });
 
@@ -12673,11 +13385,15 @@ try {
     initSunWatch({
         THREE, scene,
         flyToRegion,
-        onFlareSelect: (lat, lon, cls) => {
+        // A row of the 7-day ledger is a PAST flare: it goes through the ONE
+        // entry point and is re-run from onset, captioned REPLAY with its rate.
+        // (It used to set the site and jump the ribbon clock to 50 by hand —
+        // the seventh way a flare could start, with no cooling track or caption.)
+        onFlareSelect: (lat, lon, cls, more = {}) => {
             flyToRegion(lat, lon);
-            setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: (cls || 'C')[0] });   // ledger entry: epoch
-            uniforms.u_flare_t.value   = 50;
-            triggerPositionFlare(lat, lon, (cls || 'C')[0].toUpperCase());
+            const evt = DIRECTOR.normalizeFlare({ cls: more.cls || cls || 'C', latDeg: lat, lonDeg: lon, time: more.timeMs ?? undefined },
+                { nowMs: Date.now(), source: 'sun-watch' });
+            playFlare(evt, { lonIsEpoch: true, fromOnset: true, rate: FLARE_REPLAY_RATE });   // ledger entry: epoch longitude
         },
         getLiveFlares: () => liveFlares,
         registerRotatingGroup: (g) => { scene.add(g); _sunWatchGroups.push(g); },
@@ -12717,6 +13433,328 @@ try {
     console.warn('[sun] CME train overlay failed to mount:', err);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  CAMERA — hero framing, one-shot flights, Cinematic mode   (js/sun-camera.js)
+// ═══════════════════════════════════════════════════════════════════════════
+// The kernel is PURE and node-gated; this block only measures the page, applies
+// poses and owns the DOM. Three rules it must keep (each is the kernel's):
+//   • a flight is one-shot — the controls' 'start' event (any drag, scroll or
+//     pinch) cancels it and nothing eases the camera back;
+//   • framing is MEASURED — the Sun sits in the unobstructed rectangle of the
+//     canvas (setViewOffset), at a distance derived from the lens and that
+//     rectangle; the user's own zoom is never overwritten by a re-measure;
+//   • every shot starts from where the camera IS.
+// `sunCam` is a `var` on purpose: animate(), resize() and the SDO callback run
+// before this line executes and guard on it (the TDZ scar — a `let` here
+// would abort the whole page module).
+const FLARE_REPLAY_RATE = 40;        // a replay compresses the flare's own clocks; printed in its caption
+var sunCam = (() => {
+    const nowS = () => performance.now() / 1000;
+    const CHROME = ['#hud', '#sun-watch-dock', '#sun-provenance', '#btn-panel-open', '#btn-sdo', '#btn-sw', '#btn-cine',
+                    '#panel.open', '#sdo-drawer.open', '#smart-tour-overlay.show', '#flare-caption', '#cine-hud', '.cine-bar'];
+    let flight = null, flightDone = null, flightName = null, flightClock = nowS;
+    let b0 = 0, heroDistance = camera.position.length(), safe = null;
+    let userMoved = false;                 // the user has zoomed/orbited since the last fit
+    const cine = { on: false, paused: false, order: [], idx: -1, limbSide: 0, savedView: null, savedLens: false,
+                   savedRate: 1, autoChannel: true, flareShown: null, relock: false };
+
+    function chromeRects() {
+        const host = canvasWrap.getBoundingClientRect();
+        const out = [];
+        for (const sel of CHROME) for (const el of document.querySelectorAll(sel)) {
+            if (el.hidden) continue;
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
+            if (el.classList.contains('cine-bar') && !cine.on) continue;      // bars are invisible outside Cinematic
+            const r = el.getBoundingClientRect();
+            if (r.width < 2 || r.height < 2) continue;
+            out.push({ left: r.left - host.left, top: r.top - host.top, right: r.right - host.left, bottom: r.bottom - host.top });
+        }
+        return out;
+    }
+    /** Measure the safe frame, move the principal point into it, and derive the hero distance. */
+    function reframe() {
+        const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
+        if (!w || !h) return null;
+        safe = CAM.safeFrame({ w, h }, chromeRects());
+        if (Math.abs(safe.offsetX) < 0.5 && Math.abs(safe.offsetY) < 0.5) camera.clearViewOffset();
+        else camera.setViewOffset(w, h, -safe.offsetX, -safe.offsetY, w, h);
+        heroDistance = CAM.heroFraming({ w, h }, safe, { fovDeg: CAM.HERO_FOV_DEG }).distance;
+        if (!userMoved && !flight && !cine.on) applyPose(heroPose());      // still on the load pose: keep it fitted
+        return safe;
+    }
+    function heroPose() { return CAM.heroPose({ b0Rad: b0, distance: heroDistance }); }
+    function pose() { return CAM.poseFromCamera(camera.position.toArray(), controls.target.toArray(), camera.fov); }
+    function applyPose(p) {
+        const v = CAM.posePosition(p);
+        camera.position.set(v[0], v[1], v[2]);
+        controls.target.set(p.target[0], p.target[1], p.target[2]);
+        if (Math.abs(camera.fov - p.fov) > 1e-4) { camera.fov = p.fov; camera.updateProjectionMatrix(); }
+        camera.lookAt(controls.target);
+    }
+    function restoreLens() {
+        if (Math.abs(camera.fov - CAM.HERO_FOV_DEG) > 1e-4) { camera.fov = CAM.HERO_FOV_DEG; camera.updateProjectionMatrix(); }
+    }
+    // `clock` is what the flight's key times are measured on. Wall seconds for every shot but one: a shot
+    // that FOLLOWS the model (the eruption) reads the flare clock (CAM.followClock), because that clock is
+    // deliberately not the wall clock (it caps a long frame at 1 s) and a camera on the wall ran ahead of
+    // the rope on a slow renderer. Either way the controls' 'start' event cancels it.
+    function fly(keys, { name = 'flight', done = null, clock = null } = {}) {
+        if (flight) flight.cancel();
+        flightClock = clock || nowS;
+        flight = new CAM.Flight(keys, { name, startS: flightClock() });
+        flightDone = done; flightName = name;
+    }
+    function cancel(why = 'user') {
+        if (!flight) return false;
+        flight.cancel(); flight = null; flightDone = null;
+        if (why === 'user' && cine.on && !cine.paused) setPaused(true);     // the user took the camera: the sequence waits
+        return true;
+    }
+    function tick() {
+        if (!flight) return;
+        const sample = flight.sample(flightClock());
+        if (sample.pose) applyPose(sample.pose);
+        if (sample.done) { const cb = flightDone; flight = null; flightDone = null; if (cb) cb(); }
+    }
+    function goHero({ fly: doFly = true } = {}) {
+        userMoved = false;
+        if (!doFly) { applyPose(heroPose()); controls.update(); return; }
+        fly(CAM.hop(pose(), heroPose()), { name: 'hero' });
+    }
+    function setB0(v) {
+        b0 = +v || 0;
+        if (!userMoved && !flight && !cine.on) { applyPose(heroPose()); controls.update(); }
+    }
+
+    // ── Shots ──────────────────────────────────────────────────────────────
+    function have() {
+        const ph = flarePhaseNow();
+        return {
+            offLimb: !!(sunOffLimb && sunOffLimb.enabled && sunOffLimb.getState?.().mode !== 'off' && (sunOffLimb.frames?.size ?? 0) > 0
+                        && [...sunOffLimb.frames.values()].some(f => f.ok && f.tex)),
+            coronagraph: _coroDrawn(),
+            flare: !!(ph && ph.id !== 'faded' && flareSite.set && uniforms.u_showFlares.value > 0.5),
+        };
+    }
+    function shotKeys(name) {
+        const from = pose();
+        const basis = observerBasis(b0);
+        if (name === 'approach') return CAM.approachShot(from, heroPose());
+        if (name === 'limb') {
+            // East limb, then west on the next pass: 55°→125° and 235°→305° position angle.
+            const base = (cine.limbSide++ % 2) ? 235 : 55;
+            return CAM.limbPanShot(from, { basis, pa0: base * CAM.DEG, pa1: (base + 70) * CAM.DEG });
+        }
+        if (name === 'flare') {
+            const site = FG.sitePositionAt(flareSite.latRad, flareSite.lonRad0, solarRotAngle);
+            // Framed to THIS flare's size: the ribbons' 1/e length, from the kernel.
+            const length = 2 * flareModel.ribbonLength0(flareSite.cls);
+            // AN ERUPTIVE FLARE: pull back with the rope. Only when the rope will actually climb while the
+            // shot runs (a replay, or a wound-up sim speed) — at real time it rises for ten minutes, and a
+            // camera drifting out for ten minutes is not a shot.
+            const perWallS = DIRECTOR.SIM_UNITS_PER_S * simSpeed * _flareRate;          // sim units per wall second
+            const apexAt = (s) => 1 + flareModel.ropeApexHeight(uniforms.u_flare_t.value + s * perWallS, flareSite.cls);
+            const ropeOn = !!(_flareEruption && _flareEruption.eruptive) && flareModel.params.rope.speed > 0 && _flareHoldT == null;
+            // The follow runs until the rope reaches its fade radius or ERUPTION_FOLLOW_S, whichever is first
+            // (it was a fixed 40 s with a 1.35 R☉ test: a ×14 replay, whose rope is at 1.31 R☉ after 40 s and
+            // gone by 95 s, got the static close-up and erupted out of the top of the frame — measured).
+            const ERUPTION_FOLLOW_S = 100;
+            if (ropeOn && apexAt(0) < flareModel.params.rope.fadeR - 0.2 && apexAt(ERUPTION_FOLLOW_S) > 1.6) {
+                const keys = CAM.eruptionShot(from, { site, earth: basis.normal, cls: flareSite.cls, length, apexAt, maxApexR: flareModel.params.rope.fadeR, seconds: ERUPTION_FOLLOW_S });
+                // The keys are the rope's heights at FLARE-clock times; the flight reads that clock (playShot).
+                keys.clock = CAM.followClock({ model: () => uniforms.u_flare_t.value, wall: nowS, perShotS: perWallS });
+                return keys;
+            }
+            return CAM.flareShot(from, { site, earth: basis.normal, cls: flareSite.cls, length });
+        }
+        if (name === 'corona') {
+            // Frame each instrument to the field it is actually DRAWING (rOut is
+            // limited by the frame for C3), never to a typed radius.
+            const inst = (id, dflt) => (_coroState?.instruments || []).find(i => i.id === id)?.rOut ?? dflt;
+            return CAM.coronaShot(from, { b0Rad: b0, fov: CAM.HERO_FOV_DEG, c2Reach: inst('c2', 6), c3Reach: inst('c3', 26) });
+        }
+        if (name === 'orbit') return CAM.orbitShot({ ...from, fov: CAM.HERO_FOV_DEG, target: [0, 0, 0] }, { distance: heroDistance * 1.08 });
+        return CAM.hop(from, heroPose());
+    }
+    function shotNote(name) {
+        if (name === 'limb') return 'Long lens on the limb. The glow is the live SDO/AIA 304 + 131 Å frame, drawn on the plane of sky.';
+        if (name === 'corona') return 'SOHO/LASCO white-light coronagraphs, as observed: C2 (orange) to 6 R☉, C3 (blue) to ~26 R☉. The dark bar is the occulter pylon.';
+        if (name === 'orbit') return 'The Earth-facing half is the observed frame; the far side is the procedural model (15° grid).';
+        if (name === 'flare') return _flareEvent ? DIRECTOR.caption(_flareEvent, flarePhaseNow() ?? { id: 'faded' }, _flareElapsedS, { replay: _flareReplay, simSpeed: +(simSpeed * _flareRate).toFixed(2) }) : '';
+        return 'Down the Sun–Earth line: the view an Earth-orbiting observatory has.';
+    }
+    /** Fly one named shot from wherever the camera is. Used by Cinematic mode and by "▶ Watch". */
+    function playShot(name, { done = null } = {}) {
+        const keys = shotKeys(name);
+        if (name === 'corona') controls.maxDistance = CAM.MAX_DISTANCE_CORONAGRAPH;
+        fly(keys, { name, done, clock: keys.clock || null });
+        const st = document.getElementById('cine-shot'), nt = document.getElementById('cine-note');
+        if (st) st.textContent = CAM.SHOT_TITLES[name] ?? name;
+        if (nt) nt.textContent = shotNote(name);
+        return CAM.flightDuration(keys);
+    }
+
+    // ── Cinematic mode ─────────────────────────────────────────────────────
+    function advance(step = 1) {
+        if (!cine.on) return;
+        cine.order = CAM.cinematicOrder(have());
+        cine.idx = ((cine.idx + step) % cine.order.length + cine.order.length) % cine.order.length;
+        const name = cine.order[cine.idx];
+        if (name !== 'flare') leaveFlareView();
+        playShot(name, { done: name === 'flare' ? flareShotDone(nowS()) : () => {
+            if (name === 'approach' && cine.relock) { cine.relock = false; sunPost?.exposure?.recalibrate(); }
+            if (cine.on && !cine.paused) advance(1);
+        } });
+    }
+    function setPaused(p, step = 0) {
+        cine.paused = !!p;
+        const b = document.getElementById('cine-pause');
+        if (b) { b.textContent = cine.paused ? '▶' : '⏸'; b.title = cine.paused ? 'Resume the camera (Space)' : 'Pause the camera (Space)'; }
+        const nt = document.getElementById('cine-note');
+        if (cine.paused) { if (flight) { flight.cancel(); flight = null; flightDone = null; } if (nt) nt.textContent = 'Camera is yours — ▶ resumes the sequence.'; }
+        else advance(step);
+    }
+    function leaveFlareView() {
+        if (cine.savedView != null) { _setViewMode(cine.savedView); cine.savedView = null; }
+    }
+    function setCinematic(on) {
+        on = !!on;
+        if (on === cine.on) return on;
+        cine.on = on;
+        document.body.classList.toggle('sun-cine', on);
+        document.getElementById('btn-cine')?.setAttribute('aria-pressed', String(on));
+        const hud = document.getElementById('cine-hud');
+        if (hud) hud.hidden = !on;
+        if (on) {
+            try { if (smartTour && smartTour.active) { smartTour.stop(); const t = document.getElementById('tog-smart-tour'); if (t) t.checked = false; } } catch (e) {}
+            cine.savedLens = sunPost ? sunPost.lens : false;
+            if (sunPost) sunPost.lens = true;                  // ghosts, 1.5 px CA and grain: the Phase 2 lens, ON in the cinematic paths
+            controls.autoRotate = false;
+            cine.paused = false; cine.idx = 0; cine.limbSide = 0; cine.autoChannel = true;
+            setPaused(false, 0);                                // play shot 0
+        } else {
+            if (flight) { flight.cancel(); flight = null; flightDone = null; }
+            if (sunPost) sunPost.lens = cine.savedLens;
+            leaveFlareView();
+            controls.maxDistance = _coroDrawn() ? CAM.MAX_DISTANCE_CORONAGRAPH : CAM.MAX_DISTANCE;
+        }
+        // The stage changed size (theatre mode) and the chrome changed: re-measure next frame, then settle.
+        requestAnimationFrame(() => { resize(); if (!on) { userMoved = false; fly(CAM.hop(pose(), heroPose()), { name: 'hero' }); } });
+        return on;
+    }
+
+    // ── The flare director's hooks ─────────────────────────────────────────
+    /**
+     * In Cinematic mode the flare shot HOLDS while there is something to
+     * watch: until the plasma has reached its 171 Å arcade (the director's
+     * phase, from the flare's own cooling track), or FLARE_HOLD_MAX_S of wall
+     * clock, whichever is first. The hold is a slow continuing drift — a new
+     * one-shot flight each time, still cancelled by any touch of the controls.
+     */
+    const FLARE_HOLD_MAX_S = 75;
+    function flareShotDone(startedS) {
+        return () => {
+            if (!cine.on || cine.paused) return;
+            const ph = flarePhaseNow();
+            const watching = ph && (ph.id === 'impulsive' || ph.id === 'hot' || ph.id === 'cooling' || (ph.id === 'arcade' && ph.progress < 0.12));
+            if (watching && nowS() - startedS < FLARE_HOLD_MAX_S) {
+                const from = pose();
+                const to = { ...from, az: from.az + 0.07, r: Math.max(CAM.MIN_DISTANCE + 0.6, from.r * 0.985) };
+                fly([{ t: 0, pose: from }, { t: 8, pose: to, linear: true }], { name: 'flare', done: flareShotDone(startedS) });
+                const nt = document.getElementById('cine-note'); if (nt) nt.textContent = shotNote('flare');
+            } else advance(1);
+        };
+    }
+    function onFlare(ev, { fly: doFly = false } = {}) {
+        cine.flareShown = null;
+        if (cine.on && !cine.paused && DIRECTOR.shouldCutTo(ev, null, Date.now())) {
+            // In Cinematic mode a located M/X flare takes the next shot.
+            cine.order = CAM.cinematicOrder(have());
+            cine.idx = Math.max(0, cine.order.indexOf('flare'));
+            playShot('flare', { done: flareShotDone(nowS()) });
+        } else if (doFly) {
+            playShot('flare');
+        }
+    }
+    /** 2 Hz from the caption tick: in Cinematic mode the VIEW follows the plasma down the cooling track. */
+    function onFlarePhase(ph, mode) {
+        if (!cine.on || !cine.autoChannel || flightName !== 'flare' || mode == null) return;
+        if (cine.flareShown === mode) return;
+        const cur = parseFloat(document.getElementById('view-mode')?.value) || 0;
+        if (cine.savedView == null) cine.savedView = cur;
+        cine.flareShown = mode;
+        _setViewMode(mode);
+    }
+    function onFlareEnd() { leaveFlareView(); cine.flareShown = null; }
+
+    // ── Wiring ─────────────────────────────────────────────────────────────
+    // ANY user input on the controls ends a flight. This is the whole "may not hold" rule.
+    controls.addEventListener('start', () => { userMoved = true; cancel('user'); });
+    document.getElementById('btn-cine')?.addEventListener('click', () => setCinematic(true));
+    document.getElementById('cine-exit')?.addEventListener('click', () => setCinematic(false));
+    document.getElementById('cine-pause')?.addEventListener('click', () => setPaused(!cine.paused));
+    document.getElementById('cine-next')?.addEventListener('click', () => setPaused(false, 1));
+    document.getElementById('cine-prev')?.addEventListener('click', () => setPaused(false, -1));
+    document.getElementById('fc-view')?.addEventListener('click', (e) => { cine.autoChannel = false; _setViewMode(e.currentTarget.dataset.mode); });
+    document.getElementById('fc-watch')?.addEventListener('click', (e) => { e.currentTarget.hidden = true; playShot('flare'); });
+    document.getElementById('view-mode')?.addEventListener('change', (e) => { if (e.isTrusted) cine.autoChannel = false; });   // a hand on the channel picker ends auto-follow
+    window.addEventListener('keydown', (e) => {
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === 'c' || e.key === 'C') { setCinematic(!cine.on); e.preventDefault(); return; }
+        if (!cine.on) return;
+        if (e.key === 'Escape') { setCinematic(false); e.preventDefault(); }
+        else if (e.key === ' ') { setPaused(!cine.paused); e.preventDefault(); }
+        else if (e.key === 'ArrowRight') { setPaused(false, 1); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft') { setPaused(false, -1); e.preventDefault(); }
+    });
+    // The chrome that defines the safe frame comes and goes (the Sun Watch dock
+    // mounts late and can be minimised): re-measure when any of it resizes.
+    const ro = new ResizeObserver(() => reframe());
+    const watch = () => { for (const sel of ['#hud', '#sun-watch-dock', '#panel', '#sdo-drawer']) { const el = document.querySelector(sel); if (el && !el.__camWatched) { el.__camWatched = true; ro.observe(el); } } };
+    watch(); setTimeout(watch, 1500); setTimeout(watch, 5000);
+    reframe();
+    if (!userMoved) { applyPose(heroPose()); controls.update(); }
+    // ?cine=1 — but NOT before the exposure controller has locked its
+    // calibration on the hero view. It calibrates on the first ~80 frames, and
+    // a fly-in that starts at 34 R☉ would lock it on black sky: every later
+    // shot then reads as over-bright and is pulled down ~1 EV (measured). So
+    // wait for the lock, at most 8 s; a machine too slow to calibrate in that
+    // time re-locks when the Approach lands on the hero frame instead.
+    if (new URLSearchParams(location.search).get('cine') === '1') {
+        const t0 = performance.now();
+        (function wait() {
+            const locked = !sunPost?.exposure || sunPost.exposure.calibLum != null;
+            if (locked || performance.now() - t0 > 8000) { cine.relock = !locked; setCinematic(true); }
+            else setTimeout(wait, 200);
+        })();
+    }
+
+    return {
+        tick, fly, cancel, pose, reframe, goHero, setB0, restoreLens, playShot, setCinematic, setPaused, advance,
+        onFlare, onFlarePhase, onFlareEnd, heroPose,
+        get state() {
+            return { flying: !!flight, shot: flight ? flightName : null, userMoved, heroDistance, b0, safe,
+                     fov: camera.fov, view: camera.view ? { ...camera.view } : null,
+                     cine: { on: cine.on, paused: cine.paused, order: [...cine.order], idx: cine.idx, autoChannel: cine.autoChannel },
+                     have: have() };
+        },
+    };
+})();
+
+/**
+ * A located M/X flare arrived while the page is NOT in Cinematic mode: offer
+ * the shot, never take the camera (the owner's decision, 2026-11-20). In
+ * Cinematic mode sunCam.onFlare has already cut to it.
+ */
+function _offerFlare(ev) {
+    const btn = document.getElementById('fc-watch');
+    if (!btn || !ev || sunCam.state.cine.on) return;
+    btn.hidden = !DIRECTOR.shouldCutTo(ev, null, Date.now());
+}
+
 // ── Test / debug handle (smoke tests, Phase-1 verification) ──────────────────
 // Mirrors window.__ua / window.__ssd. Exposes the renderer + the seven layer
 // meshes so tests can assert visibility toggles and sample frames without a
@@ -12738,19 +13776,16 @@ window.__sun = {
     setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
     rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
     get regionCount() { return liveRegions.length; },
-    testFlare: (cls, latDeg, lonDeg) => {            // debug/test: fire a flare NOW at a Stonyhurst location
-        const c = (cls || 'X')[0].toUpperCase();
-        const la = (latDeg ?? 14), lo = (lonDeg ?? 15);
-        const lat = la * Math.PI / 180, lon = lo * Math.PI / 180;
-        const site = setFlareSite(lat, lon, { cls: c });
+    testFlare: (cls, latDeg, lonDeg, opts = {}) => {   // debug/test: fire a flare NOW at a Stonyhurst location
+        const evt = DIRECTOR.normalizeFlare({ cls: cls || 'X', latDeg: latDeg ?? 14, lonDeg: lonDeg ?? 15, eruptive: opts.eruptive }, { nowMs: Date.now(), source: 'test' });
+        const site = playFlare(evt, { fromOnset: true, ...opts });
         uniforms.u_flare_intensity.value = 1.0;
-        uniforms.u_flare_t.value = 0.0;
-        try { _refreshFlareRibbons(lat, flareSite.lonRad0); } catch (e) {}
-        try { triggerPositionFlare(site.latDeg, site.lonDeg0, c); } catch (e) {}
-        try { eruptNearestProminence(lat, flareSite.lonRad0); } catch (e) {}
-        try { spawnEruptingProminence(lat, flareSite.lonRad0, c); } catch (e) {}
         return site;
     },
+    /** The ONE flare entry point + what it is doing now (js/sun-flare-director.js). */
+    playFlare: (raw, opts) => playFlare(DIRECTOR.normalizeFlare(raw, { nowMs: Date.now() }), opts),
+    get flareEvent() { return _flareEvent ? { ..._flareEvent, replay: _flareReplay, rate: _flareRate, elapsedS: _flareElapsedS, clock: _flareClock, phase: flarePhaseNow() } : null; },
+    get cam() { return sunCam; },
     // Flare-site geometry as the page is DRAWING it this frame — every
     // consumer's answer side by side so tests/sun-flare-geometry.spec.js can
     // assert they agree with js/flare-geometry.js and with each other.
@@ -12776,6 +13811,7 @@ window.__sun = {
             flashes: flareFlashes.filter(f => f.userData.active).map(f => ({ lat: f.userData.lat, lon: f.userData.lon, pos: f.position.clone().normalize().toArray() })),
             siteGroupRotY: _flareSiteGroup.rotation.y,
             arcade: flareArcade.state,
+            rope: flareRope.state,
             arcadeSite: flareArcade.site,
             loopRotations: (loopGroup?.children ?? []).slice(0, 4).map(l => ({ latRad: l.material.userData.latRad, rotY: l.rotation.y })),
         };
@@ -12825,6 +13861,18 @@ window.__sun = {
             : null;
     },
     setFlareElapsed: (s) => { _flareElapsedS = Math.max(0, +s || 0); },
+    /** The flare-shape model being drawn, and how to swap it (null → shipped, 'v1', or overrides). */
+    get flareModel() { return flareModel; },
+    setFlareModel,
+    FG,                                   // the flare-geometry module (the look gate builds reference models with it)
+    /** Hold both flare clocks at one age in sim units (null releases) — captures and the look gate. */
+    holdFlareAt: (t) => { _flareHoldT = (t == null) ? null : Math.max(0, +t || 0); },
+    flareArcade,
+    /** The arcade view's display constants (its exposure control's target and floor, the hot-loop fuzz). */
+    flareArcadeConst: { AEC_TARGET: ARCADE_AEC_TARGET, AEC_FLOOR: ARCADE_AEC_FLOOR, HOT_FUZZ: ARCADE_HOT_FUZZ },
+    flareRope,
+    /** The director's call for the flare on screen: is it eruptive, and on what basis. */
+    get flareEruption() { return _flareEruption; },
     startFlareClock: (cls) => _startFlareClock(cls),
     // Observed cool material (HEK filaments/prominences → the volume's B channel).
     // Prominence bundles: the rung the governor is on, and a pin for tests —
@@ -12860,6 +13908,10 @@ window.__sun = {
     refreshOffLimb: () => sunOffLimb?.refresh(true),
     setOffLimbSource: (id) => sunOffLimb?.setSource(id),
     get offLimbCoverage() { return sunOffLimb ? sourceCoverage(sunOffLimb.sourceId) : null; },
+    get coronagraph()     { return sunCoronagraph ? sunCoronagraph.getState() : null; },   // observed SOHO/LASCO outer corona
+    get coronagraphCtl()  { return sunCoronagraph; },
+    get coronagraphMesh() { return sunCoronagraph?.mesh ?? null; },
+    get spaceOcclusion()  { return _spaceOcclPass ? { center: _spaceOcclPass.uniforms.center.value.toArray(), sunR: _spaceOcclPass.uniforms.sunR.value, relax: _spaceOcclPass.uniforms.relax.value } : null; },
     setObserved: (on) => { _obsUserOn = !!on; _obsApply('user'); },
     refreshObserved: () => sunObserved?.refresh(true),
     /** Freeze the sim clock at a fixed u_time so a screenshot is deterministic. */

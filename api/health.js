@@ -55,6 +55,11 @@ const UPSTREAMS = [
     // request settles it, so a red row here may mean the path, not the feed.
     // /api/solar/aia?channel=suvi304&meta=1 reports every candidate's status.
     { source: 'goes-suvi',    url: 'https://services.swpc.noaa.gov/images/animations/suvi/primary/304/latest.png', edge_authoritative: true },
+    // SOHO/LASCO realtime browse frames — proxied by /api/solar/aia?channel=c2|c3
+    // (the observed outer corona on sun.html, js/sun-coronagraph.js), so this
+    // row IS authoritative. The 512 frame keeps the probe cheap; the path is
+    // js/lasco-sources.js lascoUrl('c2', 512).
+    { source: 'soho-lasco',   url: 'https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg', edge_authoritative: true },
     // LMSAL HEK — proxied by /api/hek/coronal-holes and /api/hek/filaments
     // (the coronal-hole cells on the space-weather globe, and the COOL-MATERIAL
     // channel of sun.html's volumetric corona). Authoritative for both. The

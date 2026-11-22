@@ -57,6 +57,43 @@
  * stretch, and per the plan's honesty rule 2 no procedural term may recolour
  * an observed pixel. We correct the LEVEL only (below) and nothing else.
  *
+ * ── REAL FRAMES (2026-11-20) — read this before the two sections below ────
+ * Everything below about the reference shell and the √ stretch was designed
+ * on SYNTHETIC fixtures, because nasa.gov was unreachable from the build
+ * sandbox for the layer's first two months. On the first real frames
+ * (tests/fixtures/sdo/real_304.jpg / real_131.jpg, fetched 2026-11-20) the
+ * design failed, visibly, and had been failing in production since it shipped:
+ *
+ *   1. THE 1.05–1.15 R☉ SHELL IS BELOW THE PRODUCT'S DISPLAY FLOOR. A real
+ *      AIA 304 browse frame is essentially black there — median 2 code values
+ *      (linear 7e-4), against 0.075 at the limb. The reference landed a hair
+ *      above REF_FLOOR, so the frame "calibrated", and every pixel nearer the
+ *      limb was then drawn at 30–100× the reference: a saturated white-and-pink
+ *      band round the whole disc with JPEG noise amplified into speckle.
+ *      The synthetic frames carry a broad bright haze that real frames do not
+ *      have (a real off-limb profile falls ~100× between 1.03 and 1.10 R☉).
+ *   2. THE √ STRETCH IS A SECOND STRETCH. "No linear mapping shows both the
+ *      quiet corona and a prominence" is true of RADIANCE. A browse JPEG is not
+ *      radiance: the instrument team has already display-stretched it. Taking
+ *      a square root of that lifts the product's own near-black noise floor.
+ *   3. THE FRAME CARRIES A BURNED-IN CAPTION ("SDO/AIA 304 2026-11-20
+ *      14:59:06 UT", bottom-left, rows 987–1009 of 1024). It sits at ρ ≈ 1.2 R☉
+ *      below the Sun, inside the ring, and was drawn as white text in the sky.
+ *
+ * What the layer does now:
+ *   • the reference is the frame's own LIMB GLOW — the median of 1.00–1.05 R☉,
+ *     where every real channel has signal (304: 0.05, 131: 0.15 linear). "1.0"
+ *     now means "as bright as this frame's own limb", which is still
+ *     frame-independent and still not I0;
+ *   • BLACK_POINT (two code values, the old REF_FLOOR argument) is subtracted
+ *     first, so the product's quantisation floor is sky, not corona;
+ *   • STRETCH_GAMMA is 1: the profile above the limb is the browse product's
+ *     own, as published. The exponent is still a uniform — the fixture-era √
+ *     is one number away for an A/B — but it is no longer applied;
+ *   • the caption strip (the bottom CAPTION_V of the frame) is never drawn.
+ * tests/sun-offlimb.mjs runs the OLD rule on the real frames as its negative
+ * control (it must blow out) beside the new one (it must not).
+ *
  * ── Level normalisation, and why it is not I0 ────────────────────────────
  * The fusion lesson applies unchanged: a browse JPEG's ABSOLUTE level is a
  * display choice, not radiometry. On the disk that is handled by dividing by
@@ -232,8 +269,39 @@ export function sourceCoverage(id, rIn = R_INNER, rOut = R_OUTER) {
 export const FEATHER_IN  = 0.015;
 export const FEATHER_OUT = 0.14;
 
-/** The shell whose median sets the layer's brightness unit (see the header). */
-export const REF_SHELL = Object.freeze({ lo: 1.05, hi: 1.15 });
+/**
+ * THE DETECTOR EDGE IS FEATHERED, R☉ (2026-11). The shader refuses to
+ * clamp-extend a border texel — correct — but that left the layer ending on a
+ * hard line wherever the frame ends inside the annulus. For SDO/AIA that is
+ * 1.280 R☉ on axis against a 1.6 R☉ ring, so the default view drew a SQUARE
+ * around the Sun: the noise floor of a √-stretched frame is not black, and a
+ * step from it to nothing is a visible edge four times around the disc. The
+ * weight now falls to zero over the last EDGE_FEATHER of the frame, measured
+ * from the nearest frame edge in the frame's own plate scale (so SUVI and AIA
+ * each fade in THEIR units). It is a fade of the layer's alpha toward a
+ * boundary of the data, disclosed in the chip tooltip; no pixel is moved,
+ * extended or recoloured, and the coverage figures (sourceCoverage) still
+ * count every pixel the frame holds.
+ */
+export const EDGE_FEATHER = 0.14;   // = FEATHER_OUT: the frame's edge and the ring's own outer edge fade alike
+
+/** JS mirror of the shader's frame-edge weight. (x, y) plane-of-sky R☉; geom = {cx, cy, r} in frame fractions. */
+export function frameEdgeWeight(x, y, geom, feather = EDGE_FEATHER) {
+    const uv = planeOfSkyUV(x, y, geom);
+    const u = uv.u, v = uv.v;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+    const edge = Math.min(u, 1 - u, v, 1 - v) / Math.max(geom.r, 1e-4);
+    return smoothstep(0, feather, edge);
+}
+
+/**
+ * The shell whose median sets the layer's brightness unit: THE LIMB GLOW.
+ * It was 1.05–1.15 R☉ until 2026-11-20 — which on a real AIA 304 frame is
+ * two code values above black (header, "REAL FRAMES"). `REF_SHELL_LEGACY` is
+ * kept ONLY so the node gate can run the old rule as its negative control.
+ */
+export const REF_SHELL = Object.freeze({ lo: 1.00, hi: 1.05 });
+export const REF_SHELL_LEGACY = Object.freeze({ lo: 1.05, hi: 1.15 });
 
 /**
  * Radial profile of the annulus, 0 outside [R_INNER, R_OUTER].
@@ -329,6 +397,32 @@ export function offAxisWeightDeg(deg) { return offAxisWeight(Math.cos(deg * Math
  */
 export const REF_MIN_CODE_VALUES = 2;
 export const REF_FLOOR = srgbToLinear(REF_MIN_CODE_VALUES);
+/**
+ * The product's quantisation floor, subtracted before anything is drawn: at or
+ * below two code values a browse JPEG is ringing, not corona (the argument
+ * above), so that level is SKY. Same number as REF_FLOOR, used as a black
+ * point rather than only as a refusal threshold.
+ */
+export const BLACK_POINT = REF_FLOOR;
+/**
+ * The limb glow must clear the black point by this many code values before
+ * the frame is believed (eight: unmistakably signal in an 8-bit product).
+ */
+export const REF_OK_CODE_VALUES = 8;
+export const REF_OK_MIN = srgbToLinear(REF_OK_CODE_VALUES) - BLACK_POINT;
+
+/**
+ * THE CAPTION STRIP. Browse frames carry a burned-in caption along the bottom
+ * edge (AIA: rows 987–1009 of 1024 = the bottom 3.6 %; GOES/SUVI: the bottom
+ * ~3.5 % of 1280, full width). It is not an observation. The layer draws
+ * nothing below CAPTION_V of the frame's height and fades in over
+ * CAPTION_FEATHER above it. Measured on tests/fixtures/sdo/real_*.jpg; the
+ * node gate re-measures it there, so a product that moves its caption fails.
+ */
+export const CAPTION_V = 0.045;
+export const CAPTION_FEATHER = 0.02;
+/** JS mirror of the shader's caption mask. `v` is the frame's v, 0 at the BOTTOM row. */
+export function captionWeight(v) { return smoothstep(CAPTION_V, CAPTION_V + CAPTION_FEATHER, v); }
 /** Minimum pixels in the shell before the median means anything. */
 export const REF_MIN_SAMPLES = 64;
 
@@ -343,11 +437,12 @@ export const REF_MIN_SAMPLES = 64;
  * @param {{cx:number, cy:number, r:number}} geom fractions of the frame
  * @returns {{ref:number, samples:number, ok:boolean}}
  */
-export function calibrateOffLimb(rgba, w, h, geom) {
+export function calibrateOffLimb(rgba, w, h, geom, { shell = REF_SHELL, black = BLACK_POINT, okMin = REF_OK_MIN } = {}) {
     const fail = { ref: 1, samples: 0, ok: false };
     if (!rgba || !geom || !(geom.r > 0)) return fail;
     const R = geom.r * Math.min(w, h);
     const cx = geom.cx * w, cy = geom.cy * h;
+    const REF_SHELL = shell;      // (the legacy shell is passable for the gate's negative control)
     const lo2 = (REF_SHELL.lo * R) ** 2, hi2 = (REF_SHELL.hi * R) ** 2;
     const vals = [];
     // Walk only the bounding box of the outer shell — the frame is 256² here
@@ -363,15 +458,17 @@ export function calibrateOffLimb(rgba, w, h, geom) {
             const d2 = dx * dx + dy * dy;
             if (d2 < lo2 || d2 > hi2) continue;
             const o = (y * w + x) * 4;
-            vals.push(luminance(srgbToLinear(rgba[o]), srgbToLinear(rgba[o + 1]), srgbToLinear(rgba[o + 2])));
+            // Above the product's black point: its quantisation floor is sky.
+            vals.push(Math.max(luminance(srgbToLinear(rgba[o]), srgbToLinear(rgba[o + 1]), srgbToLinear(rgba[o + 2])) - black, 0));
         }
     }
     if (vals.length < REF_MIN_SAMPLES) return fail;
     vals.sort((a, b) => a - b);
     const ref = vals[vals.length >> 1];
-    // A black shell is not a quiet corona, it is a frame with no off-limb
-    // signal. Drawing 1/ref of it would manufacture one out of JPEG ringing.
-    if (!(ref >= REF_FLOOR)) return { ref, samples: vals.length, ok: false };
+    // A black limb is not a quiet Sun, it is a frame with no off-limb signal
+    // (a bad decode, an occulted product, a disc cutout). Drawing 1/ref of it
+    // would manufacture a corona out of JPEG ringing.
+    if (!(ref >= okMin)) return { ref, samples: vals.length, ok: false };
     return { ref, samples: vals.length, ok: true };
 }
 
@@ -443,6 +540,13 @@ export const OFFLIMB_FRAG = /* glsl */`
         return inW * outW;
     }
 
+    // The product's quantisation floor is sky: subtract it on LUMINANCE, so the
+    // browse colour ratio survives (js/sun-offlimb.js BLACK_POINT).
+    vec3 blackPoint(vec3 c) {
+        float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        return c * (max(L - ${BLACK_POINT.toExponential(6)}, 0.0) / max(L, 1e-6));
+    }
+
     // One channel's contribution. Returns the channel's OWN colour (the browse
     // frame is already AIA-colorized and AIA-byte-scaled; we correct the level
     // and nothing else — plan honesty rule 2) in the direct view, or the
@@ -452,7 +556,13 @@ export const OFFLIMB_FRAG = /* glsl */`
         // Outside the frame there is no measurement. Never clamp-extend a
         // border texel across the sky.
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec3(0.0);
-        vec3 cur = texture2D(tex, uv).rgb / max(ref, 1e-4);
+        // ...and do not END on a line either: fade over the last EDGE_FEATHER
+        // (R_sun, in this frame's own plate scale) before the detector edge.
+        float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)) / max(geom.z, 1e-4);
+        float ew   = smoothstep(0.0, ${EDGE_FEATHER.toFixed(4)}, edge);
+        // The burned-in caption along the frame's bottom edge is not an observation.
+        ew *= smoothstep(${CAPTION_V.toFixed(4)}, ${(CAPTION_V + CAPTION_FEATHER).toFixed(4)}, uv.y);
+        vec3 cur = blackPoint(texture2D(tex, uv).rgb) / max(ref, 1e-4);
         if (u_diff < 0.5) {
             // DISPLAY STRETCH (module header): the normalised field spans ~70:1
             // and no linear mapping shows both the quiet corona and a
@@ -461,16 +571,16 @@ export const OFFLIMB_FRAG = /* glsl */`
             // colour ratio survives it — stretching R, G and B separately
             // would desaturate every bright feature toward white.
             float L = max(dot(cur, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
-            return cur * (pow(L, u_stretch) / L);
+            return cur * (pow(L, u_stretch) / L) * ew;
         }
-        vec3 old = texture2D(prev, uv).rgb / max(ref, 1e-4);
+        vec3 old = blackPoint(texture2D(prev, uv).rgb) / max(ref, 1e-4);
         float d  = dot(cur - old, vec3(0.2126, 0.7152, 0.0722));
         // Same stretch, signed: a running difference spans the same decades.
         float m  = pow(abs(d), u_stretch) * u_diffGain;
         // Additive blending cannot darken, so the sign rides the hue: the
         // channel's own colour for a brightening, u_dimColor for a dimming.
         vec3 hue = normalize(max(cur, vec3(1e-3)));
-        return d >= 0.0 ? hue * m : u_dimColor * m;
+        return (d >= 0.0 ? hue * m : u_dimColor * m) * ew;
     }
 
     void main() {
@@ -498,9 +608,15 @@ export const DIM_COLOR = Object.freeze([0.30, 0.55, 1.00]);
  * in the chip tooltip. STRETCH_GAMMA = 0.5 is a square root — see the module
  * header for why there has to be a stretch at all.
  */
-export const DEFAULT_GAIN = 0.16;
+// 2026-11-20: gain 0.16 → 0.42 and gamma 0.5 → 1 with the move to the limb-glow
+// reference (header, "REAL FRAMES"). The limb's own glow is drawn at DEFAULT_GAIN
+// of display white; everything above it follows the browse product's profile.
+export const DEFAULT_GAIN = 0.42;
 export const DEFAULT_DIFF_GAIN = 0.9;
-export const STRETCH_GAMMA = 0.5;
+export const STRETCH_GAMMA = 1.0;
+/** The fixture-era exponent, kept for the gate's negative control and an A/B. */
+export const STRETCH_GAMMA_LEGACY = 0.5;
+export const DEFAULT_GAIN_LEGACY = 0.16;
 
 /** The stretch, in JS — the node test pins it against the GLSL. */
 export function displayStretch(v, gamma = STRETCH_GAMMA) {
@@ -667,6 +783,19 @@ export class SunOffLimb {
         }
         this.uniforms.u_axis.value = w;
         this.mesh.visible = this.enabled && this._anyOk() && w > 0.001;
+    }
+
+    /**
+     * 0..1 — how strongly the OBSERVED He II limb is on screen this frame.
+     * sun.html fades its model chromosphere/TR fringe by this (js/sun-limb.js):
+     * where the live 304 limb is drawn, that is the limb. Zero unless the cool
+     * channel itself calibrated — a 131-only layer shows flare plasma, not the
+     * chromosphere, and must not silence the model's.
+     */
+    get limbWeight() {
+        if (!this.mesh || !this.mesh.visible) return 0;
+        const cool = this.frames.get(this.channels[0]);
+        return (cool && cool.ok && cool.tex) ? this.axisWeight : 0;
     }
 
     /** Fetch both channels. Each fails independently — one dead channel must not blank the other. */

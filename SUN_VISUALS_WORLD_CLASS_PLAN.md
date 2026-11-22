@@ -8,8 +8,10 @@
 > `SUN_CONVECTION_UPGRADE_PLAN.md` for the convection work this plan sits on
 > top of and does NOT redo.
 
-*Status: Phases 0–3 IMPLEMENTED (2026-09-06); Phases 4–6 planned. Decisions
-in §1 are locked by the repo owner.*
+*Status: Phases 0–3 IMPLEMENTED (2026-09-06); Phase 5 (cinematography) and
+the limb / flare / coronagraph work IMPLEMENTED 2026-11-20 — see the last
+progress entry; Phases 4 and 6 planned. Decisions in §1 are locked by the repo
+owner.*
 
 ### Progress log
 
@@ -707,6 +709,595 @@ in §1 are locked by the repo owner.*
      magnetic dips" therefore cannot be built on this atlas as it stands** —
      it would be empty. Open, with the options written up in §9.
 
+- **2026-11-20 — the cinematic pass (owner request: "redo the visuals, bring
+  in the flare work and all the NASA real-time data, make it cinematic").**
+  Scope confirmed with the owner before any edit: full package; the page opens
+  on a HERO FRAME with a Cinematic button (never fully cinematic on load, and
+  a live flare OFFERS the shot rather than taking the camera); sun.html stays
+  STRICT — no exaggeration table here, unlike the homepage hero. Everything
+  below was judged on SwiftShader captures and pixel measurements; **the
+  `@gpu` baseline (Phase 0) is still not captured and none of the LOOK is
+  verified on real hardware.**
+  - **THE LIMB WAS A FLAT BAND TWENTY TIMES TOO THICK.** The chromosphere and
+    transition-region shells drew their limb as `pow(rim, n)` on DoubleSide
+    spheres at r = 1.06 / 1.04. On a back face `max(n·v, 0)` is 0, so `rim`
+    is identically 1 across the whole visible annulus: a flat plate at the
+    clamped alpha, 0.06 R☉ = 42 Mm wide, over an observed disc (the orrery's
+    S3 scar, on this page since the shells were written). `js/sun-limb.js`
+    (PURE, `tests/sun-limb.mjs`, 8 checks) replaces it: each fragment
+    reconstructs its own SIGHTLINE and reads the fringe off the impact
+    parameter at TRUE scale (1.5 Mm chromosphere, spicules e-folding in 4 Mm,
+    a 2.5 Mm transition sheath), box-filtered over the pixel's footprint so a
+    sub-pixel shell dims to a hairline carrying the right energy instead of
+    sparkling. Measured on pixels (`tests/sun-cinematic.spec.js`, long lens on
+    the +x limb, only the two shells on): fringe 230, 1.030 R☉ 5.5, 1.045 R☉
+    1.9, sky 0.9 of 255. Three things fell out of the same rewrite:
+    - the shells took latitude/longitude from the VIEW-space normal, so every
+      plage halo and flare ribbon on them was pinned to the screen and slid
+      off its active region as the camera orbited — they now use the point ON
+      THE SUN the ray is about (photosphere hit on the disc, closest approach
+      off it);
+    - on the observed hemisphere their on-disc procedural terms stand down
+      (honesty rule 2 — they had been tinting observed pixels);
+    - while the observed off-limb ring is drawing the real He II 304 limb the
+      MODEL fringe fades by that layer's own weight (`u_limbObs` ←
+      `SunOffLimb.limbWeight`): where the observation is on screen it IS the
+      limb; orbit off the Sun–Earth line and the model takes over.
+  - **The off-limb ring ended on a line.** The shader refuses to clamp-extend
+    a border texel (correct), which left the layer stopping hard at the AIA
+    frame edge — 1.28 R☉ on axis inside a 1.6 R☉ ring — so the default view
+    had a SQUARE around the Sun. `EDGE_FEATHER` (= `FEATHER_OUT`, 0.14 R☉)
+    fades the layer's weight toward the nearest frame edge in the frame's own
+    plate scale; no pixel is moved or extended and `sourceCoverage` still
+    counts every pixel the frame holds. **NOT solved, deliberately:** the
+    faded shape is still the detector's (a soft rounded square), most visible
+    in the limb-pan shot. A circular crop at 1.28 R☉ would hide it but would
+    make the SDO and SUVI rings two different annuli, which Phase 3e ruled out
+    on purpose. The remedy is the one already planned — settle the SUVI
+    upstream (§9) and make it the default off-limb source.
+  - **Flare visuals.** (a) The flash was an untextured white `RingGeometry`
+    growing to 0.28 R☉ at opacity 0.5 — the largest thing in every flare frame
+    and a flat pale plate. It is now a radial falloff written above 1.0 into
+    the HDR buffer (the post chain does the glowing), on an impulsive
+    rise / exponential tail instead of a linear fade; mesh, pool and per-frame
+    placement are unchanged, so the flare-geometry gate still reads it.
+    (b) `js/flare-arcade.js` gains `style: 'ribbon'` (sun.html only — the
+    orrery keeps `'line'`, its Sun is 30 px): each loop is a camera-facing
+    strand of PHYSICAL width (1.6 Mm) with a pixel floor below which it is
+    dimmed in proportion, a soft halo, an along-loop profile that follows the
+    cooling (looptop source while hot, legs after), and an HDR spine. A
+    `MeshBasicMaterial` + `onBeforeCompile`, never a raw shader. 31 loops.
+    Positions, heights, shear and timing are still the kernel's.
+  - **ONE WAY A FLARE STARTS.** The page could start a flare from six places
+    (two live-SWPC branches, the load-time replay, the flare list, the
+    analysis popup, the test hook), each doing its own subset of site / class
+    / ribbon clock / cooling clock / ribbons / flash / prominence / plume.
+    `js/sun-flare-director.js` (PURE, `tests/sun-flare-director.mjs`, 8
+    checks) is the one event shape from DONKI, SWPC and the page list, and
+    sun.html has one `playFlare()`. What that fixed: a flare reported late now
+    starts late on BOTH clocks (the cooling track used to restart at zero
+    while the ribbon clock was aged — twenty minutes in, the plasma is in
+    171, not 131); the class passed to the cooling track is the full class
+    (X2.3), not the letter (X1); an unlocated flare is never placed; a re-run
+    from onset is captioned REPLAY with its time compression printed. The
+    phases (impulsive → hot loops → cooling → arcade) are NOT typed: they are
+    when 131 Å and 171 Å peak along that flare's own cooling track.
+    **Measured, and the opposite of what the first comment claimed:** an X5
+    holds its hot phase longer than an M1 (131 peaks at ~216 s vs ~60 s) but
+    reaches its 171 arcade SOONER (~1290 s vs ~1510 s) — the RTV loop it
+    starts in is denser and radiates faster. `#flare-caption` prints the
+    director's sentence and offers the channel the plasma is brightest in.
+  - **Phase 5 — the camera.** `js/sun-camera.js` (PURE,
+    `tests/sun-camera.mjs`, 12 checks).
+    - **The lens is 30°, not 50°.** The same disc from further back: at the
+      hero distance (~6.7 R☉) the sphere's silhouette hides 1.4 % of the
+      plane-of-sky ring instead of the 4.6 % it hid at the 50° equivalent —
+      i.e. the base of every prominence. Old-lens distances (presets,
+      `flyToRegion`'s `distR`, the tour) go through `equivalentDistance`.
+    - **Hero framing is measured.** The canvas is full-bleed under floating
+      panels; `safeFrame` finds the unobstructed rectangle, `setViewOffset`
+      moves the principal point into it, and the distance is derived from the
+      lens and that rectangle (disc = 60 % of its shorter side). A re-measure
+      never overwrites the user's own zoom.
+    - **Flights are spherical, one-shot, time-based.** `flyToRegion` lerped
+      Cartesian positions, so any far-side hop took the camera THROUGH the Sun
+      (the gate keeps that as its negative control). Any touch of the controls
+      ends a flight and nothing eases the camera back.
+    - **`spaceOcclusion` followed the frame, not the Sun.** Its dimming zones
+      were a fixed 0.14 / 0.50 of the frame about the frame's centre — the
+      same thing as "around the Sun" only at the old default camera. They now
+      ride the Sun's projected centre and radius (0.773 / 2.76 R☉ are those
+      two numbers at that camera, so the default is unchanged).
+    - **Cinematic mode** (`#btn-cine`, `C`, `?cine=1`): theatre stage, chrome
+      hidden, two thin bars with one caption line, the Phase 2 lens on, and a
+      running order built from what is actually on screen (Approach → Flare →
+      Limb pan → Orbit → Pull-back; a shot whose subject is absent is
+      skipped). THE PROVENANCE CHIP IS NEVER HIDDEN. In a flare shot the VIEW
+      follows the plasma down the cooling track (131 → 193 → 171) until the
+      user touches the channel picker, and the shot holds until the arcade
+      phase or 75 s. `?cine=1` waits for the exposure controller to lock on
+      the hero view first — a fly-in from 34 R☉ locked it on black sky and
+      every later shot came out ~1 EV dark (measured).
+    - **Wind particles were 7 px blobs.** Their size was (1.6–2.5)·160/z
+      clamped to 7 px, i.e. 43–67 px before the clamp at every distance the
+      camera can reach — every particle drew at exactly 7 px. Now ~1.2–2.4
+      CSS px at the hero distance, and faded where their own sightline meets
+      the disc (a model mote must not sit on an observed pixel).
+  - **Phase 3's coronagraph plane: SOHO/LASCO C2 + C3, observed.**
+    `js/sun-coronagraph.js` + `js/lasco-sources.js` (`tests/sun-coronagraph.mjs`
+    29 checks, `tests/coronagraph-route.mjs` 8), `channel=c2|c3` on
+    `/api/solar/aia`, `solar-lasco` in the pipeline registry, `soho-lasco` in
+    `api/health.js`, synthetic fixtures with the real browse geometry. Same
+    plane of sky and vantage as the off-limb ring (SOHO is at L1); centre
+    MEASURED from the white limb circle, scale DERIVED from plate scale × the
+    Sun's apparent radius on the frame's date; nothing inside the measured
+    occulter, nothing over the timestamp corner, nothing outside the frame;
+    C3 level-matched to C2 on their overlap. Three things the page does
+    around it: **(1) it is a different exposure** — the outer corona is
+    10⁻⁶–10⁻¹⁰ of the disc, so the layer is drawn at zero gain at the hero
+    framing and fades in as the camera pulls back (at full gain there it rang
+    the Sun with a dark hole and an orange wall); **(2)** the zoom range
+    extends to 140 R☉ only while a frame is actually drawn; **(3)** the
+    exposure ceiling is +1.5 EV with the whole Sun in view (+4 is for flights
+    inside the corona; far out it blew the disc and C2 to white). The client
+    REQUIRES the `X-SOHO-Instrument` response header, because an unknown
+    channel on this proxy has always fallen back to the HMI disc — the
+    browser gate's negative control withholds it and the layer draws nothing.
+    **UNVERIFIED (nasa.gov is egress-blocked here):** that the realtime frames
+    carry the limb circle, their roll (SOHO flies inverted about half the
+    year — `__sun.coronagraph.instruments[1].pylonPaDeg` near 135 is upright,
+    near 315 needs `rollDeg: 180`), the plate scales, and the cadence
+    thresholds. One production load settles all four; `node
+    scripts/fetch-sdo-fixtures.mjs` on a machine with egress writes real
+    c2/c3 frames for the gates.
+  - **Gates.** New: `tests/sun-limb.mjs`, `tests/sun-camera.mjs`,
+    `tests/sun-flare-director.mjs`, `tests/sun-coronagraph.mjs`,
+    `tests/coronagraph-route.mjs`, `tests/sun-cinematic.spec.js` (4 browser
+    tests, incl. the no-header negative control), an edge-feather check in
+    `tests/sun-offlimb.mjs`, and `.github/workflows/sun-kernels.yml` — the
+    Sun node gates had no workflow at all until now.
+  - **Not done.** Phase 4 (cube-sphere fluid, granule relief, limb faculae)
+    and Phase 6 (WebGPU) are untouched. Depth of field (Phase 5's bokeh pass)
+    was not built. `?preview=1` does not yet play the cinematic loop. The
+    arcade's loops are evenly spaced and equal in size, which at close range
+    reads as mechanical; the kernel's `weight` is the hook for varying them.
+
+- **2026-11-20 (later) — THE FIRST REAL FRAMES, and what they broke.** The
+  owner's verdict on the pass above was "we have a long ways to go". To stop
+  judging on synthetic stand-ins I proposed, and the owner approved, a cloud
+  environment (`ParkersPhysics`) that allows exactly three hosts:
+  `sdo.gsfc.nasa.gov`, `soho.nascom.nasa.gov`, `services.swpc.noaa.gov`.
+  `scripts/fetch-sdo-fixtures.mjs` then wrote the first REAL frames this
+  project has ever tested against (`tests/fixtures/sdo/real_*`, 13 files,
+  plus 256² lossless copies for the node gates), and three production defects
+  that no gate could have seen were on screen immediately:
+  - **The off-limb ring was blown out, and had been since Phase 3b shipped in
+    September.** Its level was normalised by the median of the 1.05–1.15 R☉
+    shell. On a real AIA 304 frame that shell is at 0–2 code values (linear
+    7e-4, against 0.075 at the limb): the reference sat a hair above
+    `REF_FLOOR`, the frame "calibrated", and the limb was drawn 30–100× over
+    — a saturated white-and-pink band with JPEG noise amplified into speckle.
+    The synthetic frames carry a broad bright haze real frames do not have (a
+    real profile falls ~100× between 1.03 and 1.10 R☉). And the √ stretch was
+    a SECOND stretch: a browse JPEG is already display-stretched by the
+    instrument team. Now: reference = the frame's own LIMB GLOW (1.00–1.05
+    R☉, where every real channel has signal), a two-code-value black point
+    subtracted first, `STRETCH_GAMMA` = 1 (as published). Measured on the real
+    frames, limb zone: new rule median 0.42 (the gain) / p95 0.9; old rule 304
+    median 1.28 before 131 is added, and a noise haze of 0.068 in 131's sky
+    where the new rule draws 0.0005. On screen (`tests/sun-real-frames.spec.js`):
+    limb 157/255, 8 % of limb probes white, sky under 1.
+  - **AIA's burned-in caption was drawn as white text under the Sun** ("131
+    2026-11-20 14:58:56 UT" — rows 987–1009 of 1024, at ρ ≈ 1.2 R☉, inside
+    the ring). `CAPTION_V` masks the bottom strip of the frame; the node gate
+    re-finds the caption in the real frames and fails if a product moves it.
+  - **The first real LASCO C3 frame was half-missing** — a telemetry dropout,
+    11 % of the field exactly black beside a band of garbage. `frameIntegrity`
+    (a LASCO field always carries a coloured pedestal, so black is absent
+    data) refuses it BEFORE it replaces the last complete frame; the chip says
+    "LASCO C2 (C3 frame incomplete)". That frame is kept as
+    `real_c3_dropout.jpg`, the gate's negative control.
+  - **What the real frames CONFIRMED** (all listed as unverified above): the
+    LASCO limb circle exists and is measured; the derived plate scale is right
+    (C2 ring ratio 0.995); the frames are north-up (C3 pylon lower-left); the
+    coronagraph `STRETCH_GAMMA` wanted 1 as well (√ merged C2's streamers into
+    a red wash); the whole-Sun exposure ceiling had to come down to +0.4 EV
+    (+1.5 still burned the observed disc white at 20 R☉).
+  - **GOES/SUVI is settled, and is now the default off-limb source.** One
+    production request (`…/api/solar/aia?channel=suvi304&meta=1`, the check
+    this file has asked for since September) answered:
+    `swpc-animation-primary-png` 200, the secondary slot 200, the three other
+    spellings 404 — the list is trimmed to the two that exist. The real frame
+    is a 1280² "GOES-19 SUVI Composite" whose corona runs smoothly to the
+    frame edge, which is the picture the ring was always meant to show: on it
+    the limb reads 148, 1.25 R☉ 11, 1.5 R☉ 1, sky 0. sun.html now selects
+    SUVI, falls back to SDO/AIA once if SUVI does not answer, and
+    `?offlimbSource=sdo` forces AIA. The disc stays SDO.
+  - **A harness scar.** Opening the network let the TEST BROWSER reach live
+    NOAA feeds, and specs that depend on those hosts failing fast timed out.
+    Browser gates must run with the proxy variables unset (CLAUDE.md).
+  - **Still not done, and still the owner's call on a real GPU:** the look of
+    the observed disc itself (pale, flat at hero scale — true to a 1024 px
+    continuum frame, but not striking), model field lines drawn over observed
+    pixels, the evenly spaced flare arcade, and Phases 4 and 6.
+
+- **2026-11-20 (third pass) — the disc and the flare (owner: "keep going on
+  the disc and the flare look").** Judged on the real frames throughout.
+  - **The disc has a limb COLOUR** (`js/sun-disc.js`, PURE,
+    `tests/sun-disc.mjs`). Limb darkening was one grey factor on one
+    colour, so the disc was the same hue from centre to edge. It is now
+    Eddington–Barbier per channel (the limb shows cooler layers, so it
+    reddens), applied LUMINANCE-PRESERVING: the level is still the model's
+    own limb law — and on the observed hemisphere still the frame's — and
+    only the hue moves. Measured on the real HMI frame: centre
+    (255, 228, 62), 0.98 R☉ (178, 119, 14). The palette's colour picks are
+    decoded sRGB → linear before the light sum (`discDecode`). KNOWN: at
+    disc centre R clips, so the centre reads slightly lemon.
+  - **Below the frame's own pixel the page synthesises granulation and says
+    so.** A 1024 px browse frame is 2.6 Mm per pixel; a granule is ~1.4 Mm.
+    Inside that scale the observed hemisphere gets a low-contrast
+    (`GRANULE_CONTRAST`) model granulation term that fades in only where
+    the screen resolves finer than the frame (`u_obsDetail`,
+    `detailWeight`), and the provenance chip gains "+ synthesised
+    granulation" while it is drawn. `?detail=0` turns it off. The frame's
+    own structure is never altered at or above its pixel scale.
+  - **The arcade is every generation of loops at once**
+    (`arcadeShells` in `js/flare-geometry.js`): reconnection climbs, each
+    new loop is rooted further from the inversion line and stands higher,
+    and the loops under it are older. Stations along the PIL are jittered
+    (seeded by the site, so a flare keeps its arcade), brightening zips
+    outward from the centre, and each loop carries its own `age`.
+    `js/flare-arcade.js` (`style: 'ribbon'`) colours and dims each loop by
+    THAT age — 131 Å teal when new and outermost, 171 Å gold as it cools,
+    then out of the EUV bands — where it used to draw one generation of
+    identical loops in one colour that faded as a block. `arcadeLoops` and
+    the orrery's `'line'` style are untouched.
+  - **Ribbons are flare-sized.** The along-PIL envelope was ONE constant for
+    every class, σ = √0.10 rad: ribbons 440 Mm from 1/e point to 1/e point
+    (0.63 R☉) standing 28 Mm apart — a 16:1 spine, which is what made every
+    arcade read as a row of ribs. `ribbonLength0(cls)` scales it with the
+    class factor the arcade height already uses (X 152 Mm, M 112 Mm,
+    C 79 Mm — an order-of-magnitude law, not a fit); sunFS reads it as
+    `u_flare_len`. The gate keeps the old constant as its negative control.
+  - **One strand stays under display white.** At gain 2.2 every loop
+    clipped to a white tube and its colour — its temperature — was lost.
+    At 1.15 a strand keeps its hue and the arcade's brightness is strands
+    adding.
+  - **The flare event is drawn in the EUV views too.** Kernel, ribbons and
+    wave were overlaid in white light only; in the channel views — where
+    the flare director sends the viewer — the 3D arcade stood over an
+    undisturbed surface. They are now overlaid in the channel's own colour
+    (`flareEvt`, which excludes the standing active-region glow an observed
+    EUV frame already contains).
+  - **The flare shot is framed to the flare.** `flareShot({ length })`
+    derives the camera distance so the ribbons' 1/e length fills
+    `FLARE_FILL` of the frame; the typed per-class distances left a
+    real-size arcade a sixth of the picture (the gate's negative control).
+  - **Gates, and what they found.** Every Sun spec passes on the final code
+    (60 browser tests; node gates all green). Three things the run turned up:
+    a flare began with an EMPTY arcade (the zip started from the exact centre
+    and no station sits there — the central `ZIP_CORE` now forms at onset);
+    the Sun Watch rows and the region popup's flare list still started a
+    flare by hand (both now go through `playFlare` as a replay from onset);
+    and the hero framing costs fill rate — 495 → 620–672 ms/frame on
+    SwiftShader, against 799 ms for the OLD code with the Sun at the new
+    size, so per pixel the page is cheaper (two specs carry a 150 s budget
+    for it). The real-frame probe was sampling a frame one framing behind
+    the camera under load (5 failures in 6, identical numbers); it now waits
+    for a settled camera and a frame drawn with it.
+  - **Still open:** all of it is verified on a software rasteriser only.
+    The loops are still too regular up close (a comb); the flash's lifetime
+    is in sim time and could not be judged at 1–2 fps; model field lines
+    still draw over observed pixels.
+
+
+- **2026-11-21 — the flare's shape becomes a model you can iterate on (owner:
+  "make the flare geometry iterative and improveable, so we can add testing
+  to improve the realism and visuals over time").** Until now a shape change
+  meant editing constants in the kernel AND a mirrored literal in the shader,
+  and "better" was whoever was looking.
+  - **One parameter set.** `makeFlareModel(overrides)` in
+    `js/flare-geometry.js` builds every shape law from plain numbers. The
+    shader holds none: separation, width, length and decay are uniforms the
+    page writes from the model each frame (`_syncFlareShape`), and the 3D
+    arcade and the flare shot read the same model. `?flaremodel=v1`,
+    `__sun.setFlareModel({…})` and `__sun.holdFlareAt(t)` are the A/B and
+    capture hooks; a non-shipped model is named in the flare caption.
+  - **A scorecard.** `js/flare-realism.js` measures a model in Mm, km/s and
+    degrees and scores 17 rows against ranges from the flare literature. The
+    laws shipped until today (`FLARE_SHAPE_V1`, kept exactly) score 74.4;
+    the set chosen with the scorecard (`FLARE_SHAPE_V2`) scores 100.0. What
+    moved, and why: ribbons appeared 28 Mm apart and parted at a constant
+    6 km/s — now 11 Mm, parting at 33 km/s and slowing ninefold by half an
+    hour, further for bigger flares; loops started 30° sheared and relaxed
+    to 9° — now 62° → 28° (the strong-to-weak shear change); loops stood
+    2.7× taller than their half footpoint span — now 0.96× (near
+    semicircular); the brightening ran along the inversion line at
+    277 km/s — now 138.
+  - **Honest limits of the score.** 100 means every row is inside its range,
+    i.e. PLAUSIBLE on these axes. The ranges are wide, were written from
+    memory of the cited papers (no access to them here), and every row says
+    `verified: false`. `OPEN_TARGETS` lists what the model cannot produce at
+    all: J-shaped ribbon hooks, cusp-shaped new loops, asymmetric ribbon
+    motion, moving hard-X-ray kernels, supra-arcade downflows, loop
+    shrinkage.
+  - **A ratchet.** `tests/flare-realism.mjs` requires the shipped model to
+    score exactly the committed baseline: lower fails, higher fails until
+    `node scripts/flare-realism.mjs --update` locks it in, and no row may
+    slip behind a gain elsewhere. `--try '{…}'` scores a candidate row by
+    row; `--sweep path=lo:hi:n` walks one parameter.
+  - **The rendered half.** `tests/sun-flare-look.spec.js` isolates the 3D
+    arcade by differencing frames with it shown and hidden and takes the
+    largest connected lit region. Measured: the drawn arcade sits within
+    2 px of the active model's projection (v1 swapped in is 44 px off v2's —
+    the negative control); the light it adds is teal when hot and gold when
+    cooled. It also caught a real defect on its first run — a young arcade
+    was 64 % clipped white — which is now fixed (hot strands at the cool
+    strands' luminance, new-loop weight 0.55) with the old gain kept as the
+    control. `FLARE_SHOTS=<dir>` writes every frame it measured.
+  - **Next, in this order:** verify the scorecard's ranges against their
+    papers; turn `OPEN_TARGETS` into rows one at a time (J-hooks and the
+    cusp first — both are shape-only); break up the arcade's regularity
+    (still a comb up close) with a measured target for strand spacing.
+
+- **2026-11-21 (later) — J-shaped ribbons and cusp-shaped loops (owner:
+  "let's add the J-hooks and cusp loops next").** The first use of the
+  workflow above, done in its order.
+  - **Targets first.** Six rows went onto the scorecard with the features
+    switched off: how far each ribbon's end turns, the double-J (hooks at
+    opposite ends, opening away from the inversion line), the hook's size,
+    how pointed a just-formed loop is, how round a relaxed one is, and how
+    much a loop shrinks as it relaxes. The shipped model fell from 100 to
+    76.6.
+  - **Then the model.** Each ribbon now runs straight along the inversion
+    line and turns away from it on a 170° arc, the two hooks at opposite
+    ends; a loop forms with a pointed top, 1.28× its relaxed height, and
+    relaxes to the round arc. Score back to 100 over 23 rows; the old laws
+    now score 58.1. One function, `ribbonJ`, gives the distance to the
+    curve in both JS and GLSL — the gate transliterates the shader text
+    back to JS and runs it against the kernel.
+  - **Handedness.** Which ends hook and which way the arcade is sheared are
+    ONE quantity (the sign of the region's helicity). The page uses the
+    hemispheric rule as a prior, like Joy's law for the inversion line. Its
+    geometric sense (which end, for which sign) was derived by hand and has
+    NOT been checked against a published figure — the first thing to verify.
+  - **Two things the workflow caught.** (1) The first "cusp" row was the
+    angle at the loop's top, and the negative control showed it scoring the
+    OLD loops as cusps: they were round but 2.7× taller than their span,
+    which makes any arc's top angle sharp. The row is now the loop's width
+    near its top relative to a round arc on the same feet — independent of
+    height. (2) A missing feature was earning half marks (a straight ribbon
+    scored 0.50 on the hook row); feature-presence rows now carry their own
+    tolerance and an absent feature scores 0.
+  - **On pixels.** With the arcade hidden, the light the flare adds at the
+    projected hook points is 51 (of 255) against 3 at the same points
+    mirrored along the inversion line; under the old model, 6.6 and 6.2.
+  - **Still open:** the hook and cusp ranges are our encoding of "a hook"
+    and "pointed", not published measurements, and say so; hooks do not yet
+    grow or drift during the flare; the erupting rope whose feet the hooks
+    wrap is not drawn; asymmetric ribbon motion, moving hard-X-ray kernels
+    and supra-arcade downflows remain in the backlog.
+
+- **2026-11-21 (third) — the erupting flux rope (owner: "let's draw the
+  erupting flux rope next, keep working on cinematic, buffed up realism").**
+  The page has carried two owner-disabled eruption visuals since the summer (a
+  torus mesh and a bubble). They stay disabled. This is a new object, built
+  the same way as the arcade: kernel numbers, scored, drawn by a view that
+  decides nothing.
+  - **Targets first.** Eight rows went in with no rope in the model: the
+    feet stand inside the ribbons' hooks; the rope is always above the flare
+    loops; it rises slowly at onset; its acceleration peaks at a plausible
+    value and a plausible time; it coasts at a CME-like speed; its field has
+    a few turns; its width follows its height. Score 100 → 75.8.
+  - **The model.** The rope's apex follows a logistic speed curve — 92 km/s
+    at onset, a peak acceleration of 1.6 km/s² 8.5 minutes in, then
+    1 300 km/s for an X-class flare — and its height is that curve's
+    integral. Its axis runs from the centre of one hook to the centre of the
+    other, S-shaped while low and straightening as it rises; its field lines
+    wind 1.75 turns about the axis, left-handed in the north. Score back to
+    100 over 31 rows; the old laws score 44.0.
+  - **Two more things the gates caught.** The S-bend was first an
+    amplitude, and at the value I chose it turned the rope's middle 37° —
+    past the inversion line and out the other side. It is now defined as the
+    fraction of the chord's angle to turn back. And "feet inside the hooks"
+    was true by construction, which the no-decorative-rows check refused;
+    the foot position is now a parameter the row can fail.
+  - **Is this flare eruptive?** Not every flare launches a CME. The page
+    draws a rope only with a reason, and the caption says which: a linked
+    CME report (DONKI), the absence of one after three hours (drawn
+    confined, whatever the class), or — when nothing is known — the CME
+    association rate for flares that size, drawn only above 60 % and
+    captioned "eruption modelled · no CME report yet". That rate table is
+    recalled from Yashiro et al. and is unverified.
+  - **Drawn.** Strands of the model's field in the arcade's own strand
+    material, in two families — the hot channel (131 Å teal) and the
+    filament material it carries (304 Å / Hα red) — weighted by the view.
+    Brightness falls with height on a disclosed display law; the rope is
+    gone by 2.5 R☉, because beyond that this page's corona is observed and
+    a modelled CME is not painted over an observation. The particle plume
+    stands down while a rope is drawn.
+  - **Cinematic.** One flare clock: the ribbon clock used to advance a fixed
+    amount per frame beside a cooling clock in wall seconds, so they agreed
+    at one frame rate only and no camera could be timed against them. With
+    that fixed, an eruptive replay gets a shot that arrives on the flare,
+    holds, then pulls back WITH the rope — the photosphere-to-apex span held
+    at 62 % of the frame from the model's own rise — and comes back down to
+    the arcade once the rope has gone.
+  - **Still open:** twin dimmings at the rope's feet are not drawn (they
+    would darken observed pixels); a reported CME's measured speed is not
+    used — the speed is a law of the flare class; the rope has no leading
+    edge or sheath; verified on a software rasteriser only.
+- **2026-11-21 (fourth) — the rope and the hot arcade, looked at and fixed.**
+  The first replay of an eruption on the page showed four things no gate had
+  been asked about. Each is now measured.
+  - **The camera ran ahead of the rope.** The eruption shot's keys are the
+    rope's heights at future times; the flight was sampled on the wall clock,
+    and the flare clock is deliberately not the wall clock (it caps a long
+    frame at one second). At 2 s per frame the camera had pulled back to
+    7.6 R☉ with the rope at 1.75, and was home before the rope had faded. The
+    shot now reads the flare clock (`CAM.followClock`, pure): shot seconds are
+    model time ÷ the rate the keys were written at, so the camera is where the
+    rope is at any frame rate. A stopped model clock hands the shot back to
+    the wall clock after 1.5 s — pausing must not hold the camera either. The
+    node gate flies the shot at 60 fps, 4 fps, 0.5 fps and 0.29 fps; the wall
+    clock is its negative control (fine at 60 fps, ahead of the rope and home
+    early at 0.5). The follow also runs until the rope reaches its fade
+    radius (up to 100 s) rather than for a fixed 40 s.
+  - **The rope was a hairpin.** Its feet are 0.19 R☉ apart and that stayed
+    the only width it had, while its tube grew with height — by ~0.5 R☉ up
+    the tube was fatter than the gap between its own legs. Targets first: two
+    rows (the axis's angular width from Sun centre with the apex at 2 R☉,
+    25–80°; the clear gap between the legs ÷ apex height) took the shipped
+    model from 100 to 94.3 (12° and −0.26). `rope.spread` / `rope.spreadH`
+    lean the legs out along the foot-to-foot line as the rope rises: 37° and
+    0.64, and 100 again over 33 rows.
+  - **Leaning legs broke the frame.** The tube's frame was "the vertical,
+    made perpendicular to the axis" at every point — undefined where the axis
+    is vertical, which a leg that leans out passes through. Every strand was
+    pinched onto one line at each shoulder. The frame is now carried from the
+    apex by parallel transport (the gate keeps the old construction as its
+    negative control: a turn of more than 90° between two samples).
+  - **Strands.** Field lines lie on nested shells spread by the golden ratio,
+    with uneven brightness, instead of two shells at even phases (it read as
+    a spirograph). The cool strands are no longer just more field lines: a
+    filament's material sits in the dips of the helical field, on the rope's
+    underside, so they are a thin bundle offset below the axis
+    (`rope.filament`). In 304 Å the rope is now a braided prominence
+    erupting; in 131 Å, the hot channel around it. Drawn threads widen as
+    (h/h0)^0.7 and the display dilution is 0.6 — at 1, with hairline strands,
+    the rope was at 5 % brightness and sub-pixel by 1.9 R☉ while the camera
+    pulled back to frame it. Both are display choices and say so.
+  - **The hot arcade was a clipped white comb.** Three causes, three fixes in
+    the strand view (`js/flare-arcade.js`). (1) Hot loops are fuzzy and cool
+    ones crisp: a just-formed loop is drawn 2.4× wider and 2.4× fainter and
+    sharpens as it cools — its light per unit length never changes. (2) The
+    arcade has its own exposure control, as an EUV imager does on a flare:
+    each frame the light its loops will put on screen is divided by the
+    screen area they cover, and above a target the gain comes down to hold it
+    (never up, never below a floor). `arcadeExposure` is pure and node-gated,
+    and its light constant is pinned to the strand shader's own profile.
+    (3) A pointed looptop is smaller than the ribbon drawn round it, and a
+    strand pointing at the camera has no direction on screen: both drew as
+    bright blocks at every looptop, and both now fade instead. Measured by
+    the look gate on the hot arcade in close-up: clipped-white share 1.6 %
+    (was 35 %); 38.6 % with the exposure control off; 66.5 % at the old gain
+    with no control. Placement is unchanged (within ~2 px).
+  - **Still open:** the looptops of a few dozen drawn loops do not yet merge
+    into the continuous bright ridge a real arcade shows — a spine through
+    the newest loops' tops is the next step there; the rope has no leading
+    edge or sheath; everything above is a software-rasteriser result.
+- **2026-11-22 — plasma moves along the field (owner: "how can we show more
+  flux and plasma behaviors that are realistic?").** Until now every strand
+  was lit end to end the moment it existed: the arcade changed shape and
+  colour, but nothing FLOWED, and nothing connected the arcade to the rope
+  above it. Three behaviours went in, targets first (six rows; the shipped
+  model scored 88.4 with them off, 100 over 39 rows with them on; the old
+  laws 38.2).
+  - **Evaporation.** A new loop fills from both feet at 300 km/s, with a
+    brighter front at the edge of what has filled. An X-class loop takes
+    about 1.4 minutes. Each loop fills on its own age and its own length, so
+    the arcade lights up loop by loop from the ribbons upward.
+  - **Coronal rain.** Nine minutes after a loop forms, when it has cooled,
+    clumps begin to run down both legs at 80 km/s — 0.58 of free fall from
+    the arcade's top, as rain is observed to be slower than gravity allows.
+    The erupting rope's filament drains down its legs the same way.
+  - **The current sheet.** Between the arcade's top and the rope's underside
+    the page now draws the layer the field reconnects in: a fan of faint hot
+    lines, with blobs leaving the reconnection point both ways at 450 km/s —
+    down onto the arcade, up into the rope.
+  - **How it is built.** One function (`strandFlowGain`) in JS and in GLSL,
+    interpolated into the strand shader and transliterated back by the gate,
+    the way the J-shaped ribbons are. With the flows off it returns exactly
+    1, so the old picture is one switch away (`?flow=0`).
+  - **Two things the first frames showed.** The clump pattern was too sharp
+    — every loop and sheet line drew as a string of beads — and is now soft
+    (about half brightness between clumps, about double at them). And a
+    pattern's travel along something being STRETCHED has to be an integral:
+    written as speed × time ÷ length it runs backwards while the rope's legs
+    lengthen faster than the plasma moves.
+  - **Not done:** the reconnection rate is not tied to the rope's
+    acceleration (the ribbons part fastest at onset; the rope accelerates
+    8.5 minutes later) — real flares have them rise and fall together, and
+    fixing it means changing the ribbon law, so it is on the backlog with
+    its source. Supra-arcade downflows are not drawn. All six ranges are
+    from memory and unverified, like the rest. Software rasteriser only.
+- **2026-11-22 (second) — the reconnection rate is tied to the rope's
+  acceleration (owner: "tie the reconnection rate to the rope's acceleration
+  next").** The ribbons mark where newly reconnected field meets the surface,
+  so the speed at which they part is the reconnection rate. In the model they
+  parted fastest at onset, 8.5 minutes before the rope accelerated; in real
+  flares the two rise and fall together.
+  - **Targets first.** Two rows — the lag of the ribbon-speed peak behind the
+    rope's acceleration peak (±3 min), and the correlation of the two curves
+    over the first half hour — took the shipped model from 100 to 95.5 (lag
+    −8.5 min, correlation 0.59).
+  - **The law.** The ribbons now ride the rope's own progress: separation =
+    start + slow creep + gain × (share of its final speed the rope has
+    gained). The slope of that share is the rope's acceleration, so the
+    ribbons are slow at onset (15 km/s over the first two minutes), fastest
+    as the rope launches, then creep at 3.7 km/s. Lag 0, correlation 1.00,
+    and 100 again over 41 rows; the old laws score 34.9.
+  - **What the sweep showed.** With no creep the ribbons stop dead after the
+    acceleration and the arcade shrinks as its shear relaxes (−2.4 km/s at
+    25–30 min). The creep that keeps both that row and the deceleration row
+    in range is 1.5–2.1 × 10⁻⁵ rad per unit; 1.5 is shipped.
+  - **Seen on the page.** The current sheet is as bright as the reconnection
+    is fast: faint at onset, brightest as the rope accelerates, a faint ray
+    afterwards.
+  - **A weak gate found on the way.** The check that every scored row
+    responds to some parameter had been passing for the "both ribbons hook"
+    row only because the then-zero creep was probed at an absurd value. It
+    now also probes each parameter switched off.
+- **2026-11-22 (third) — the disc no longer goes dark in a close-up, and the
+  two halves of the disc match (owner: "fix items 1 and 2", the first two
+  findings of the visual review).**
+  - **Item 1 was not the flare.** The review saw the 304 Å disc fall from 109
+    to 19–25 display levels in the flare frames. Measured with no flare on
+    the page: the exposure controller meters the frame's mean, the mean rises
+    2.5–4.5 EV between the hero frame (mostly black sky) and a close-up (all
+    disc), and the controller held every close-up at its −2 EV floor for as
+    long as the camera stayed. The flare shot is simply the close-up most
+    visitors see.
+  - **The fix.** A surface's radiance does not depend on the camera's
+    distance, so a brighter frame is not a brighter Sun. The controller now
+    accommodates a brighter frame — at once while the page reports the
+    framing as changing (camera, lens, channel, a frame that just loaded),
+    over 6 s while it is still, so a flash still stops the exposure down and
+    it then recovers. The dark side (flying inside the corona) is unchanged.
+    The calibration now locks only on a still view with the whole disc in
+    frame. Browser gate: close-up frame 4.6 EV brighter than the hero frame,
+    exposure −0.02 EV; the old law on the same close-up, −2.00 EV.
+  - **Every earlier flare capture was under-exposed.** They were taken after
+    the controller had stopped down 1.4–2 EV. The flare look gate was not
+    affected (it had been running at 0 EV all along) and passes unchanged:
+    clipped-white share of the hot arcade 2.7 %.
+  - **Item 2 had four causes, all on the same edge.** Camera 90° off the
+    Sun–Earth line, real HMI frame: texture 22.6 vs 4.5 display levels and
+    the model half 10 % dimmer. (1) The model's granulation is a display
+    pattern — 15 Mm cells at ±34 % — beside a frame whose quiet disc is
+    smooth to 2 %. (2) Its display-level lifts and Ca/EUV-bright plage. (3)
+    The transition-region shell's EUV moss, drawn on the model half only.
+    (4) The observed half itself was drawn up to 40 % too dark away from disc
+    centre: the shader formed its brightness ratio from a chroma-divided
+    pixel while the calibration fitted the plain luminance, which on NASA's
+    gold-coloured frame weighted the blue channel sixteen-fold. The model's
+    over-dark granulation had been hiding that at the terminator.
+  - **The rule.** While a calibrated white-light frame is drawn, the
+    unobserved half is the model as that instrument would record it: quiet
+    texture at the contrast the frame was measured to have, on the same
+    smooth photosphere, no EUV-only features; below the frame's resolution
+    both halves get the same synthesised granulation. The MODEL view, the
+    EUV views and an uncalibrated frame are untouched. Gate on the real
+    frame: texture ratio 1.1 and level within 1 %, against 5× and 10 % for
+    the control; the synthetic seam gate's asymmetry fell from 0.045 to
+    0.039.
+  - **A side effect to know about.** The observed disc at the default view is
+    brighter toward the limb than it was (0.9 R☉: 176 display levels, was
+    156), because it is no longer limb-darkened twice. The white-light hero
+    is, if anything, flatter for it — review item 3 is still open.
+  - **Not verified.** A GPU; the EUV views when orbited (the rule is
+    white-light only); a frame with a large spot group on it (the robust
+    contrast measure is gated on a synthetic one).
 ---
 
 ## 1. Scope & locked decisions
@@ -1079,7 +1670,7 @@ owner's GPU, and *identical* screenshots on the Phase 0 baseline scenes
 | 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring: UnrealBloom ×2 + radialDiffuse → `SunPostPass`; Doppler save/restore; resize; animate drive; `flareAdd` overlay in sunFS), `tests/sun-smoke.spec.js` |
 | 3 | `js/corona-loop-density.js`, `js/corona-accumulate.js`, `tests/corona-volumetric.mjs` | `js/corona-volumetric.js` (loop sampler, two-scale jittered march, `u_marchLegacy`), `js/corona-volumetric-mount.js` (layer 1, `setLoopDensity`, `setJitter`), `js/field-atlas.js` (WASM path fix), `sun.html` (lazy default mount, accumulation pass, loop rebuild, K/F corona in coronaFS), `tests/sun-smoke.spec.js` |
 | 4 | `tests/solar-fluid.mjs` | `js/solar-fluid.js`, `sun.html` `sunFS` |
-| 5 | `js/sun-camera.js`, `tests/sun-camera.mjs` | `sun.html`, `js/preview-mode.js` |
+| 5 (2026-11-20) | `js/sun-camera.js`, `js/sun-flare-director.js`, `js/sun-limb.js`, `js/sun-coronagraph.js`, `js/lasco-sources.js`, `tests/sun-{camera,flare-director,limb,coronagraph}.mjs`, `tests/coronagraph-route.mjs`, `tests/sun-cinematic.spec.js`, `js/sun-disc.js`, `tests/sun-disc.mjs`, `tests/sun-real-frames.spec.js`, `.github/workflows/sun-kernels.yml` | `sun.html`, `js/sun-offlimb.js` (edge feather, `limbWeight`), `js/flare-arcade.js` (`style: 'ribbon'`), `api/solar/aia.js` (c2/c3), `api/health.js`, `js/pipeline-registry.js`, `tests/sun-offlimb.mjs`, the SDO fixture scripts. `js/preview-mode.js` NOT yet wired |
 | 6 | `js/vendor/three-0.17x/`, `js/sun-render.js`, `tests/sunfield-kernel-smoke.mjs`, `scripts/lint-three-vendor.mjs` | `sun.html` import map |
 
 Extraction rule: shader code that Phase 2/6 needs to compile for two
@@ -1168,6 +1759,18 @@ log. Re-read CLAUDE.md §5 before opening it.
 ---
 
 ## 9. Deferred / open
+
+- ~~Settle the LASCO frames~~ — DONE 2026-11-20 on real frames: limb circle
+  measured, ring ratio 0.995, north-up. STILL OPEN: SOHO flies inverted for
+  about half the year, and only one orientation has been seen — `autoRoll`
+  is off; check `pylonPaDeg` on C3 after the next roll manoeuvre.
+- ~~Make GOES/SUVI the default off-limb source~~ — DONE 2026-11-20 (upstream
+  settled on production, SDO fallback kept).
+- **Cinematic mode in `?preview=1`** and depth of field — the Phase 5 items
+  not built on 2026-11-20. (Per-loop variation in the arcade shipped the same
+  day: `arcadeShells`.)
+- ~~Route Sun Watch's flare rows through `playFlare`~~ — DONE 2026-11-20
+  (and the region popup's flare list).
 
 - **GONG far-side plage seeding** (`/api/solar/farside?format=series` →
   the strongest detections modulate a far-hemisphere plage term; no

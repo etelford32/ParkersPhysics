@@ -111,7 +111,15 @@ test.describe('sun.html flare-site geometry', () => {
         expect(g0.arcade.loops).toBeGreaterThan(0);
         expect(g0.arcade.pil).toBe('prior');
         expect(g0.arcade.apexR).toBeGreaterThan(1.02);
-        expect(g0.arcade.apexR).toBeCloseTo(1 + FG.arcadeHeight(g0.arcade.t, 'X'), 6);
+        // The arcade is NESTED (FG.arcadeShells): every loop is a generation that
+        // formed at some τ ≤ t, at arcadeHeight(τ) × (1 ± HEIGHT_JITTER). So the
+        // kernel's envelope is the bound, not an equality on the tallest loop.
+        expect(g0.arcade.nested).toBe(true);
+        const hEnv = FG.arcadeHeight(g0.arcade.builtT, 'X');
+        expect(g0.arcade.envelopeApexR).toBeCloseTo(1 + hEnv, 9);
+        // …and a loop that has just formed stands taller by the cusp it has not yet retracted (cusp.shrink).
+        expect(g0.arcade.apexR - 1).toBeLessThanOrEqual(hEnv * (1 + FG.ARCADE.HEIGHT_JITTER) * (1 + FG.FLARE_MODEL.params.cusp.shrink) + 1e-9);
+        expect(g0.arcade.apexR - 1).toBeGreaterThanOrEqual(FG.arcadeHeight(0, 'X') * (1 - FG.ARCADE.HEIGHT_JITTER) - 1e-9);
         expect(g0.arcadeSite.cls).toBe('X');
 
         // Let the frame turn, fast.
@@ -175,5 +183,74 @@ test.describe('sun.html flare-site geometry', () => {
         expect(g.site.lonRad0).toBeCloseTo(FG.epochLonFor(45 * DEG, g.rotAngle, -8 * DEG), 12);
         expect(vdist(g.siteNow, FG.stonyhurstToUnit(-8 * DEG, 45 * DEG))).toBeLessThan(1e-9);
         expect(g.arcadeSite.cls).toBe('M');
+    });
+    test('plasma moves along the field: loops fill then rain, the filament drains, a current sheet stands under the rope', async ({ page }) => {
+        test.setTimeout(150_000);
+        const errors = [];
+        page.on('pageerror', (e) => errors.push('PAGEERR ' + e.message));
+        page.on('console', (m) => { if (m.type() === 'error' && /shader|program|GLSL|WebGL/i.test(m.text())) errors.push(m.text().slice(0, 300)); });
+        await boot(page);
+        const at = async (t) => {
+            await page.evaluate((t) => window.__sun.holdFlareAt(t), t);
+            await page.waitForFunction((t) => Math.abs(window.__sun.flareGeometry.arcade.builtT - t) < 1e-6 && Math.abs(window.__sun.flareRope.state.t - t) < 1e-6, t, { timeout: 60_000 });
+            return page.evaluate(() => {
+                const s = window.__sun, A = s.flareArcade, R = s.flareRope;
+                // What each drawn loop's own material was handed, beside what the kernel says for that loop.
+                const loops = A.group.children.filter((m) => m.visible && m.material?.userData?.flow && m.userData.loop).map((m) => {
+                    const f = m.material.userData.flow.value, L = m.userData.loop;
+                    const k = s.flareModel.loopFlow({ age: L.age, halfLength: m.userData.halfLength });
+                    return { mode: f.x, fill: f.y, rain: f.z, kFill: k.fill, kRain: k.rain, half: m.userData.halfLength, len: s.FG.polylineLength(L.pts) };
+                });
+                const sheetMeshes = R.group.children.filter((m) => m.visible && m.material?.userData?.flow?.value.x === 2);
+                const filament = R.group.children.filter((m) => m.visible && m.material?.userData?.flow?.value.x === 1);
+                return { arcade: A.state, rope: R.state, loops, sheetLines: sheetMeshes.length, filament: filament.length,
+                    sheetK: s.flareModel.sheetState(R.state.t, R.site.cls) };
+            });
+        };
+        await page.evaluate(() => window.__sun.testFlare('X2.0', 12, 30, { flash: false }));
+
+        // EARLY (t = 40): the newest loops are still filling from their feet; nothing rains yet.
+        const early = await at(40);
+        expect(early.arcade.flow.on).toBe(true);
+        expect(early.arcade.flow.filling, 'new loops are filling').toBeGreaterThan(3);
+        expect(early.arcade.flow.raining).toBe(0);
+        expect(early.loops.length).toBeGreaterThan(5);
+        for (const L of early.loops) {
+            expect(L.mode).toBe(1);
+            expect(L.fill).toBeCloseTo(L.kFill, 5); expect(L.rain).toBeCloseTo(L.kRain, 5);       // float32 uniforms
+            expect(L.half).toBeCloseTo(0.5 * L.len, 12);                                          // the loop's OWN half-length
+        }
+        // THE RISE (t = 150): the rope is up, a sheet stands between the arcade's top and its underside, the filament is draining.
+        const mid = await at(150);
+        expect(mid.rope.active).toBe(true);
+        expect(mid.rope.sheet.active).toBe(true);
+        expect(mid.sheetLines, 'sheet lines drawn').toBeGreaterThan(6);
+        expect(mid.rope.sheet.lowH).toBeCloseTo(mid.sheetK.lowH, 12); expect(mid.rope.sheet.highH).toBeCloseTo(mid.sheetK.highH, 12);
+        expect(mid.rope.sheet.highH).toBeGreaterThan(mid.rope.sheet.lowH + 0.02);
+        expect(mid.arcade.envelopeApexR - 1, 'the sheet starts above the arcade').toBeLessThan(mid.rope.sheet.lowH + 1e-9);
+        expect(mid.rope.drain.rain, 'the filament is draining').toBeGreaterThan(0.9);
+        expect(mid.filament).toBeGreaterThan(3);
+        // LATE (t = 520): the rope has gone (no sheet); the cooled loops are raining and none is still filling.
+        const late = await at(520);
+        expect(late.rope.sheet).toBe(null);
+        expect(late.arcade.flow.raining, 'cooled loops rain').toBeGreaterThan(20);
+        expect(late.arcade.flow.filling).toBe(0);
+        expect(late.loops.some((L) => L.rain > 0.99)).toBe(true);
+
+        // NEGATIVE CONTROL: the flows off — every loop is handed mode 0 (the gain is then exactly 1), no sheet, no drainage.
+        await page.evaluate(() => { const s = window.__sun; s.flareArcade.setFlowEnabled(false); s.flareRope.setFlowEnabled(false); });
+        await page.evaluate(() => window.__sun.holdFlareAt(150.5));
+        await page.waitForFunction(() => Math.abs(window.__sun.flareGeometry.arcade.builtT - 150.5) < 1e-6 && Math.abs(window.__sun.flareRope.state.t - 150.5) < 1e-6, null, { timeout: 60_000 });
+        const off = await page.evaluate(() => {
+            const s = window.__sun;
+            return { arcade: s.flareArcade.state.flow, rope: s.flareRope.state,
+                modes: s.flareArcade.group.children.filter((m) => m.visible && m.material?.userData?.flow).map((m) => m.material.userData.flow.value.x),
+                ropeModes: s.flareRope.group.children.filter((m) => m.visible && m.material?.userData?.flow).map((m) => m.material.userData.flow.value.x) };
+        });
+        expect(off.arcade).toEqual({ on: false, filling: 0, raining: 0 });
+        expect(off.modes.length).toBeGreaterThan(5); expect(off.modes.every((m) => m === 0)).toBe(true);
+        expect(off.rope.sheet).toBe(null); expect(off.rope.drain).toBe(null);
+        expect(off.ropeModes.every((m) => m === 0)).toBe(true);
+        expect(errors, 'the strand shader compiled with the flow function in it').toEqual([]);
     });
 });

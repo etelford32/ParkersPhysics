@@ -47,6 +47,10 @@ import { calibrateDisk, srgbToLinear, linearToSrgb, limbLaw } from '../js/sun-ob
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = join(HERE, 'fixtures', 'sdo');
 const MAN = JSON.parse(readFileSync(join(FIXTURE_DIR, 'manifest.json'), 'utf8'));
+// The REAL browse frames (fetched 2026-11-20; tests/fixtures/sdo/README.md). The
+// texture gate below runs on these: a synthetic disc has no instrument texture
+// to match, and CLAUDE.md's rule is that an observed layer is judged on real frames.
+const REAL = JSON.parse(readFileSync(join(FIXTURE_DIR, 'real-manifest.json'), 'utf8'));
 
 // ── A GOLD-COLORIZED white-light frame ──────────────────────────────────────
 // sdo.gsfc.nasa.gov ships the HMI continuum through a gold browse LUT. The
@@ -63,14 +67,14 @@ function goldenize(pngBuffer) {
     return pngBuffer;
 }
 
-async function routeAia(page, { gold }) {
+async function routeAia(page, { gold, real = false }) {
     await page.route('**/api/solar/aia*', (route) => {
         const ch = new URL(route.request().url()).searchParams.get('channel') || 'white';
-        const frame = MAN.frames[ch] || MAN.frames.white;
+        const frame = (real ? REAL.frames[ch] : null) || MAN.frames[ch] || MAN.frames.white;
         route.fulfill({
             status: 200,
             headers: {
-                'Content-Type': 'image/png',
+                'Content-Type': /\.jpe?g$/.test(frame.file) ? 'image/jpeg' : 'image/png',
                 'X-AIA-Channel': ch,
                 'X-AIA-Mode': 'live',
                 'X-SDO-Observed-At': new Date(Date.now() - 7 * 60 * 1000).toISOString(),
@@ -125,7 +129,7 @@ function attachShaderErrors(page) {
     return errs;
 }
 
-async function boot(page, { gold = false } = {}) {
+async function boot(page, { gold = false, real = false } = {}) {
     await page.addInitScript(() => {
         try {
             localStorage.setItem('pp_consent_v1', JSON.stringify(
@@ -137,7 +141,7 @@ async function boot(page, { gold = false } = {}) {
         await page.addInitScript(() => { window.__ppGoldOn = true; });
     }
     const errs = attachShaderErrors(page);
-    await routeAia(page, { gold });
+    await routeAia(page, { gold, real });
     await page.setViewportSize({ width: 1100, height: 780 });
     await page.goto('/sun.html');
     await page.waitForFunction(() => window.__sun && window.__sun.frames > 5, null, { timeout: 40_000 });
@@ -265,6 +269,63 @@ async function seamMetric(page, shot) {
     }, { b64: shot.toString('base64') });
 }
 
+/**
+ * TEXTURE AND LEVEL OF THE TWO HALVES, camera 90° off the Sun–Earth line so
+ * the terminator runs down the middle of the disc. Two matched patches, one
+ * either side of disc centre at the same distance from it (so the same μ —
+ * limb darkening cancels, as in seamMetric): the mean level, and the
+ * pixel-to-pixel texture as the standard deviation of (pixel − its 5×5 box
+ * mean). Which patch is which half is not assumed: the result is the ratio of
+ * the rougher to the smoother, and the relative level difference.
+ */
+async function halfMetric(page, shot) {
+    return page.evaluate(async ({ b64 }) => {
+        const img = new Image();
+        await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = 'data:image/png;base64,' + b64; });
+        const c = document.createElement('canvas');
+        c.width = img.width; c.height = img.height;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(img, 0, 0);
+        const { data, width: W, height: H } = g.getImageData(0, 0, c.width, c.height);
+        const L = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) L[i] = 0.2126 * data[i * 4] + 0.7152 * data[i * 4 + 1] + 0.0722 * data[i * 4 + 2];
+        // The disc, found the way seamMetric finds it.
+        const all = [];
+        for (let i = 0; i < W * H; i += 7) all.push(L[i]);
+        all.sort((a, b) => a - b);
+        const THRESH = all[Math.floor(all.length * 0.95)] * 0.45;
+        let sx = 0, sy = 0, n = 0;
+        for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (L[y * W + x] > THRESH) { sx += x; sy += y; n++; }
+        if (n < 400) return { ok: false, bright: n };
+        const xc = Math.round(sx / n), yc = Math.round(sy / n);
+        const on = (x, y) => x >= 0 && y >= 0 && x < W && y < H && L[y * W + x] > THRESH;
+        let lo = xc; while (on(lo - 1, yc)) lo--;
+        let hi = xc; while (on(hi + 1, yc)) hi++;
+        let top = yc; while (on(xc, top - 1)) top--;
+        let bot = yc; while (on(xc, bot + 1)) bot++;
+        const R = Math.min(hi - lo, bot - top) / 2, cx = (lo + hi) / 2, cy = (top + bot) / 2;
+        if (R < 70) return { ok: false, R };
+        const patch = (sgn) => {
+            const xa = Math.round(cx + sgn * 0.30 * R), xb = Math.round(cx + sgn * 0.62 * R);
+            const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), y0 = Math.round(cy - 0.40 * R), y1 = Math.round(cy + 0.40 * R);
+            let m = 0, k = 0, hp = 0, hp2 = 0;
+            for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+                let b = 0;
+                for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) b += L[(y + dy) * W + x + dx];
+                const v = L[y * W + x], d = v - b / 25;
+                m += v; hp += d; hp2 += d * d; k++;
+            }
+            return { mean: m / k, tex: Math.sqrt(Math.max(hp2 / k - (hp / k) ** 2, 0)) };
+        };
+        const a = patch(-1), b = patch(+1);
+        return {
+            ok: true, R: Math.round(R), a, b,
+            texRatio: Math.max(a.tex, b.tex) / Math.max(Math.min(a.tex, b.tex), 1e-3),
+            levelDiff: Math.abs(a.mean - b.mean) / ((a.mean + b.mean) / 2),
+        };
+    }, { b64: shot.toString('base64') });
+}
+
 const CLIP = { x: 150, y: 90, width: 800, height: 620 };
 
 test.describe('sun.html observed ↔ model photometric fusion', () => {
@@ -327,6 +388,48 @@ test.describe('sun.html observed ↔ model photometric fusion', () => {
         // …and the gate must actually be able to tell them apart, or it has
         // stopped measuring anything and would pass on a re-broken page.
         expect(broken.worstInner).toBeGreaterThan(fixed.worstInner * 2.5);
+    });
+
+    test('THE TEXTURE GATE: on a real frame the two halves carry the same texture and level; the model\'s own granulation is the control', async ({ page }) => {
+        test.setTimeout(240_000);
+        const errs = await boot(page, { real: true });
+        expect(errs, errs.join('\n')).toHaveLength(0);
+        const st = await page.evaluate(() => {
+            const s = window.__sun, u = s.uniforms;
+            s.post.adaptEnabled = false;            // a level comparison must not ride the exposure controller
+            u.u_obsGrid.value = 0;                  // the graticule is a deliberate cue on the model half, not texture
+            return { fuse: u.u_obsFuse.value, quiet: u.u_obsQuiet.value, farFuse: u.u_farFuse.value };
+        });
+        expect(st.fuse, 'the real frame calibrates').toBe(1);
+        expect(st.farFuse).toBe(1);
+        // The real HMI frame's quiet disc is smooth to a few per cent — that is the whole point.
+        expect(st.quiet).toBeGreaterThan(0.005);
+        expect(st.quiet).toBeLessThan(0.06);
+        await orbit(page, 90);
+        await page.waitForTimeout(2500);
+        const gain = await page.evaluate(() => window.__sun.uniforms.u_farTex.value);
+        expect(gain, 'the gain is the frame\'s contrast over the model\'s (js/sun-disc.js)').toBeGreaterThan(0.03);
+        expect(gain).toBeLessThan(0.3);
+
+        const fused = await halfMetric(page, await page.screenshot({ clip: CLIP }));
+        expect(fused.ok, 'found the disc').toBe(true);
+
+        // NEGATIVE CONTROL — the look shipped until 2026-11-22: the model half keeps its
+        // own display granulation (15 Mm cells at ±34 %), its level lifts, and its EUV moss.
+        await page.evaluate(() => { window.__sun.uniforms.u_farFuse.value = 0.0; });
+        await page.waitForTimeout(2500);
+        const legacy = await halfMetric(page, await page.screenshot({ clip: CLIP }));
+        expect(legacy.ok).toBe(true);
+        console.log(`halves  fused: texture ratio ${fused.texRatio.toFixed(2)} (${fused.a.tex.toFixed(2)} / ${fused.b.tex.toFixed(2)}), level diff ${(fused.levelDiff * 100).toFixed(1)} % (${fused.a.mean.toFixed(1)} / ${fused.b.mean.toFixed(1)})`);
+        console.log(`       legacy: texture ratio ${legacy.texRatio.toFixed(2)} (${legacy.a.tex.toFixed(2)} / ${legacy.b.tex.toFixed(2)}), level diff ${(legacy.levelDiff * 100).toFixed(1)} % (${legacy.a.mean.toFixed(1)} / ${legacy.b.mean.toFixed(1)})`);
+
+        // Measured 2026-11-22 on the software renderer: fused 1.0–1.5× and 0.5–1.5 %;
+        // legacy 5.3× and 10 %.
+        expect(fused.texRatio, 'the model half is no rougher than the instrument records').toBeLessThan(2.2);
+        expect(fused.levelDiff, 'the two halves sit at one level').toBeLessThan(0.04);
+        expect(legacy.texRatio, 'the control must still read as a seam in texture').toBeGreaterThan(3.5);
+        expect(legacy.levelDiff, 'and in level').toBeGreaterThan(0.06);
+        expect(legacy.texRatio).toBeGreaterThan(fused.texRatio * 2);
     });
 
     test('at the default camera the correction is the identity — the frame is trusted to the limb', async ({ page }) => {

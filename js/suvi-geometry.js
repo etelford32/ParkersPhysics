@@ -272,35 +272,24 @@ export function annulusCoverage(rIn, rOut, diskFraction) {
  * is primary is an operational decision we do not get to assume.
  */
 export const SOURCE_CANDIDATES = Object.freeze([
+    // SETTLED 2026-11-20 by one production request
+    //   curl '…/api/solar/aia?channel=suvi304&meta=1' | jq .source_id,.candidates
+    // → swpc-animation-primary-png 200 image/png (a frame 88 s old), and the
+    // secondary slot 200 too. The three other spellings this list used to try
+    // (…/latest.jpg, /images/suvi-primary-{code}.png and its secondary twin)
+    // all answered 404 and were removed. The frame is a 1280² RGBA PNG titled
+    // "GOES-19 SUVI Composite"; tests/fixtures/sdo/real_suvi304.png is one.
     Object.freeze({
         id: 'swpc-animation-primary-png',
         satellite: 'primary',
         template: 'https://services.swpc.noaa.gov/images/animations/suvi/primary/{code}/latest.png',
-        note: 'SWPC animation frame directory — the path the public SUVI loops are served from.',
-    }),
-    Object.freeze({
-        id: 'swpc-animation-primary-jpg',
-        satellite: 'primary',
-        template: 'https://services.swpc.noaa.gov/images/animations/suvi/primary/{code}/latest.jpg',
-        note: 'Same directory, JPEG rather than PNG.',
-    }),
-    Object.freeze({
-        id: 'swpc-flat-primary-png',
-        satellite: 'primary',
-        template: 'https://services.swpc.noaa.gov/images/suvi-primary-{code}.png',
-        note: 'Flat /images naming, the shape several other SWPC single-frame products use.',
+        note: 'SWPC animation frame directory — the path the public SUVI loops are served from. VERIFIED on production 2026-11-20.',
     }),
     Object.freeze({
         id: 'swpc-animation-secondary-png',
         satellite: 'secondary',
         template: 'https://services.swpc.noaa.gov/images/animations/suvi/secondary/{code}/latest.png',
-        note: 'Secondary spacecraft — tried only after every primary candidate.',
-    }),
-    Object.freeze({
-        id: 'swpc-flat-secondary-png',
-        satellite: 'secondary',
-        template: 'https://services.swpc.noaa.gov/images/suvi-secondary-{code}.png',
-        note: 'Flat naming for the secondary spacecraft.',
+        note: 'Secondary spacecraft — tried only after the primary. VERIFIED on production 2026-11-20.',
     }),
 ]);
 

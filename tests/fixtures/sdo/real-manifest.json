@@ -1,0 +1,128 @@
+{
+  "synthetic": false,
+  "fetched": "2026-11-20T15:15:02.245Z",
+  "res": 1024,
+  "frames": {
+    "94": {
+      "file": "real_94.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0094.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:10:08 GMT",
+      "bytes": 335859,
+      "thumb": "real_94_256.png",
+      "thumbSize": 256,
+      "sha256": "110dc5fff83061d26275f0f2e314c2d761cb2a209467189cff5d5d7082bdc049"
+    },
+    "131": {
+      "file": "real_131.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:11:05 GMT",
+      "bytes": 230876,
+      "thumb": "real_131_256.png",
+      "thumbSize": 256,
+      "sha256": "72bf50871440a61e6002d2ac496dcc5f29c400eccedcc763ceb522bbc19368cd"
+    },
+    "171": {
+      "file": "real_171.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:12:06 GMT",
+      "bytes": 182986,
+      "thumb": "real_171_256.png",
+      "thumbSize": 256,
+      "sha256": "077335bf24d419c0515aa9333c410de6bff348b8e17ea9a5413c6d29b7cbd9c3"
+    },
+    "193": {
+      "file": "real_193.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:13:06 GMT",
+      "bytes": 139416,
+      "thumb": "real_193_256.png",
+      "thumbSize": 256,
+      "sha256": "dab5d56a5c4638ae5bb57268ac2e90b4c93dbb554207dffc80079beae3b1241c"
+    },
+    "211": {
+      "file": "real_211.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:05:07 GMT",
+      "bytes": 136348,
+      "thumb": "real_211_256.png",
+      "thumbSize": 256,
+      "sha256": "77f53b7a486e688804eb416ed87f2b5657ec50c7bee5406d32982931772f777d"
+    },
+    "304": {
+      "file": "real_304.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:14:06 GMT",
+      "bytes": 206708,
+      "thumb": "real_304_256.png",
+      "thumbSize": 256,
+      "sha256": "0bad77165bc54b50da189977ad650722a19cb0b4072bc2c21b3908d6b5c4d8ff"
+    },
+    "white": {
+      "file": "real_white.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:10:06 GMT",
+      "bytes": 202946,
+      "thumb": "real_white_256.png",
+      "thumbSize": 256,
+      "sha256": "ab6c21d6836441516c57e3be4cbb8b2e84ab12bb83bc96061e05fd629a4f1437"
+    },
+    "mag": {
+      "file": "real_mag.jpg",
+      "url": "https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIB.jpg",
+      "lastModified": "Fri, 20 Nov 2026 15:10:15 GMT",
+      "bytes": 406801,
+      "thumb": "real_mag_256.png",
+      "thumbSize": 256,
+      "sha256": "1d160292358a3e39098351fc698db1c4292fe130a058bbb67a26aefdbc70f404"
+    },
+    "c2": {
+      "file": "real_c2.jpg",
+      "url": "https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg",
+      "lastModified": "Fri, 20 Nov 2026 12:11:30 GMT",
+      "bytes": 448661,
+      "thumb": "real_c2_256.png",
+      "thumbSize": 256,
+      "sha256": "08ad81c39b2fbab39378fe05548daafac7ccad17feb0f2204cccd06d794121a4"
+    },
+    "c3": {
+      "file": "real_c3.jpg",
+      "url": "https://soho.nascom.nasa.gov/data/realtime/c3/1024/latest.jpg",
+      "lastModified": "Fri, 20 Nov 2026 13:11:25 GMT",
+      "bytes": 836060,
+      "thumb": "real_c3_256.png",
+      "thumbSize": 256,
+      "sha256": "6a1ea927da09c4e51a183432e7bd28bbb8ce2b0ea101110d924eff54a20b2cbc"
+    },
+    "suvi304": {
+      "file": "real_suvi304.png",
+      "url": "https://services.swpc.noaa.gov/images/animations/suvi/primary/304/latest.png",
+      "source_id": "swpc-animation-primary-png",
+      "lastModified": "Fri, 20 Nov 2026 15:12:48 GMT",
+      "bytes": 1172467,
+      "thumb": "real_suvi304_256.png",
+      "thumbSize": 256,
+      "sha256": "9dfade36f4f0611c01cffe4ec21e604c069fb01ea3ae796d6512c6e17d06bd1c"
+    },
+    "suvi131": {
+      "file": "real_suvi131.png",
+      "url": "https://services.swpc.noaa.gov/images/animations/suvi/primary/131/latest.png",
+      "source_id": "swpc-animation-primary-png",
+      "lastModified": "Fri, 20 Nov 2026 15:14:51 GMT",
+      "bytes": 566215,
+      "thumb": "real_suvi131_256.png",
+      "thumbSize": 256,
+      "sha256": "a3e3201f076b4597c257ca04a3c41c9913e7aeaaafed7040c5488fc23a03509e"
+    },
+    "c3_dropout": {
+      "file": "real_c3_dropout.jpg",
+      "url": "https://soho.nascom.nasa.gov/data/realtime/c3/1024/latest.jpg",
+      "lastModified": "Fri, 20 Nov 2026 13:11:25 GMT",
+      "bytes": 836060,
+      "kept": true,
+      "note": "SOHO/LASCO C3 realtime frame served 2026-11-20 with a telemetry dropout: the right half is missing blocks (black) and garbage. Kept as the negative control for the frame-integrity check in js/sun-coronagraph.js.",
+      "thumb": "real_c3_dropout_256.png",
+      "thumbSize": 256,
+      "sha256": "6a1ea927da09c4e51a183432e7bd28bbb8ce2b0ea101110d924eff54a20b2cbc"
+    }
+  }
+}

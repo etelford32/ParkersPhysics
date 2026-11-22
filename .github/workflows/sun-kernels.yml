@@ -1,0 +1,113 @@
+# sun-kernels — the pure half of sun.html (plain node, no install)
+#
+# These gates existed as files for months without a workflow running them;
+# the 2026-11 cinematic pass added four kernels and this job with them.
+#
+#   sun-limb.mjs            the analytic limb: true-scale scale heights, the
+#                           box-filtered shell vs quadrature, energy kept at any
+#                           pixel size, and the old pow(rim, n) flat band as the
+#                           NEGATIVE CONTROL
+#   sun-disc.mjs            the disc's limb colour (Eddington-Barbier, luminance
+#                           preserved), palette decode, sub-frame detail weight
+#   flare-realism.mjs       the flare-shape model measured against observed
+#                           ranges; a committed baseline that only ratchets up
+#   sun-camera.mjs          framing (fitDistance, safeFrame, hero), spherical
+#                           flights that never enter the Sun (a Cartesian lerp
+#                           is the negative control), one-shot runner, shots
+#   sun-flare-director.mjs  one event shape from DONKI / SWPC / the page list,
+#                           west-positive, unlocated ⇒ never placed, phases out
+#                           of the flare's own cooling track
+#   sun-coronagraph.mjs     SOHO/LASCO C2 + C3: measured geometry, occulter and
+#                           timestamp masks, per-frame level, C2 → C3 hand-over
+#   coronagraph-route.mjs   /api/solar/aia?channel=c2|c3 on a stubbed upstream
+#   + the gates that were already there: the observed disc, the off-limb ring
+#     (now with the detector-edge feather), SUVI geometry + route, the post
+#     chain, the volumetric corona, nanoflares, the flare DEM, HEK filaments,
+#     flare geometry.
+#
+# Browser gates (tests/sun-*.spec.js) run with the Playwright suite; the GPU
+# screenshot baseline (tests/sun-visual.spec.js) is opt-in on real hardware.
+name: sun-kernels
+
+on:
+  push:
+    paths:
+      - 'sun.html'
+      - 'js/sun-*.js'
+      - 'js/flare-*.js'
+      - 'js/corona-*.js'
+      - 'js/suvi-geometry.js'
+      - 'js/lasco-sources.js'
+      - 'js/hek-filaments.js'
+      - 'api/solar/**'
+      - 'tests/sun-*.mjs'
+      - 'tests/flare-*.mjs'
+      - 'tests/corona-volumetric.mjs'
+      - 'tests/suvi-*.mjs'
+      - 'tests/coronagraph-route.mjs'
+      - 'tests/hek-filaments.mjs'
+      - 'tests/fixtures/sdo/**'
+      - 'scripts/lib/sdo-synth.mjs'
+      - 'scripts/bake-sdo-real-thumbs.py'
+      - '.github/workflows/sun-kernels.yml'
+  pull_request:
+    paths:
+      - 'sun.html'
+      - 'js/sun-*.js'
+      - 'js/flare-*.js'
+      - 'js/corona-*.js'
+      - 'js/suvi-geometry.js'
+      - 'js/lasco-sources.js'
+      - 'js/hek-filaments.js'
+      - 'api/solar/**'
+      - 'tests/sun-*.mjs'
+      - 'tests/flare-*.mjs'
+      - 'tests/corona-volumetric.mjs'
+      - 'tests/suvi-*.mjs'
+      - 'tests/coronagraph-route.mjs'
+      - 'tests/hek-filaments.mjs'
+      - 'tests/fixtures/sdo/**'
+      - 'scripts/lib/sdo-synth.mjs'
+      - 'scripts/bake-sdo-real-thumbs.py'
+      - '.github/workflows/sun-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sun-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Sun page kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: limb + camera + flare director
+        run: node tests/sun-limb.mjs && node tests/sun-camera.mjs && node tests/sun-flare-director.mjs
+      - name: disc colour + flare geometry
+        run: node tests/sun-disc.mjs && node tests/flare-geometry.mjs
+      # The flare-shape model's scorecard: the shipped parameter set must score
+      # exactly the committed baseline (it only ratchets up).
+      - name: flare realism scorecard
+        run: node tests/flare-realism.mjs
+      - name: coronagraph (kernel + route)
+        run: node tests/sun-coronagraph.mjs && node tests/coronagraph-route.mjs
+      - name: observed disc + off-limb ring + SUVI
+        run: node tests/sun-observed.mjs && node tests/sun-offlimb.mjs && node tests/suvi-geometry.mjs && node tests/suvi-route.mjs
+      - name: post chain + corona + nanoflares
+        run: node tests/sun-post.mjs && node tests/corona-volumetric.mjs && node tests/sun-nanoflares.mjs
+      - name: flares (DEM + geometry) + HEK filaments
+        run: node tests/flare-dem.mjs && node tests/flare-geometry.mjs && node tests/hek-filaments.mjs
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs
+      - name: real-frame thumbnails are current
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 scripts/bake-sdo-real-thumbs.py --check
