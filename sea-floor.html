@@ -14,7 +14,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/sea-floor.html">
-<meta property="og:title" content="Sea Floor — how deep, and how cold, are the ocean's trenches?">
+<meta property="og:title" content="Sea Floor — a 3D globe of the ocean floor you can dive beneath">
 <meta property="og:description" content="Twenty-eight trenches, deeps and abyssal plains in 3D, with the deepest real temperature casts ever lowered into them and an echo sounder you can fire yourself.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Sea Floor — the ocean's trenches, sounded">
@@ -77,12 +77,23 @@ h2 small { font-weight:400; color:var(--sf-ink-3); font-size:.72rem; }
 .sf-badge[data-kind="model"] { border-style:dashed; }
 /* stage */
 #sf-stage { position:relative; width:100%; height:clamp(380px, 62vh, 720px); background:#050912; border-radius:8px; overflow:hidden; }
-#sf-stage-host { position:absolute; inset:0; }
+#sf-stage-host, #sf-globe-host { position:absolute; inset:0; outline:none; }
+#sf-stage[data-mode="globe"] #sf-stage-host, #sf-stage[data-mode="local"] #sf-globe-host { display:none; }
+#sf-stage[data-mode="globe"] [data-for="local"], #sf-stage[data-mode="local"] [data-for="globe"] { display:none; }
+.sf-group { display:inline-flex; gap:6px 10px; flex-wrap:wrap; align-items:center; }
+.sf-seg { display:inline-flex; } .sf-seg button:first-child { border-radius:6px 0 0 6px; } .sf-seg button:last-child { border-radius:0 6px 6px 0; border-left:0; }
+#sf-stage-tools button[aria-pressed="true"] { background:rgba(60,110,170,.95); border-color:rgba(143,211,255,.6); }
+#sf-stage-tools button:disabled { opacity:.45; cursor:default; }
+#sf-dive, #sf-dive-here { background:rgba(40,90,140,.9); font-weight:600; }
+#sf-dive-hud { right:8px; bottom:8px; max-width:min(330px, calc(100% - 16px)); line-height:1.5; color:var(--sf-ink); }
+#sf-dive-hud[hidden] { display:none; }
+#sf-dive-hud b { font-variant-numeric:tabular-nums; } #sf-dive-hud small { color:var(--sf-ink-3); }
+#sf-dive-hud .sf-zone { font-weight:650; }
+@media (max-width: 640px) { #sf-dive-hud { left:8px; right:8px; bottom:auto; top:96px; max-width:none; font-size:.68rem; } }
 .sf-ov { position:absolute; z-index:2; background:rgba(6,10,20,.82); border:1px solid var(--sf-line); border-radius:8px; padding:6px 8px; font-size:.72rem; color:var(--sf-ink-2); }
 #sf-stage-tools { top:8px; left:8px; right:8px; display:flex; gap:6px 10px; flex-wrap:wrap; align-items:center; }
 #sf-stage-tools button, #sf-stage-tools select, .sf-btn { font:inherit; font-size:.74rem; color:var(--sf-ink); background:rgba(30,45,75,.8); border:1px solid var(--sf-line); border-radius:6px; padding:5px 9px; min-height:30px; cursor:pointer; }
 #sf-stage-tools button:hover, .sf-btn:hover { border-color:rgba(143,211,255,.5); }
-#sf-ping { background:rgba(40,90,140,.9); font-weight:600; }
 #sf-stage-tools label { display:inline-flex; gap:6px; align-items:center; }
 #sf-stage-readout { left:8px; bottom:8px; max-width:min(520px, calc(100% - 16px)); line-height:1.5; color:var(--sf-ink); }
 #sf-stage-readout small { color:var(--sf-ink-3); }
@@ -127,11 +138,42 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
     <p>How deep are the ocean's trenches, and how cold is the water at the bottom? Depth here comes from a global bathymetry grid;
       temperature comes from the deepest real casts ever archived near each site in NOAA's World Ocean Database. Where no instrument reached
       the floor, the profile is continued by physics and marked as modelled. One result surprises most people: below about four kilometres
-      the water gets <em>warmer</em> with depth, because it is squeezed. Pick a site, then fire the echo sounder to see why measuring depth is harder than it sounds.</p>
+      the water gets <em>warmer</em> with depth, because it is squeezed. Turn the globe, click anywhere on the ocean and dive under the surface to the sea floor. Then fire the echo sounder to see why measuring depth is harder than it sounds.</p>
+  </section>
+
+  <section class="sf-panel sf-span" id="sf-stage-panel">
+    <h2><span id="sf-site-title">The ocean floor</span> <small id="sf-site-sub"></small></h2>
+    <div id="sf-stage" data-mode="globe">
+      <div id="sf-globe-host" aria-label="3D globe of the ocean floor"></div>
+      <div id="sf-stage-host" aria-label="3D block of sea floor at the selected point"></div>
+      <div id="sf-stage-fallback" hidden>This browser could not start WebGL, so the 3D views are unavailable. The map, cross-section, profiles and sounding below still work.</div>
+      <div class="sf-ov" id="sf-stage-tools">
+        <span class="sf-seg" role="group" aria-label="View">
+          <button id="sf-mode-globe" aria-pressed="true" title="The whole planet">Globe</button><button id="sf-mode-local" aria-pressed="false" title="The sea floor around the selected point">Sea floor here</button>
+        </span>
+        <span class="sf-group" data-for="globe">
+          <button id="sf-dive-here" title="Go under the surface at the selected point (or double-click the ocean)">Dive here ▼</button>
+          <label title="Relief exaggeration">Relief <input id="sf-globe-exag" type="range" min="1" max="60" step="1" value="30" aria-label="Relief exaggeration on the globe"><span id="sf-globe-exag-val">30×</span></label>
+          <label title="Show or drain the ocean"><input id="sf-water" type="checkbox" checked> Water</label>
+        </span>
+        <span class="sf-group" data-for="local">
+          <button id="sf-dive" title="Fly beneath the surface to the sea floor at the sounding point">Dive ▼</button>
+          <button id="sf-ping" title="Fire the echo sounder at the sounding point">Ping</button>
+          <label title="Vertical exaggeration">↕ <input id="sf-exag" type="range" min="1" max="12" step="1" value="5" aria-label="Vertical exaggeration"><span id="sf-exag-val">5×</span></label>
+          <button data-view="oblique" title="Back above the surface, oblique view">⟲</button>
+          <button data-view="top" title="Look straight down">⊤</button>
+          <button data-view="section" title="Look along the sea surface">⊢</button>
+          <button id="sf-reset-point" title="Return the sounding point to the site's deepest point">Deepest point</button>
+        </span>
+      </div>
+      <div class="sf-ov" id="sf-stage-readout" aria-live="polite"></div>
+      <div class="sf-ov" id="sf-dive-hud" aria-live="polite" hidden></div>
+    </div>
+    <div class="sf-note" id="sf-stage-note"></div>
   </section>
 
   <section class="sf-panel sf-span" id="sf-map-panel">
-    <h2>The deep places <small id="sf-map-sub">select a site on the map or in the table</small></h2>
+    <h2>Flat map <small id="sf-map-sub">the same sites; select one here or in the table</small></h2>
     <div id="sf-map-wrap"><canvas id="sf-map" aria-label="World map of ocean depth with the sea-floor sites"></canvas></div>
     <div class="sf-keys" id="sf-map-keys"></div>
   </section>
@@ -140,24 +182,6 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
     <h2>Depth and bottom temperature, site by site <small>click a column to sort</small></h2>
     <div class="sf-tablewrap"><table id="sf-table"><thead></thead><tbody></tbody></table></div>
     <div class="sf-note" id="sf-table-note"></div>
-  </section>
-
-  <section class="sf-panel sf-span" id="sf-stage-panel">
-    <h2><span id="sf-site-title">Sea floor</span> <small id="sf-site-sub"></small></h2>
-    <div id="sf-stage">
-      <div id="sf-stage-host"></div>
-      <div id="sf-stage-fallback" hidden>This browser could not start WebGL, so the 3D block is unavailable. The cross-section, profiles and sounding below still work.</div>
-      <div class="sf-ov" id="sf-stage-tools">
-        <button id="sf-ping" title="Fire the echo sounder at the selected point">Ping ▼</button>
-        <label title="Vertical exaggeration">↕ <input id="sf-exag" type="range" min="1" max="12" step="1" value="5" aria-label="Vertical exaggeration"><span id="sf-exag-val">5×</span></label>
-        <button data-view="oblique" title="Oblique view">⟲</button>
-        <button data-view="top" title="Look straight down">⊤</button>
-        <button data-view="section" title="Look along the sea surface">⊢</button>
-        <button id="sf-reset-point" title="Return the sounding point to the site's deepest point">Deepest point</button>
-      </div>
-      <div class="sf-ov" id="sf-stage-readout" aria-live="polite"></div>
-    </div>
-    <div class="sf-note" id="sf-stage-note"></div>
   </section>
 
   <section class="sf-panel" id="sf-section-panel">
@@ -209,7 +233,12 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
     <p><b>Sound speed and soundings.</b> Sound speed is Chen &amp; Millero (UNESCO 1983) from temperature, salinity and pressure. It differs from the newer TEOS-10 standard by up to
       about 2 m/s at trench pressure, which is roughly 15 m of echo depth at 11 km, and soundings here carry that uncertainty. The echo is timed straight down;
       the beam test uses straight rays on the 1.8 km grid, so a real narrow beam would resolve walls this grid cannot. Depth from pressure is the UNESCO standard-ocean formula.</p>
-    <p><b>Not to scale:</b> the 3D block's vertical exaggeration, printed on it and adjustable down to 1×. The ping's flight is shown on a compressed clock; the real time is printed.</p>
+    <p><b>Diving anywhere.</b> The 28 marked sites are stored with the page. Anywhere else, the sea floor is read at the moment you dive from the same public tiles, at the same 1.8 km detail.
+      Temperature is shown only where an archived cast lies within 150 km of your point; elsewhere the page shows pressure and light but no temperature.</p>
+    <p><b>Light under water.</b> Sunlight fades by about 4 % per metre in the clearest open ocean, so about 1 % is left at 115 m and effectively none below a few hundred metres. That rate is an order-of-magnitude figure
+      written from memory, not checked against its source. In the dive view the water is drawn clear and the sea floor is lit artificially, because real sea water lets you see only tens of metres;
+      only the background colour follows the light at your depth.</p>
+    <p><b>Not to scale:</b> the relief on the globe and the vertical scale of the sea-floor block, both printed on the view and adjustable down to 1×. The ping's flight is shown on a compressed clock; the real time is printed.</p>
   </section>
 
 </div>

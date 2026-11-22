@@ -140,3 +140,44 @@ export function localOffsetKm(lat0, lon0, lat, lon) {
     let dl = lon - lon0; dl -= 360 * Math.round(dl / 360);
     return { e: dl * D2R * R_EARTH_KM * Math.cos(lat0 * D2R), n: (lat - lat0) * D2R * R_EARTH_KM };
 }
+
+// ── the whole-planet grid behind the globe ───────────────────────────────────
+/**
+ * Decode data/seafloor/world.bin.gz (after gunzip): cell-centred, row 0 = the northernmost row,
+ * stored in `quant_m` steps, row-delta coded (first column = difference from the row above) and
+ * byte-shuffled (all low bytes, then all high bytes). Returns ELEVATION in metres (Int16Array).
+ */
+export function decodeWorld(meta, u8) {
+    const n = meta.nx * meta.ny;
+    if (u8.byteLength !== 2 * n) throw new Error(`world grid: ${u8.byteLength} bytes for ${meta.nx}×${meta.ny}`);
+    if (meta.encoding !== 'q-delta-rows-shuffled') throw new Error(`world grid: unknown encoding ${meta.encoding}`);
+    const z = new Int16Array(n), q = meta.quant_m;
+    let rowStart = 0;
+    for (let j = 0; j < meta.ny; j++) {
+        let v = 0;
+        for (let i = 0; i < meta.nx; i++) {
+            const k = j * meta.nx + i;
+            const d = ((u8[k] | (u8[n + k] << 8)) << 16) >> 16;        // signed int16 from the two shuffled bytes
+            if (i === 0) { rowStart += d; v = rowStart; } else v += d;
+            z[k] = v * q;
+        }
+    }
+    return { nx: meta.nx, ny: meta.ny, step: meta.step_deg, capDeg: meta.polar_cap_deg, quantM: q, z };
+}
+
+/** Bilinear ELEVATION (m, + up) of the world grid at a point; longitude wraps, latitude clamps to the last row. */
+export function worldElevationAt(w, lat, lon) {
+    const fj = Math.min(Math.max((90 - lat) / w.step - 0.5, 0), w.ny - 1);
+    let fi = (lon + 180) / w.step - 0.5; fi -= w.nx * Math.floor(fi / w.nx);
+    const j0 = Math.min(Math.floor(fj), w.ny - 2), v = fj - j0;
+    const i0 = Math.floor(fi), i1 = (i0 + 1) % w.nx, u = fi - i0;
+    const a = w.z[j0 * w.nx + i0], b = w.z[j0 * w.nx + i1], c = w.z[(j0 + 1) * w.nx + i0], d = w.z[(j0 + 1) * w.nx + i1];
+    return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+}
+
+/**
+ * The globe's frame — the site's canonical geo frame (js/geo/coords.js): +X Greenwich, +Y north,
+ * −Z = 90° E. `dirOf` and `latLonOf` are exact inverses (gated).
+ */
+export function dirOf(lat, lon) { const c = Math.cos(lat * D2R); return [c * Math.cos(lon * D2R), Math.sin(lat * D2R), -c * Math.sin(lon * D2R)]; }
+export function latLonOf(x, y, z) { const r = Math.hypot(x, y, z) || 1; return { lat: Math.asin(y / r) / D2R, lon: Math.atan2(-z, x) / D2R }; }

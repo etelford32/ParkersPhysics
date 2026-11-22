@@ -17,7 +17,17 @@ import { depthColor, temperatureColor } from './page-model.js';
 const MAX_SIDE = 260;
 const D2R = Math.PI / 180;
 
-export function createStage(host, { onPick = null } = {}) {
+const CLEARANCE_KM = 0.35;                 // the camera is kept this far (drawn) above the sea floor
+const CAMERA_EVENT_MS = 120;
+
+/**
+ * UNDERWATER: the camera may go below y = 0. Nothing here knows any optics — the page injects
+ * `ambient(depthM)` (page-model's `ambientColor`, sRGB bytes) and the backdrop takes that colour;
+ * the terrain stays lit by the scene's own lamp (disclosed on the page: real water is opaque
+ * past ~100 m, so the water is drawn clear). `onCamera({ lat, lon, depthM })` reports where the
+ * camera is, throttled; depth is TRUE metres (drawn y ÷ exaggeration).
+ */
+export function createStage(host, { onPick = null, onCamera = null, ambient = null } = {}) {
     let renderer;
     try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: false }); }
     catch (e) { return null; }
@@ -40,7 +50,9 @@ export function createStage(host, { onPick = null } = {}) {
     const castGroup = new THREE.Group(), markGroup = new THREE.Group(), pingGroup = new THREE.Group();
     world.add(castGroup, markGroup, pingGroup);
     let casts = [], marks = null, ping = null, dirty = true, visible = true, raf = 0;
-    const state = { exaggeration: exag, vertices: 0, casts: 0, pinging: false, frames: 0 };
+    const state = { exaggeration: exag, vertices: 0, casts: 0, pinging: false, frames: 0, cameraDepthM: 0, underwater: false, flying: false };
+    let flight = null, lastCamEvent = 0, lastCamKey = '';
+    const keys = new Set();
 
     const toScene = (lat, lon, depthM) => {
         const o = localOffsetKm(origin.lat, origin.lon, lat, lon);
@@ -119,7 +131,7 @@ export function createStage(host, { onPick = null } = {}) {
             const a = toScene(marks.point.lat, marks.point.lon, 0), b = toScene(marks.point.lat, marks.point.lon, marks.point.depth);
             const g = new THREE.BufferGeometry().setFromPoints([a, b]);
             markGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x9fe8ff })));
-            const s = new THREE.Mesh(new THREE.SphereGeometry(1.4, 14, 10), new THREE.MeshBasicMaterial({ color: 0x9fe8ff })); s.position.copy(b); markGroup.add(s);
+            const s = new THREE.Mesh(new THREE.SphereGeometry(0.7, 14, 10), new THREE.MeshBasicMaterial({ color: 0x9fe8ff })); s.position.copy(b); markGroup.add(s);
             const ship = new THREE.Mesh(new THREE.ConeGeometry(1.6, 3.2, 12).rotateX(Math.PI), new THREE.MeshBasicMaterial({ color: 0xffffff })); ship.position.copy(a).y += 1.6; markGroup.add(ship);
             if (marks.beamDeg > 0) {
                 // the beam cone: a real cone in real space, so the exaggeration squashes its footprint ÷ exag on screen — drawn at its TRUE footprint
@@ -177,9 +189,58 @@ export function createStage(host, { onPick = null } = {}) {
         return { lat, lon };
     }
 
+    // one-shot flights: the page may START one, any drag / wheel / key cancels it (never a per-frame hold)
+    controls.addEventListener('start', () => { flight = null; state.flying = false; });
+    function fly(toPos, toTarget, ms = 2400) {
+        flight = { p0: camera.position.clone(), t0: controls.target.clone(), p1: toPos, t1: toTarget, start: performance.now(), ms };
+        state.flying = true; dirty = true;
+    }
+    const camGeo = () => ({
+        lat: origin.lat + (-camera.position.z) / R_EARTH_KM / D2R,
+        lon: origin.lon + camera.position.x / (R_EARTH_KM * Math.cos(origin.lat * D2R)) / D2R,
+        depthM: -camera.position.y / exag * 1000,
+    });
+    function floorY(x, z) {
+        const d = sampleDepth(grid, origin.lat + (-z) / R_EARTH_KM / D2R, origin.lon + x / (R_EARTH_KM * Math.cos(origin.lat * D2R)) / D2R);
+        return d == null ? null : -d / 1000 * exag;
+    }
+    host.tabIndex = 0;
+    host.addEventListener('keydown', (e) => {
+        const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'q', 'e'].includes(k)) { keys.add(k); flight = null; state.flying = false; e.preventDefault(); }
+    });
+    host.addEventListener('keyup', (e) => { keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key); });
+    host.addEventListener('blur', () => keys.clear());
+    let lastTick = 0;
+    function moveByKeys(dt) {
+        if (!keys.size || !grid) return;
+        const f = new THREE.Vector3().subVectors(controls.target, camera.position); f.y = 0;
+        if (f.lengthSq() < 1e-9) f.set(0, 0, -1); f.normalize();
+        const r = new THREE.Vector3(-f.z, 0, f.x);
+        const dist = camera.position.distanceTo(controls.target), sp = Math.max(4, dist * 0.9) * dt;      // a NAVIGATION speed: faster when further out
+        const mv = new THREE.Vector3();
+        if (keys.has('w') || keys.has('ArrowUp')) mv.add(f); if (keys.has('s') || keys.has('ArrowDown')) mv.sub(f);
+        if (keys.has('d') || keys.has('ArrowRight')) mv.add(r); if (keys.has('a') || keys.has('ArrowLeft')) mv.sub(r);
+        mv.multiplyScalar(sp);
+        const nx = Math.min(extent.maxX, Math.max(extent.minX, controls.target.x + mv.x)), nz = Math.min(extent.maxZ, Math.max(extent.minZ, controls.target.z + mv.z));
+        const dx = nx - controls.target.x, dz = nz - controls.target.z, y0 = controls.target.y;
+        let dy = 0; const fy = floorY(nx, nz); if (fy != null) dy = fy - y0;                               // the pivot rides the sea floor
+        controls.target.set(nx, y0 + dy, nz); camera.position.x += dx; camera.position.z += dz; camera.position.y += dy;
+        if (keys.has('e')) camera.position.y += sp * 0.6; if (keys.has('q')) camera.position.y -= sp * 0.6;
+        dirty = true;
+    }
+
     function tick(now) {
         raf = requestAnimationFrame(tick);
         if (!visible) return;
+        const dt = Math.min(0.1, lastTick ? (now - lastTick) / 1000 : 0); lastTick = now;
+        if (flight) {
+            const u = Math.min(1, (now - flight.start) / flight.ms), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+            camera.position.lerpVectors(flight.p0, flight.p1, e); controls.target.lerpVectors(flight.t0, flight.t1, e);
+            if (u >= 1) { flight = null; state.flying = false; }
+            dirty = true;
+        }
+        moveByKeys(dt);
         if (ping) {
             // the pulse is drawn on a COMPRESSED clock (the page prints the real two-way time)
             const f = Math.min(1, (now - ping.t0) / ping.wallMs);
@@ -190,8 +251,23 @@ export function createStage(host, { onPick = null } = {}) {
             dirty = true;
         }
         if (controls.update()) dirty = true;
+        if (grid) {
+            // never inside the sea floor
+            const fy = floorY(camera.position.x, camera.position.z);
+            if (fy != null && camera.position.y < fy + CLEARANCE_KM) { camera.position.y = fy + CLEARANCE_KM; dirty = true; }
+            const cg = camGeo(); state.cameraDepthM = cg.depthM; state.underwater = cg.depthM > 0;
+            const key = `${cg.lat.toFixed(4)}|${cg.lon.toFixed(4)}|${Math.round(cg.depthM / 5)}`;
+            if (onCamera && key !== lastCamKey && now - lastCamEvent > CAMERA_EVENT_MS) { lastCamKey = key; lastCamEvent = now; onCamera(cg); }
+        }
         if (!dirty) return;
         dirty = false; state.frames++;
+        if (ambient) {
+            const c = ambient(state.cameraDepthM), col = new THREE.Color(srgb(c[0]), srgb(c[1]), srgb(c[2]));
+            renderer.setClearColor(col, 1);
+            // under water a light haze of the same colour gives distance a cue (a display choice, disclosed on the page)
+            if (state.underwater) { if (!scene.fog) scene.fog = new THREE.Fog(col, 30, 520); scene.fog.color.copy(col); } else scene.fog = null;
+        }
+        if (sea) sea.material.opacity = state.underwater ? 0.22 : 0.10;
         renderer.render(scene, camera);
     }
     raf = requestAnimationFrame(tick);
@@ -203,7 +279,30 @@ export function createStage(host, { onPick = null } = {}) {
         setExaggeration(x) { exag = x; state.exaggeration = x; if (grid) { buildTerrain(); buildCasts(); buildMarks(); controls.target.y = -3 * exag * 0.6; } dirty = true; },
         setCasts(list) { casts = list || []; if (grid) buildCasts(); dirty = true; },
         setMarks(m) { marks = m; if (grid) buildMarks(); dirty = true; },
-        view(preset) { frameAll(preset); },
+        view(preset) { flight = null; state.flying = false; frameAll(preset); },
+        /** Fly beneath the surface to just above the sea floor at a point (one-shot; any input cancels it). */
+        dive({ lat, lon, depth, alongDeg = null }) {
+            if (!grid) return;
+            const floor = toScene(lat, lon, depth);
+            let back = new THREE.Vector3().subVectors(camera.position, controls.target); back.y = 0;
+            if (back.lengthSq() < 1e-6) back.set(-0.5, 0, 0.85); back.normalize();
+            if (alongDeg != null) {
+                // approach ALONG the deepest line (a trench's axis), from whichever end is nearer the current view:
+                // approached across it, the camera would end over the shallower wall and be pushed back up
+                const a = alongDeg * D2R, ax = new THREE.Vector3(Math.sin(a), 0, -Math.cos(a));
+                back = ax.dot(back) >= 0 ? ax : ax.negate();
+            }
+            // end pose: a third of the way up the (drawn) water column, as far back as the sea floor stays below the camera
+            const column = depth / 1000 * exag, up = Math.max(1.5, column * 0.3), want = Math.max(22, column * 2.4);
+            let dist = want;
+            for (; dist > 6; dist *= 0.85) {
+                let clear = true;
+                for (let k = 1; k <= 8 && clear; k++) { const q = floor.clone().addScaledVector(back, dist * k / 8), fy = floorY(q.x, q.z); if (fy == null || fy + CLEARANCE_KM > floor.y + up * (0.35 + 0.65 * k / 8)) clear = false; }
+                if (clear) break;
+            }
+            fly(floor.clone().addScaledVector(back, dist).setY(floor.y + up), floor, 2600);
+        },
+        camera: () => (grid ? camGeo() : null),
         ping({ lat, lon, depth, hit = null, wallMs = 2600, done = null }) {
             if (!grid) return;
             if (ping) { pingGroup.remove(ping.mesh); }

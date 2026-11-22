@@ -162,7 +162,7 @@ export const SIMULATIONS = [
     { id: 'sea-floor', href: 'sea-floor.html', title: 'Sea Floor',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'fluid', badge: 'NEW',
-      blurb: '28 trenches and abyssal plains in 3D, the deepest real temperature casts in each, and an echo sounder to fire.' },
+      blurb: 'A 3D globe of the ocean floor you can dive beneath, with real deep temperature casts and an echo sounder.' },
     { id: 'upper-atmosphere', href: 'upper-atmosphere.html', title: 'Upper Atmosphere',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'atmosphere',

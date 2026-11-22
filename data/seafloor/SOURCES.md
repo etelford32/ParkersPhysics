@@ -6,7 +6,7 @@ Baked for `sea-floor.html`. Never hand-edit the files here; re-run the bakes.
 |------|------|----------|
 | `index.json` | grid geometry + the deepest cell FOUND in each window | `scripts/build-seafloor-bathymetry.py` |
 | `<id>.bin.gz` | one 1 arc-minute bathymetry window per site (int16 LE metres of elevation, row 0 north) | same |
-| `world.bin.gz` | 0.5° overview for the map | same |
+| `world.bin.gz` | the whole planet at 0.25° for the globe (10 m steps, row-delta coded, byte-shuffled) | same |
 | `casts.json.gz` | the 8 deepest real temperature casts within 150 km of each site | `scripts/build-seafloor-casts.py` |
 
 ## Bathymetry — a grid, not a survey
@@ -24,6 +24,13 @@ bathymetry host that was reachable. A direct GEBCO 2024 (15 arc-second) bake wou
 Attribution: ETOPO1 — NOAA NCEI (public domain). GEBCO — GEBCO Compilation Group. Terrain Tiles —
 Mapzen / Linux Foundation, see https://github.com/tilezen/joerd/blob/master/docs/attribution.md
 
+## Diving anywhere — read live, same source
+
+Away from the 28 baked windows, `sea-floor.html` reads the SAME tiles at the moment of the dive,
+through the existing `/api/climalytix/dem` route (no new route, no passthrough URL), and samples
+them onto the same 1′ grid (`js/seafloor/free-dive.js`). A missing tile is a failed dive, never a
+flat sea floor. Tiles stop at 85° of latitude; dives stop at 80°.
+
 ## Temperature casts — measured
 
 Source: **NOAA NCEI World Ocean Database** (Boyer et al.), the public `noaa-wod-pds` S3 bucket:
@@ -38,6 +45,9 @@ The baker reads byte RANGES of the per-year netCDF files (every variable is cont
 uncompressed), so a year costs about a megabyte of transfer rather than the 0.1–3.5 GB file.
 
 ## What is MODEL on the page
+
+- Sunlight with depth: Beer–Lambert with K_d = 0.04 m⁻¹ (`js/seafloor/light.js`), written from
+  memory and marked unverified. The dive view's clear water and lit sea floor are display choices.
 
 - Temperature below a cast's deepest level: the adiabat (`js/seafloor/profile.js`), labelled.
 - Sound speed, potential temperature, pressure↔depth: UNESCO 1983 (EOS-80) algorithms in

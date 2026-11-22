@@ -19,6 +19,9 @@ import * as SO from '../js/seafloor/sounder.js';
 import * as BA from '../js/seafloor/bathy.js';
 import * as PM from '../js/seafloor/page-model.js';
 import { SEAFLOOR_SITES, WINDOW_HALF_DEG, GRID_ARCMIN } from '../js/seafloor/sites.js';
+import * as LI from '../js/seafloor/light.js';
+import * as FD from '../js/seafloor/free-dive.js';
+import { terrariumEncode, tileLatLon, TILE_PX } from '../js/climalytix/terrain.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rd = (p) => fs.readFileSync(path.join(ROOT, p));
@@ -155,9 +158,6 @@ const grids = new Map();
     for (const id of ['mariana', 'tonga', 'kermadec', 'puerto-rico', 'atacama']) ok(BA.trenchAxis(grids.get(id), index.sites.find((m) => m.id === id).deepest.lat, index.sites.find((m) => m.id === id).deepest.lon).defined, `${id}: axis defined`);
     const ta = BA.trenchAxis(grids.get('tonga'), dmOf('tonga').lat, dmOf('tonga').lon); ok(ta.azimuthDeg <= 40 || ta.azimuthDeg >= 170, `Tonga runs NNE (${ta.azimuthDeg}°)`);
     const sec = BA.section(mar, dm.lat, dm.lon, 0, 100, 201); near(sec[100].depth, dm.depth, 1e-6, 'section passes through its centre'); ok(Math.abs(BA.distanceKm(sec[0].lat, sec[0].lon, sec[200].lat, sec[200].lon) - 200) < 0.01, 'and is as long as asked');
-    const w = index.world, wz = BA.int16FromBytes(new Uint8Array(zlib.gunzipSync(rd('data/seafloor/' + w.file)))); ok(wz.length === w.nx * w.ny, 'world grid size');
-    const frac = wz.reduce((a, v, k) => { const lat = 90 - (Math.floor(k / w.nx) + 0.5) * w.step_deg, c = Math.cos(lat * Math.PI / 180); a[0] += v < 0 ? c : 0; a[1] += c; return a; }, [0, 0]);
-    ok(frac[0] / frac[1] > 0.68 && frac[0] / frac[1] < 0.74, `the world grid is ${(100 * frac[0] / frac[1]).toFixed(1)} % ocean (Earth: 71 %)`);
     function dmOf(id) { return index.sites.find((m) => m.id === id).deepest; }
 }
 
@@ -237,5 +237,72 @@ console.log('6. page-model.js');
     ok(!/from '\.\/seawater\.js'/.test(page) && !/from '\.\/seawater\.js'/.test(stage), 'nor import the equation of state');
     const html = rd('sea-floor.html').toString(); ok(html.indexOf('type="importmap"') < html.indexOf('modulepreload'), 'import map precedes the first module load');
     ok(!stage.match(/\/\* glsl \*\//), 'stage has no raw shader');
+}
+// ── 7. the globe: the planet grid, light, and a dive anywhere ────────────────
+console.log('7. globe, light, free dive');
+{
+    const wm = index.world, w = BA.decodeWorld(wm, new Uint8Array(zlib.gunzipSync(rd('data/seafloor/' + wm.file))));
+    ok(w.z.length === wm.nx * wm.ny && wm.step_deg === 0.25, 'the planet grid decodes to its declared size');
+    let mn = 1e9, mx = -1e9, area = [0, 0];
+    for (let k = 0; k < w.z.length; k++) { const v = w.z[k]; if (v < mn) mn = v; if (v > mx) mx = v; const c = Math.cos((90 - (Math.floor(k / w.nx) + 0.5) * w.step) * Math.PI / 180); area[0] += v < 0 ? c : 0; area[1] += c; }
+    ok(mn < -9500 && mn > -11100 && mx > 5500 && mx < 8900, `planet grid spans ${mn} … ${mx} m (0.25° cells average the extremes)`);
+    ok(area[0] / area[1] > 0.69 && area[0] / area[1] < 0.73, `and is ${(100 * area[0] / area[1]).toFixed(1)} % ocean (Earth: 71 %)`);
+    // the coarse planet grid and the fine baked windows are the SAME sea floor: median depth of each window agrees
+    let worst = 0;
+    for (const m of index.sites) {
+        const g = grids.get(m.id); let sw = 0, sf = 0, c = 0;
+        for (let j = 20; j < g.ny - 20; j += 20) for (let i = 20; i < g.nx - 20; i += 20) { const la = BA.cellLat(g, j), lo = BA.cellLon(g, i), f = BA.depthAtCell(g, i, j); if (f <= 0) continue; sw += -BA.worldElevationAt(w, la, lo); sf += f; c++; }
+        if (c) worst = Math.max(worst, Math.abs(sw / c - sf / c) / (sf / c));
+    }
+    ok(worst < 0.06, `planet grid vs the 28 fine windows: mean depth within ${(100 * worst).toFixed(1)} %`);
+    // NEGATIVE CONTROL: read without un-shuffling the bytes and the planet is noise
+    const bad = new Uint8Array(zlib.gunzipSync(rd('data/seafloor/' + wm.file))); const sw2 = bad.slice(); for (let k = 0; k < sw2.length / 2; k++) { sw2[2 * k] = bad[k]; sw2[2 * k + 1] = bad[bad.length / 2 + k]; }
+    const wrong = BA.decodeWorld(wm, sw2); let far = 0; for (let k = 0; k < w.z.length; k += 997) if (Math.abs(wrong.z[k] - w.z[k]) > 500) far++;
+    ok(far > 200, 'NEGATIVE CONTROL: the un-shuffled byte order is not the planet');
+    near(BA.worldElevationAt(w, 10, 180), BA.worldElevationAt(w, 10, -180), 1e-9, 'longitude wraps at the date line');
+    // frame: exact inverses, +X Greenwich, +Y north, −Z = 90° E (js/geo/coords.js)
+    for (const [la, lo] of [[0, 0], [45, 90], [-30, -120], [80, 179], [-80, -179]]) { const d = BA.dirOf(la, lo), b = BA.latLonOf(...d); near(b.lat, la, 1e-9, 'lat round trip'); near(b.lon, lo, 1e-9, 'lon round trip'); }
+    assert.deepEqual(BA.dirOf(0, 0).map((v) => +v.toFixed(12)), [1, 0, 0]); ok(BA.dirOf(0, 90)[2] < -0.999999 && BA.dirOf(90, 0)[1] > 0.999999, '−Z is 90° E, +Y is north');
+    ok(/x = cos|\-Z|−Z/.test(rd('js/geo/coords.js').toString()), 'the canonical frame file is still there to agree with');
+    const tex = PM.worldTexture({ nx: 8, ny: 4, step: 45, z: new Int16Array(32).fill(-4000) });
+    const flat = PM.depthColor(4000); ok(tex.length === 128 && Math.abs(tex[0] - flat[0]) <= 1 && Math.abs(tex[2] - flat[2]) <= 1 && tex[3] === 255, 'a flat sea floor is drawn in the depth ramp\'s own colour (hillshade exactly 1)');
+    // light
+    near(LI.sunlightFraction(0), 1, 0, 'full light at the surface'); near(LI.sunlightFraction(LI.depthOfFraction(0.01)), 0.01, 1e-12, '1 % level round trip');
+    const eu = LI.depthOfFraction(0.01); ok(eu > 100 && eu < 150, `1 % light level at ${eu.toFixed(0)} m (clear ocean: 100–150 m)`); ok(LI.KD_CLEAR_OCEAN.verified === false, 'and its coefficient is marked unverified');
+    ok(LI.zoneAt(50).id === 'epipelagic' && LI.zoneAt(200).id === 'mesopelagic' && LI.zoneAt(3999).id === 'bathypelagic' && LI.zoneAt(5000).id === 'abyssopelagic' && LI.zoneAt(10900).id === 'hadal' && LI.zoneAt(-1) === null, 'depth zones');
+    let dark = true, prev = 1e9; for (let z = 1; z <= 4000; z += 50) { const c = LI.ambientColor(z), L = c[0] + c[1] + c[2]; if (L > prev) dark = false; prev = L; } ok(dark && LI.ambientColor(3000).every((v) => v === 0), 'the backdrop only darkens with depth, to black in the midnight zone');
+    assert.deepEqual(LI.ambientColor(-5), LI.SKY_RGB.slice()); n++;
+    // a dive window anywhere: SYNTHETIC tiles of a known sea floor, sampled back through the tile pyramid
+    const h = (lat, lon) => -4000 - 500 * Math.sin(lat * 0.5) * Math.cos(lon * 0.4) - 4000 * Math.exp(-((lat - 20.3) ** 2 + (lon + 40.2) ** 2) / 0.5);
+    const tiles = new Map(), getTile = (z, x, y) => {
+        const key = `${z}/${x}/${y}`; if (tiles.has(key)) return tiles.get(key);
+        const d = new Uint8ClampedArray(TILE_PX * TILE_PX * 4);
+        for (let j = 0; j < TILE_PX; j++) { const lat = tileLatLon(x, y + (j + 0.5) / TILE_PX, z).lat; for (let i = 0; i < TILE_PX; i++) { const rgb = terrariumEncode(h(lat, tileLatLon(x + (i + 0.5) / TILE_PX, y, z).lon)); d.set([rgb[0], rgb[1], rgb[2], 255], (j * TILE_PX + i) * 4); } }
+        tiles.set(key, d); return d;
+    };
+    const win = FD.diveWindow(20.31, -40.19), need = FD.diveTiles(win);
+    ok(win.ny === 2 * WINDOW_HALF_DEG * 60 / GRID_ARCMIN + 1 && win.step_deg === index.sites[0].step_deg, 'a dive window has the baked windows\' own shape');
+    const sampled = FD.gridFromTiles(win, (z, x, y) => (need.some((t) => t.z === z && t.x === x && t.y === y) ? getTile(z, x, y) : null));
+    ok(sampled.holes === 0, `the listed tiles (${need.length}) cover every node`);
+    const meta = FD.diveMeta(win, sampled), dg = BA.makeGrid(meta, sampled.z);
+    let err = 0; for (let j = 0; j < dg.ny; j += 7) for (let i = 0; i < dg.nx; i += 7) err = Math.max(err, Math.abs(BA.depthAtCell(dg, i, j) + h(BA.cellLat(dg, j), BA.cellLon(dg, i))));
+    ok(err < 3, `tiles → grid reproduces the sea floor to ${err.toFixed(2)} m`);
+    ok(Math.abs(meta.deepest.lat - 20.3) < 0.05 && Math.abs(meta.deepest.lon + 40.2) < 0.05 && meta.deepest.depth_m > 6000, 'and finds the planted deep');
+    ok(FD.gridFromTiles(win, () => null).holes === win.nx * win.ny, 'NEGATIVE CONTROL: no tiles ⇒ every node is a hole, none is sea level');
+    ok(FD.diveWindow(85, 0) === null && FD.diveWindow(-79.9, 10) !== null, 'no window past the tile pyramid');
+    // the dive HUD
+    const site = PM.customSite(20.31, -40.19), det = PM.siteDetail({ site, meta, grid: dg, casts: [] });
+    ok(det.point.custom && det.column === null && det.ping === null && det.pressure.dbar > 4000, 'open ocean with no cast: depth and pressure, no column, no echo time');
+    const hud = PM.cameraReport(det, dg, { lat: 20.31, lon: -40.19, depthM: 1500 });
+    ok(hud.underwater && hud.t === null && hud.zone.id === 'bathypelagic' && Math.abs(hud.aboveFloorM - (det.point.depth - 1500)) < 1 && hud.atm > 145 && hud.atm < 155, 'HUD: zone, pressure, height above the floor — and NO temperature where no cast is');
+    ok(!PM.cameraReport(det, dg, { lat: 20.31, lon: -40.19, depthM: -200 }).underwater, 'above the surface is not under water');
+    const mar = PM.siteDetail({ site: SEAFLOOR_SITES.find((s) => s.id === 'mariana'), meta: index.sites.find((m) => m.id === 'mariana'), grid: grids.get('mariana'), casts: casts.sites.mariana.casts });
+    const w1 = PM.waterAt(mar, 4600), w2 = PM.waterAt(mar, 10800);
+    ok(w1.tKind === 'measured' && w2.t > w1.t + 0.8, `diving Challenger Deep: ${w1.t.toFixed(2)} °C at 4.6 km, ${w2.t.toFixed(2)} °C at 10.8 km`);
+    const nearM = PM.castsNear(casts, 11.35, 142.2), none = PM.castsNear(casts, 20.31, -40.19);
+    ok(nearM.length >= 8 && nearM.every((c, i) => c.km <= 150 && (i === 0 || c.km >= nearM[i - 1].km)) && none.length === 0 && PM.castsNear(null, 0, 0).length === 0, 'casts near a point: within 150 km, nearest first, none in mid-Atlantic');
+    const globe = rd('js/seafloor/globe.js').toString();
+    ok(!/intersectObject/.test(globe) && /pointAt/.test(globe), 'the globe picks analytically, never by mesh raycast');
+    for (const f of ['soundSpeed(', 'potentialTemperature(', 'pressureFromDepth(', 'sunlightFraction(']) ok(!globe.includes(f) && !rd('js/seafloor/stage.js').toString().includes(f), `globe.js / stage.js never call ${f}`);
 }
 console.log(`\n✅ seafloor-kernels: ${n} checks passed`);

@@ -7,16 +7,17 @@
  * redraws every panel. Tables update rows IN PLACE where the row set is unchanged.
  */
 import { SEAFLOOR_SITES } from './sites.js';
-import { loadIndex, loadCasts, loadGrid, loadWorld } from './load.js';
-import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint } from './page-model.js';
+import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid } from './load.js';
+import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint, customSite, castsNear, cameraReport, ambientColor, worldTexture } from './page-model.js';
 import { BEAMS } from './sounder.js';
 import { MODEL_GAP_WARN_M } from './profile.js';
-import { GRID_VERTICAL_UNCERTAINTY_M } from './bathy.js';
+import { GRID_VERTICAL_UNCERTAINTY_M, sampleDepth, worldElevationAt } from './bathy.js';
+import { DIVE_MAX_LAT } from './free-dive.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const NS = 'http://www.w3.org/2000/svg';
-const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
+const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
 window.__seaFloor = S;
 
 // ── tiny SVG helpers ─────────────────────────────────────────────────────────
@@ -43,6 +44,13 @@ function kindKeys() {
 }
 const tip = (node, html, e) => { node.innerHTML = html; node.hidden = false; const w = node.offsetWidth, h = node.offsetHeight; node.style.left = Math.max(6, Math.min(window.innerWidth - w - 6, e.clientX + 14)) + 'px'; node.style.top = Math.max(6, Math.min(window.innerHeight - h - 6, e.clientY + 14)) + 'px'; };
 
+/** The current selection: a named site, or the open-ocean point last dived at. */
+function cur() {
+    if (S.id === 'custom' && S.custom) return { site: S.custom.site, meta: S.custom.meta, grid: S.custom.grid, casts: castsNear(S.casts, S.custom.site.lat, S.custom.site.lon) };
+    return { site: SEAFLOOR_SITES.find((s) => s.id === S.id), meta: S.index.sites.find((m) => m.id === S.id), grid: S.grids.get(S.id), casts: S.casts && S.casts.sites[S.id] ? S.casts.sites[S.id].casts : [] };
+}
+const kindLabel = (site) => site.kind === 'custom' ? 'Open ocean' : KIND_STYLE[site.kind].label;
+
 // ── boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
     for (const b of BEAMS) $('sf-beam').add(new Option(b.label, b.deg, false, b.deg === S.beam));
@@ -67,18 +75,29 @@ async function boot() {
     renderTable(); renderCompare();
     $('sf-map-keys').innerHTML = kindKeys() + `<span class="sf-ramp">0 m <canvas id="sf-ramp" width="140" height="8"></canvas> 11 km deep</span>`;
     drawRamp();
-    loadWorld(S.index).then((w) => { S.world = w; drawMap(); }).catch(() => { drawMap(); });
     drawMap();
     wire();
-    const want = new URLSearchParams(location.search).get('site');
-    select(S.rows.some((r) => r.id === want) ? want : 'mariana');
+    const q = new URLSearchParams(location.search), want = q.get('site'), at = (q.get('at') || '').split(',').map(Number);
+    select(S.rows.some((r) => r.id === want) ? want : 'mariana', { show: S.rows.some((r) => r.id === want) });
+    loadWorld(S.index).then(async (w) => {
+        S.world = w; drawMap();
+        const m = await import('./globe.js');
+        S.globe = m.createGlobe($('sf-globe-host'), { onPickPoint: pickPoint, onPickSite: (id, o) => select(id, { show: o.double }), onHover: globeHover, onDive: diveAt });
+        if (!S.globe) { globeDown(); return; }
+        window.__seaFloorGlobe = S.globe;
+        S.globe.setWorld(w, worldTexture(w)); S.globe.setSites(S.rows); S.globe.setSelected(S.id);
+        stageNote();
+        if (at.length === 2 && at.every(Number.isFinite)) diveAt({ lat: at[0], lon: at[1] });
+    }).catch((e) => { console.warn('sea-floor globe unavailable:', e && e.message); globeDown(); });
     import('./stage.js').then((m) => {
-        S.stage = m.createStage($('sf-stage-host'), { onPick: (p) => { S.at = p; S.pingShown = false; refresh(); } });
+        S.stage = m.createStage($('sf-stage-host'), { onPick: (p) => { S.at = p; S.pingShown = false; refresh(); }, onCamera: renderHud, ambient: ambientColor });
         if (!S.stage) { $('sf-stage-fallback').hidden = false; return; }
         window.__seaFloorStage = S.stage;
         pushStage(true);
     }).catch(() => { $('sf-stage-fallback').hidden = false; });
 }
+/** No globe (no WebGL, or the planet grid failed to load): the sea-floor block and the flat map still work. */
+function globeDown() { $('sf-mode-globe').disabled = true; $('sf-dive-here').disabled = true; if (S.mode === 'globe') setMode('local'); }
 
 function wire() {
     $('sf-beam').addEventListener('change', (e) => { S.beam = +e.target.value; S.pingShown = false; refresh(); });
@@ -88,10 +107,16 @@ function wire() {
     for (const b of document.querySelectorAll('#sf-stage-tools [data-view]')) b.addEventListener('click', () => S.stage && S.stage.view(b.dataset.view));
     $('sf-reset-point').addEventListener('click', () => { S.at = null; S.pingShown = false; refresh(); });
     $('sf-ping').addEventListener('click', firePing);
+    $('sf-mode-globe').addEventListener('click', () => setMode('globe'));
+    $('sf-mode-local').addEventListener('click', () => setMode('local'));
+    $('sf-globe-exag').addEventListener('input', (e) => { $('sf-globe-exag-val').textContent = e.target.value + '×'; S.globe && S.globe.setExaggeration(+e.target.value); stageNote(); });
+    $('sf-water').addEventListener('change', (e) => { S.globe && S.globe.setWater(e.target.checked); });
+    $('sf-dive-here').addEventListener('click', () => { if (S.pick) diveAt(S.pick); else { setMode('local'); diveNow(); } });
+    $('sf-dive').addEventListener('click', () => { if (S.stage && S.stage.state.underwater) S.stage.view('oblique'); else diveNow(); });
     const map = $('sf-map');
     map.addEventListener('pointermove', (e) => { const r = mapHit(e); if (r) tip($('sf-map-tip'), mapTip(r), e); else $('sf-map-tip').hidden = true; map.style.cursor = r ? 'pointer' : 'default'; });
     map.addEventListener('pointerleave', () => { $('sf-map-tip').hidden = true; });
-    map.addEventListener('click', (e) => { const r = mapHit(e); if (r) select(r.id); });
+    map.addEventListener('click', (e) => { const r = mapHit(e); if (r) select(r.id, { show: true }); });
     new ResizeObserver(() => drawMap()).observe($('sf-map-wrap'));
     let rt = 0; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.detail) { renderSection(); renderColumn(); } renderCompare(); }, 150); });
 }
@@ -165,7 +190,7 @@ function renderTable() {
     const order = rows.map((r) => r.id).join('|');
     if (body.dataset.order !== order) {
         body.textContent = '';
-        for (const r of rows) { const tr = body.insertRow(); tr.dataset.id = r.id; tr.tabIndex = 0; for (const c of COLS) { const td = tr.insertCell(); if (c.n) td.className = 'n'; td.innerHTML = c.text(r); } tr.addEventListener('click', () => select(r.id)); tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') select(r.id); }); }
+        for (const r of rows) { const tr = body.insertRow(); tr.dataset.id = r.id; tr.tabIndex = 0; for (const c of COLS) { const td = tr.insertCell(); if (c.n) td.className = 'n'; td.innerHTML = c.text(r); } tr.addEventListener('click', () => select(r.id, { show: true })); tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') select(r.id, { show: true }); }); }
         body.dataset.order = order;
     }
     for (const tr of body.rows) tr.setAttribute('aria-selected', tr.dataset.id === S.id ? 'true' : 'false');
@@ -177,46 +202,132 @@ function renderTable() {
 }
 
 // ── selection ────────────────────────────────────────────────────────────────
-async function select(id) {
+async function select(id, { show = false } = {}) {
     if (!S.rows.some((r) => r.id === id)) return;
-    S.id = id; S.at = null; S.castId = null; S.pingShown = false;
+    S.id = id; S.at = null; S.castId = null; S.pingShown = false; S.pick = null;
     const site = SEAFLOOR_SITES.find((s) => s.id === id), row = S.rows.find((r) => r.id === id);
-    $('sf-site-title').textContent = site.deep ? `${site.deep}, ${site.name}` : site.name;
-    $('sf-site-sub').textContent = `${KIND_STYLE[site.kind].label} · ${site.ocean} · ${fmt.latlon(row.lat, row.lon)}`;
+    titles(site, row.lat, row.lon);
     renderTable(); drawMap();
-    const u = new URL(location.href); u.searchParams.set('site', id); history.replaceState(null, '', u);
+    if (S.globe) { S.globe.setSelected(id); if (S.mode === 'globe' && !show) S.globe.flyTo(row.lat, row.lon); }
+    const u = new URL(location.href); u.searchParams.set('site', id); u.searchParams.delete('at'); history.replaceState(null, '', u);
     if (!S.grids.has(id)) {
         try { S.grids.set(id, await loadGrid(S.index.sites.find((m) => m.id === id))); }
         catch (e) { if (S.id === id) { S.detail = null; $('sf-stage-readout').textContent = 'This site\'s bathymetry could not be loaded.'; $('sf-sound-body').innerHTML = '<div class="sf-empty">This site\'s bathymetry could not be loaded.</div>'; } return; }
     }
     if (S.id !== id) return;
     refresh(true);
+    if (show) setMode('local');
+}
+function titles(site, lat, lon) {
+    $('sf-site-title').textContent = site.kind === 'custom' ? 'Open ocean' : (site.deep ? `${site.deep}, ${site.name}` : site.name);
+    $('sf-site-sub').textContent = `${kindLabel(site)}${site.ocean ? ' · ' + site.ocean : ''} · ${fmt.latlon(lat, lon)}`;
+}
+
+// ── the globe: read a depth anywhere, dive anywhere ──────────────────────────
+function pickPoint(p) {
+    S.pick = p; S.globe && S.globe.setSelected(S.id, p); renderReadout();
+}
+function globeHover(h, e) {
+    const tipEl = $('sf-map-tip');
+    if (!h) { tipEl.hidden = true; return; }
+    if (h.site) { tip(tipEl, mapTip(S.rows.find((r) => r.id === h.site)) + '<br><small>click to select · double-click to go there</small>', e); return; }
+    const el = h.elevation;
+    tip(tipEl, `${fmt.latlon(h.point.lat, h.point.lon)}<br>${el < 0 ? `<b>${fmt.m(-el)}</b> deep <small>25 km overview grid</small>` : `land, ${fmt.m(el)} above sea level`}`, e);
+}
+let diveSeq = 0;
+async function diveAt(p) {
+    const seq = ++diveSeq, say = (t) => { $('sf-stage-readout').innerHTML = t; };
+    if (Math.abs(p.lat) > DIVE_MAX_LAT) { say(`Dives stop at ${DIVE_MAX_LAT}° of latitude: the sea-floor tiles end near the poles.`); return; }
+    if (S.world && worldElevationAt(S.world, p.lat, p.lon) >= 0) { S.pick = p; S.globe && S.globe.setSelected(S.id, p); say(`${fmt.latlon(p.lat, p.lon)} is land. Pick a point on the ocean to dive.`); return; }
+    S.pick = p; S.globe && S.globe.setSelected(S.id, p);
+    say(`Reading the sea floor at ${fmt.latlon(p.lat, p.lon)}…`);
+    if (S.globe && S.mode === 'globe') S.globe.flyTo(p.lat, p.lon, 1.6, 1100);
+    let got;
+    try { got = await loadDiveGrid(p.lat, p.lon); }
+    catch (e) { if (seq === diveSeq) say(`The sea floor at ${fmt.latlon(p.lat, p.lon)} could not be read just now, so there is nothing to dive into. Nothing is drawn in its place.`); return; }
+    if (seq !== diveSeq) return;
+    if (!(sampleDepth(got.grid, p.lat, p.lon) > 0)) { say(`${fmt.latlon(p.lat, p.lon)} is land on the detailed grid. Pick a point further from the coast.`); return; }
+    S.custom = { site: customSite(p.lat, p.lon), meta: got.meta, grid: got.grid };
+    S.id = 'custom'; S.at = null; S.castId = null; S.pingShown = false; S.pick = null;
+    titles(S.custom.site, p.lat, p.lon); renderTable(); drawMap();
+    S.globe && S.globe.setSelected(null, p);
+    const u = new URL(location.href); u.searchParams.delete('site'); u.searchParams.set('at', `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`); history.replaceState(null, '', u);
+    refresh(true);
+    setMode('local'); diveNow();
+}
+/** Fly under the surface at the sounding point (as soon as the block is on screen). */
+function diveNow() {
+    if (!S.stage || !S.detail || !(S.detail.point.depth > 0)) { S.diveWhenReady = true; return; }
+    S.diveWhenReady = false;
+    const ax = S.detail.axis;
+    requestAnimationFrame(() => S.stage.dive({ lat: S.detail.point.lat, lon: S.detail.point.lon, depth: S.detail.point.depth, alongDeg: ax && ax.defined ? ax.azimuthDeg : null }));
+}
+function setMode(m) {
+    if (m === 'globe' && (!S.globe)) m = 'local';
+    S.mode = m; $('sf-stage').dataset.mode = m;
+    $('sf-mode-globe').setAttribute('aria-pressed', m === 'globe'); $('sf-mode-local').setAttribute('aria-pressed', m === 'local');
+    $('sf-dive-hud').hidden = m !== 'local';
+    if (m === 'globe' && S.detail) S.globe.flyTo(S.detail.point.lat, S.detail.point.lon);
+    renderReadout(); stageNote();
+}
+function renderHud(cam) {
+    const hud = $('sf-dive-hud'), c = cur();
+    if (!S.detail || !c.grid) return;
+    const r = cameraReport(S.detail, c.grid, cam);
+    $('sf-dive').textContent = r.underwater ? 'Surface ▲' : 'Dive ▼';
+    if (!r.underwater) { hud.innerHTML = `You are <b>${fmt.m(-cam.depthM)}</b> above the sea surface. <small>Press Dive, or zoom in, to go under.</small>`; return; }
+    hud.innerHTML = `<span class="sf-zone">${esc(r.zone.name)}</span> <small>${esc(r.zone.note)}</small><br>`
+        + `You are <b>${fmt.m(r.depthM)}</b> below the surface`
+        + (r.aboveFloorM != null ? `, <b>${fmt.m(Math.max(0, r.aboveFloorM))}</b> above the sea floor` : '') + `<br>`
+        + `Pressure <b>${Math.round(r.atm).toLocaleString('en-US')} atm</b> · ${fmt.light(r.light)}<br>`
+        + (r.t != null ? `Water <b>${fmt.t(r.t)}</b> <small>${fmt.kind(r.tKind)}, from the cast at the sounding point${r.kmFromPoint > 30 ? `, which is ${Math.round(r.kmFromPoint)} km from you` : ''}</small>`
+            : `<small>${S.detail.column ? 'No temperature at this depth: the column here does not reach it.' : 'No temperature: no archived cast within 150 km of this point.'}</small>`);
 }
 function refresh(newSite = false) {
-    const site = SEAFLOOR_SITES.find((s) => s.id === S.id), meta = S.index.sites.find((m) => m.id === S.id), grid = S.grids.get(S.id);
-    if (!grid) return;
-    const casts = S.casts && S.casts.sites[S.id] ? S.casts.sites[S.id].casts : [];
-    S.detail = siteDetail({ site, meta, grid, casts, at: S.at, beamDeg: S.beam, nominal: S.nominal, castId: S.castId });
-    if (S.detail.point.depth == null || !(S.detail.point.depth > 0)) { S.at = null; S.detail = siteDetail({ site, meta, grid, casts, at: null, beamDeg: S.beam, nominal: S.nominal, castId: S.castId }); }
+    const c = cur();
+    if (!c.grid) return;
+    const args = { site: c.site, meta: c.meta, grid: c.grid, casts: c.casts, beamDeg: S.beam, nominal: S.nominal, castId: S.castId };
+    S.detail = siteDetail({ ...args, at: S.at });
+    if (S.detail.land) { S.at = null; S.detail = siteDetail({ ...args, at: null }); }
+    if (S.detail.land) return;
     renderCastPicker(); renderSection(); renderSound(); renderColumn(); renderReadout(); pushStage(newSite);
+    if (S.diveWhenReady) diveNow();
 }
 function pushStage(newSite) {
     if (!S.stage || !S.detail) return;
-    const d = S.detail, grid = S.grids.get(S.id), site = SEAFLOOR_SITES.find((s) => s.id === S.id), meta = S.index.sites.find((m) => m.id === S.id);
-    if (newSite) S.stage.setGrid(grid, sitePoint(site, meta));
-    S.stage.setCasts(d.casts.map((c) => ({ ...c, selected: d.cast && c.wod_cast === d.cast.wod_cast })));
+    const d = S.detail, c = cur();
+    if (newSite) S.stage.setGrid(c.grid, sitePoint(c.site, c.meta));
+    S.stage.setCasts(d.casts.map((k) => ({ ...k, selected: d.cast && k.wod_cast === d.cast.wod_cast })));
     S.stage.setMarks({ section: d.section, point: d.point, beamDeg: S.beam, hit: S.pingShown && d.echo ? d.echo.hit : null });
     stageNote();
 }
 function stageNote() {
+    if (S.mode === 'globe') {
+        const x = +$('sf-globe-exag').value;
+        $('sf-stage-note').innerHTML = `Relief exaggerated <b>${x}×</b>${x === 1 ? ' (true scale: the deepest trench is 0.17 % of Earth\'s radius)' : ''}; darker blue is deeper. Drag to turn, scroll to zoom. `
+            + `Click the ocean to read its depth, then <b>Dive here</b> (or double-click) to go under the surface at that spot. Marked sites have real temperature casts. Untick Water to drain the ocean. The globe's grid is about 25 km; a dive loads 1.8 km detail.`;
+        return;
+    }
     const x = +$('sf-exag').value;
-    $('sf-stage-note').innerHTML = `Vertical scale exaggerated <b>${x}×</b>${x === 1 ? ' (true scale)' : ''}. Drag to orbit, scroll to zoom, click the sea floor to move the sounding point. `
-        + `Coloured strings are real casts, coloured by temperature (pale = warm, dark = cold); the white line is the cross-section. Grid cells are about 1.8 km.`;
+    $('sf-stage-note').innerHTML = `Vertical scale exaggerated <b>${x}×</b>${x === 1 ? ' (true scale)' : ''}. Drag to orbit, scroll to zoom, W A S D or the arrow keys to travel along the sea floor (click the view first), click the sea floor to move the sounding point. `
+        + `Under water the sea is drawn clear, with a light haze for distance, and the floor is lit artificially: real sea water lets you see only tens of metres, and below about 1,000 m there is no sunlight. The background colour follows the light at your depth. `
+        + `Coloured strings are real casts (pale = warm, dark = cold); the white line is the cross-section. Grid cells are about 1.8 km.`;
 }
 function renderReadout() {
-    const d = S.detail, p = d.point;
-    $('sf-stage-readout').innerHTML = `<b>${fmt.m(p.depth)}</b> deep at ${fmt.latlon(p.lat, p.lon)} <small>${p.custom ? 'your point' : (SEAFLOOR_SITES.find((s) => s.id === S.id).kind === 'plain' ? 'window centre' : 'deepest grid cell')}</small><br>`
-        + (d.floor ? `Bottom water ${fmt.t(d.floor.t)} <small>${fmt.kind(d.floor.kind)}</small> · ` : 'No cast near this site · ')
+    const out = $('sf-stage-readout');
+    if (S.mode === 'globe') {
+        if (S.pick && S.world) {
+            const el = worldElevationAt(S.world, S.pick.lat, S.pick.lon);
+            out.innerHTML = el < 0 ? `<b>${fmt.m(-el)}</b> deep at ${fmt.latlon(S.pick.lat, S.pick.lon)} <small>25 km overview grid</small><br><small>Press <b>Dive here</b> to load the detailed sea floor and go under.</small>`
+                : `${fmt.latlon(S.pick.lat, S.pick.lon)} is land, ${fmt.m(el)} above sea level. <small>Pick a point on the ocean.</small>`;
+            return;
+        }
+        if (!S.detail) { out.textContent = ''; return; }
+    }
+    const d = S.detail; if (!d) return;
+    const p = d.point, site = cur().site;
+    out.innerHTML = `<b>${fmt.m(p.depth)}</b> deep at ${fmt.latlon(p.lat, p.lon)} <small>${p.custom ? 'your point' : (site.kind === 'plain' ? 'window centre' : 'deepest grid cell')}</small><br>`
+        + (d.floor ? `Bottom water ${fmt.t(d.floor.t)} <small>${fmt.kind(d.floor.kind)}</small> · ` : `${S.casts ? 'No cast within 150 km' : 'Casts not loaded'} · `)
         + (d.pressure ? `${Math.round(d.pressure.atm).toLocaleString('en-US')} atm` : '');
 }
 
@@ -237,7 +348,7 @@ function renderSound() {
           <dt>Real mean sound speed</dt><dd>${g.meanSpeed.toFixed(1)} m/s <small>from this column's temperature, salinity and pressure</small></dd>
           <dt>Corrected depth</dt><dd>${fmt.m(g.depthM)} <small>± ${Math.round(g.speedUncertaintyM)} m from the sound-speed formula alone</small></dd></dl>
           ${short ? `<div class="sf-note">The column here ends at ${fmt.m(g.depthM)}; the echo is timed only through water the column describes.</div>` : ''}</div>`);
-    } else out.push(`<div class="sf-inst"><h3>1 · Echo time</h3><div class="sf-empty">No temperature cast near this site, so there is no sound-speed profile to time an echo through. Nothing is assumed in its place.</div></div>`);
+    } else out.push(`<div class="sf-inst"><h3>1 · Echo time</h3><div class="sf-empty">No temperature cast near this point, so there is no sound-speed profile to time an echo through. Nothing is assumed in its place.</div></div>`);
     if (d.echo) {
         const e = d.echo, side = e.hit.offKm > 0.05;
         out.push(`<div class="sf-inst"><h3>2 · Beam <small>the first echo comes from the nearest sea floor in the cone</small></h3>
@@ -255,7 +366,7 @@ function renderSound() {
 function renderSection() {
     const d = S.detail, host = $('sf-section-chart'), W = Math.max(320, host.clientWidth || 560), H = 300, m = { l: 52, r: 12, t: 10, b: 32 };
     const sec = d.section.filter((p) => p.depth != null);
-    $('sf-section-sub').textContent = `240 km along bearing ${Math.round(d.sectionAzimuth)}°${d.axis && d.axis.defined ? ', across the trench' : ''}`;
+    $('sf-section-sub').textContent = `240 km along bearing ${Math.round(d.sectionAzimuth)}°${d.axis && d.axis.defined ? ', across the deepest line' : ''}`;
     host.textContent = '';
     if (sec.length < 3) { host.innerHTML = '<div class="sf-empty">The section leaves this window.</div>'; return; }
     const maxD = Math.max(1000, Math.ceil(Math.max(...sec.map((p) => p.depth)) / 1000) * 1000), minD = Math.min(0, Math.floor(Math.min(...sec.map((p) => p.depth)) / 1000) * 1000);
@@ -279,7 +390,7 @@ function renderSection() {
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); $('sf-section-read').innerHTML = base; });
     host.appendChild(svg);
     $('sf-section-note').innerHTML = `Drawn ${(1 / ve).toFixed(0)}× taller than true scale. `
-        + (d.axis && d.axis.defined ? `The line runs across the trench, found as the direction along which the floor is deepest. ` : `No clear trench axis in this window, so the line runs east–west. `)
+        + (d.axis && d.axis.defined ? `The line runs across the direction along which the floor is deepest. ` : `No clear trench axis in this window, so the line runs east–west. `)
         + `Within this window ${Math.round(d.hyps.hadalAreaKm2).toLocaleString('en-US')} km² of floor lies below 6 km.`;
 }
 
@@ -301,7 +412,7 @@ function renderColumn() {
     $('sf-column-table').textContent = '';
     if (!d.column) {
         $('sf-column-sub').textContent = ''; $('sf-column-keys').textContent = ''; $('sf-column-read').textContent = '';
-        host.innerHTML = `<div class="sf-empty">${S.casts ? 'No archived cast within 150 km of this site reaches 2 km depth, so there is no profile to show. Nothing is invented in its place.' : 'The cast archive could not be loaded.'}</div>`;
+        host.innerHTML = `<div class="sf-empty">${S.casts ? (S.id === 'custom' ? 'No archived cast in this page\'s set lies within 150 km of this point, so there is no temperature profile here. Nothing is invented in its place.' : 'No archived cast within 150 km of this site reaches 2 km depth, so there is no profile to show. Nothing is invented in its place.') : 'The cast archive could not be loaded.'}</div>`;
         $('sf-column-note').textContent = ''; return;
     }
     const col = d.column, L = col.levels.filter((l) => l.z <= d.reach + 1e-6), hasS = col.salinity !== 'assumed';
@@ -392,7 +503,7 @@ function renderCompare() {
         const off = r.floorT >= hi, cx = x(Math.max(4000, r.gridDepth)), cy = off ? m.t + 4 + 16 * offN++ : y(r.floorT), st = KIND_STYLE[r.kind];
         const mk = shape(r.kind, cx, cy, 5.5, r.floorKind === 'model' ? { fill: '#0b1120', stroke: st.color, 'stroke-width': 2 } : {});
         const t = el('title', {}, `${r.name}: ${fmt.t(r.floorT)} ${fmt.kind(r.floorKind)} at ${fmt.m(r.gridDepth)}`); mk.appendChild(t);
-        mk.style.cursor = 'pointer'; mk.addEventListener('click', () => { select(r.id); $('sf-stage-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+        mk.style.cursor = 'pointer'; mk.addEventListener('click', () => { select(r.id, { show: true }); $('sf-stage-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
         mk.addEventListener('pointermove', (e) => tip($('sf-chart-tip'), mapTip(r), e)); mk.addEventListener('pointerleave', () => { $('sf-chart-tip').hidden = true; });
         svg.appendChild(mk);
         if (labelled.has(r.id) || off) svg.appendChild(el('text', { x: cx + (cx > W - 120 ? -9 : 9), y: cy + (cx > W - 120 ? -7 : 3), 'text-anchor': cx > W - 120 ? 'end' : 'start', class: 't-strong' }, (r.deep || r.name).replace(' Abyssal Plain', ' plain') + (off ? ` ${r.floorT.toFixed(1)} °C ↑` : '')));

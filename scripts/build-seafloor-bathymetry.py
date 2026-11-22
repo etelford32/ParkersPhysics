@@ -18,7 +18,8 @@ lat/lon grid through the exact inverse — never a stretched tile image (the Cli
 OUTPUT
   <id>.bin.gz   int16 little-endian metres (elevation, negative below sea level), row-major,
                 row 0 = NORTH, col 0 = WEST. gzip mtime 0 so a re-bake is byte-stable.
-  world.bin.gz  the same at 0.5 deg for the overview map (360 x 720, lat 90..-90 cell centres).
+  world.bin.gz  the whole planet at 0.25 deg for the globe (720 x 1440 cell centres, lat 90..-90), in
+                10 m steps, row-delta coded and byte-shuffled (js/seafloor/bathy.js decodeWorld).
   index.json    per site: grid geometry + the deepest cell FOUND in the grid.
 """
 import argparse, gzip, io, json, math, os, re, sys, time
@@ -31,7 +32,8 @@ CACHE = os.path.join(ROOT, 'scripts', '.cache', 'seafloor-tiles')
 TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 ZOOM = 7                 # 0.0028 deg/px at the equator in x; finer than the 1' target everywhere used
 WORLD_ZOOM = 4
-WORLD_STEP = 0.5
+WORLD_STEP = 0.25
+WORLD_QUANT_M = 10      # the globe's relief is stored in 10 m steps (the grid itself is good to ~100 m)
 
 def load_sites():
     """Read js/seafloor/sites.js — the ONE site list. Rows are pure literals on one line each."""
@@ -129,18 +131,25 @@ def main():
             median_depth_m=int(-np.median(zi[zi < 0])) if (zi < 0).any() else None,
             ocean_fraction=round(float((zi < 0).mean()), 4), bytes=size))
         print(f"{s['id']:16s} {nx}x{ny}  deepest {-zi[j, i]:6d} m at {lat[j]:.3f}, {lon[i]:.3f}  ({size/1024:.0f} KB)")
-    # overview
-    wlat = 90 - WORLD_STEP / 2 - np.arange(int(180 / WORLD_STEP)) * WORLD_STEP
-    wlon = -180 + WORLD_STEP / 2 + np.arange(int(360 / WORLD_STEP)) * WORLD_STEP
+    # overview: 0.25 deg, 10 m steps, row-delta coded then byte-shuffled (the glacier catalogue's trick):
+    # value[j][i] = q[j][i] - q[j][i-1], first column = difference from the row above; low bytes then high bytes.
+    wlat = 90 - WORLD_STEP / 2 - np.arange(int(round(180 / WORLD_STEP))) * WORLD_STEP
+    wlon = -180 + WORLD_STEP / 2 + np.arange(int(round(360 / WORLD_STEP))) * WORLD_STEP
     LON, LAT = np.meshgrid(wlon, np.clip(wlat, -85.0, 85.0))   # Mercator ends at 85.05: the caps repeat the last row (disclosed)
-    wsize = write_bin(os.path.join(OUT, 'world.bin.gz'), sample(LAT, LON, WORLD_ZOOM))
+    q = np.rint(sample(LAT, LON, WORLD_ZOOM) / WORLD_QUANT_M).astype(np.int32)
+    d = q.copy(); d[:, 1:] = q[:, 1:] - q[:, :-1]; d[1:, 0] = q[1:, 0] - q[:-1, 0]
+    if np.abs(d).max() > 32767: raise SystemExit('world delta overflows int16')
+    b2 = np.frombuffer(d.astype('<i2').tobytes(), dtype=np.uint8).reshape(-1, 2)
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb', mtime=0, compresslevel=9) as g: g.write(np.concatenate([b2[:, 0], b2[:, 1]]).tobytes())
+    open(os.path.join(OUT, 'world.bin.gz'), 'wb').write(buf.getvalue()); wsize = len(buf.getvalue())
     index = dict(
         format='seafloor-bathy-v1', baked=time.strftime('%Y-%m-%d', time.gmtime()),
         source='AWS Terrain Tiles (Terrarium) - ocean: NOAA ETOPO1 1 arc-minute + GEBCO 2014',
         source_url='https://registry.opendata.aws/terrain-tiles/',
         note='Mostly satellite-altimetry-predicted depth on a ~1.8 km grid, not a multibeam survey. Elevation in metres, negative below sea level.',
         tile_zoom=ZOOM, encoding='int16le gzip, row 0 north, col 0 west',
-        world=dict(file='world.bin.gz', step_deg=WORLD_STEP, nx=len(wlon), ny=len(wlat), north=90, west=-180, cell='centre', polar_cap_deg=85, tile_zoom=WORLD_ZOOM, bytes=wsize),
+        world=dict(file='world.bin.gz', encoding='q-delta-rows-shuffled', quant_m=WORLD_QUANT_M, step_deg=WORLD_STEP, nx=len(wlon), ny=len(wlat), north=90, west=-180, cell='centre', polar_cap_deg=85, tile_zoom=WORLD_ZOOM, bytes=wsize),
         sites=rows)
     json.dump(index, open(idx_path, 'w'), indent=1); open(idx_path, 'a').write('\n')
     print('wrote', os.path.relpath(idx_path, ROOT), f'world {wsize/1024:.0f} KB')

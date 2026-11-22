@@ -8,15 +8,17 @@
  "encoding": "int16le gzip, row 0 north, col 0 west",
  "world": {
   "file": "world.bin.gz",
-  "step_deg": 0.5,
-  "nx": 720,
-  "ny": 360,
+  "encoding": "q-delta-rows-shuffled",
+  "quant_m": 10,
+  "step_deg": 0.25,
+  "nx": 1440,
+  "ny": 720,
   "north": 90,
   "west": -180,
   "cell": "centre",
   "polar_cap_deg": 85,
   "tile_zoom": 4,
-  "bytes": 416769
+  "bytes": 872536
  },
  "sites": [
   {

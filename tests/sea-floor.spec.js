@@ -3,13 +3,26 @@
  *
  *   npx playwright test tests/sea-floor.spec.js
  *
- * No network: the page reads only the baked data/seafloor/* files. Pins: boots without console
+ * No network: the page reads the baked data/seafloor/* files, and a dive at an open-ocean point
+ * reads elevation tiles through /api/climalytix/dem, which is MOCKED here with a synthetic sea
+ * floor (real Terrarium PNGs of a known function). Pins: boots without console
  * errors; the table, map, 3D block, cross-section, water column and sounding all draw the page
  * model's numbers; a deep link selects a site; Ping reveals the side echo; picking a point on the
  * block moves the sounding; and the NEGATIVE CONTROLS — the cast archive missing ⇒ depths stay,
  * no temperature is shown anywhere and the chip says so; the index missing ⇒ nothing is drawn.
  */
 import { test, expect } from '@playwright/test';
+import { demTilePng } from './fixtures/climalytix-mocks.mjs';
+
+/** The synthetic sea floor every mocked tile is cut from: ~4.2 km deep with a gentle swell. */
+const seaFloor = (lat, lon) => -4200 - 600 * Math.sin(lat * 0.7) * Math.cos(lon * 0.5);
+async function mockTiles(page, { down = false } = {}) {
+    await page.route('**/api/climalytix/dem**', (r) => {
+        if (down) return r.fulfill({ status: 503, body: '' });
+        const q = new URL(r.request().url()).searchParams;
+        return r.fulfill({ status: 200, contentType: 'image/png', body: demTilePng(+q.get('z'), +q.get('x'), +q.get('y'), seaFloor) });
+    });
+}
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -20,7 +33,8 @@ function recorder(page) {
     page.on('pageerror', (e) => errors.push(e.message));
     return errors;
 }
-async function boot(page, url = '/sea-floor.html') {
+async function boot(page, url = '/sea-floor.html', opts = {}) {
+    await mockTiles(page, opts);
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForFunction(() => window.__seaFloor?.detail && document.querySelector('#sf-section-chart svg'), null, { timeout: 60_000 });
     await page.evaluate(() => document.querySelector('.pp-consent-banner')?.remove());
@@ -45,7 +59,16 @@ test('boots clean and every panel draws the model', async ({ page }) => {
     await expect(page.locator('#sf-column-chart svg path')).not.toHaveCount(0);
     await expect(page.locator('#sf-compare-chart svg')).toBeVisible();
     await expect(page.locator('#sf-column-note')).toContainText('Model check on this cast');
-    // 3D block rendered kernel geometry
+    // the page opens on the GLOBE: the whole planet's relief, with the 28 sites marked
+    await page.waitForFunction(() => window.__seaFloorGlobe?.state.frames > 0 && window.__seaFloorGlobe.state.vertices > 100000, null, { timeout: 60_000 });
+    expect(await page.evaluate(() => ({ mode: window.__seaFloor.mode, sites: window.__seaFloorGlobe.state.sites, exag: window.__seaFloorGlobe.state.exaggeration }))).toEqual({ mode: 'globe', sites: 28, exag: 30 });
+    await expect(page.locator('#sf-stage-note')).toContainText('Relief exaggerated 30×');
+    await page.locator('#sf-globe-exag').fill('1');
+    await expect(page.locator('#sf-stage-note')).toContainText('true scale');
+    await page.uncheck('#sf-water');
+    expect(await page.evaluate(() => window.__seaFloorGlobe.state.water)).toBe(false);
+    // and the sea-floor block at the selected site is one click away
+    await page.click('#sf-mode-local');
     await page.waitForFunction(() => window.__seaFloorStage?.state.frames > 0 && window.__seaFloorStage.state.vertices > 10000, null, { timeout: 60_000 });
     // no horizontal overflow
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -56,6 +79,7 @@ test('deep link, table selection, ping, exaggeration, and a picked point', async
     const errors = recorder(page);
     await boot(page, '/sea-floor.html?site=puerto-rico');
     await expect(page.locator('#sf-site-title')).toContainText('Puerto Rico');
+    expect(await page.evaluate(() => window.__seaFloor.mode)).toBe('local');         // a site deep link opens on its sea floor
     await expect(page.locator('#sf-table tr[aria-selected="true"]')).toContainText('Puerto Rico');
     await page.locator('#sf-table tbody tr[data-id="tonga"]').click();
     await page.waitForFunction(() => window.__seaFloor.id === 'tonga' && window.__seaFloor.detail?.point.depth > 10000);
@@ -88,6 +112,82 @@ test('deep link, table selection, ping, exaggeration, and a picked point', async
     await page.click('#sf-reset-point');
     await expect(page.locator('#sf-stage-readout')).toContainText('deepest grid cell');
     expect(errors).toEqual([]);
+});
+
+test('globe: read a depth anywhere, dive under the surface there', async ({ page }) => {
+    const errors = recorder(page);
+    await boot(page);
+    await page.waitForFunction(() => window.__seaFloorGlobe?.state.frames > 0, null, { timeout: 60_000 });
+    // a point in the open western Pacific, picked on the globe itself (the page's own pick path)
+    const target = { lat: 2, lon: 165 };
+    await page.evaluate((t) => window.__seaFloorGlobe.flyTo(t.lat, t.lon, 3.3, 50), target);
+    await page.waitForFunction(() => !window.__seaFloorGlobe.state.flying);
+    const hit = await page.evaluate((t) => { const g = window.__seaFloorGlobe, s = g.screenOf(t.lat, t.lon), p = g.pointAt(s.x, s.y); return { s, p }; }, target);
+    expect(hit.s.facing).toBe(true);
+    expect(Math.abs(hit.p.lat - target.lat)).toBeLessThan(0.2);          // analytic pick ≡ the projection, on the near side
+    expect(Math.abs(hit.p.lon - target.lon)).toBeLessThan(0.2);
+    await page.mouse.click(hit.s.x, hit.s.y);
+    await expect(page.locator('#sf-stage-readout')).toContainText('overview grid');
+    await expect(page.locator('#sf-stage-readout')).toContainText('Dive here');
+    expect(await page.evaluate(() => window.__seaFloor.id)).toBe('mariana');        // reading a depth does not change the selection
+    await page.click('#sf-dive-here');
+    await page.waitForFunction(() => window.__seaFloor.id === 'custom' && window.__seaFloor.mode === 'local' && window.__seaFloorStage?.state.underwater, null, { timeout: 60_000 });
+    await expect(page).toHaveURL(/at=[12]\.\d+(,|%2C)16[45]\.\d+/);
+    await expect(page.locator('#sf-site-title')).toHaveText('Open ocean');
+    // the block is the MOCKED sea floor (~4.2 km), and the HUD reports the water at the camera
+    const d = await page.evaluate(() => ({ depth: window.__seaFloor.detail.point.depth, cam: window.__seaFloorStage.camera(), column: window.__seaFloor.detail.column }));
+    expect(d.depth).toBeGreaterThan(3500); expect(d.depth).toBeLessThan(4900);
+    expect(d.cam.depthM).toBeGreaterThan(0); expect(d.cam.depthM).toBeLessThan(d.depth);
+    expect(d.column).toBeNull();
+    const hud = page.locator('#sf-dive-hud');
+    await expect(hud).toContainText('below the surface');
+    await expect(hud).toContainText('above the sea floor');
+    await expect(hud).toContainText('atm');
+    await expect(hud).toContainText('no archived cast within 150 km');             // no temperature is invented in mid-ocean
+    await expect(hud).not.toContainText('°C');
+    await expect(page.locator('#sf-dive')).toHaveText('Surface ▲');
+    await expect(page.locator('#sf-sound-body')).toContainText('Pressure on the floor');
+    // back up, and back to the globe
+    await page.click('#sf-dive');
+    await page.waitForFunction(() => !window.__seaFloorStage.state.underwater);
+    await expect(hud).toContainText('above the sea surface');
+    await page.click('#sf-mode-globe');
+    expect(await page.evaluate(() => window.__seaFloor.mode)).toBe('globe');
+    // NEGATIVE CONTROL: land is not dived into
+    await page.evaluate(() => { const g = window.__seaFloorGlobe; return g.flyTo(39, -100, 3.3, 50); });
+    await page.waitForFunction(() => !window.__seaFloorGlobe.state.flying);
+    const land = await page.evaluate(() => window.__seaFloorGlobe.screenOf(39, -100));
+    await page.mouse.dblclick(land.x, land.y);
+    await expect(page.locator('#sf-stage-readout')).toContainText('is land');
+    expect(await page.evaluate(() => window.__seaFloor.mode)).toBe('globe');
+    expect(errors).toEqual([]);
+});
+
+test('diving at a named site shows the measured water on the way down', async ({ page }) => {
+    await boot(page, '/sea-floor.html?site=mariana');
+    await page.waitForFunction(() => window.__seaFloor.mode === 'local' && window.__seaFloorStage?.state.vertices > 10000, null, { timeout: 60_000 });
+    await page.click('#sf-dive');
+    await page.waitForFunction(() => window.__seaFloorStage.state.underwater && !window.__seaFloorStage.state.flying, null, { timeout: 60_000 });
+    const hud = page.locator('#sf-dive-hud');
+    await expect(hud).toContainText('°C');
+    await expect(hud).toContainText(/measured|modelled/);
+    const cam = await page.evaluate(() => window.__seaFloorStage.camera());
+    expect(cam.depthM).toBeGreaterThan(6000);                                        // inside the trench, in the hadal zone — not pushed up over its wall
+    await expect(hud).toContainText('Hadal zone');
+    // the deep link survives: ?at= dives at an arbitrary point on load
+    await page.goto('/sea-floor.html?at=2.000,165.000', { waitUntil: 'load' });
+    await page.waitForFunction(() => window.__seaFloor?.id === 'custom' && window.__seaFloor.mode === 'local', null, { timeout: 60_000 });
+});
+
+test('NEGATIVE CONTROL: elevation tiles down ⇒ no dive, nothing drawn in their place', async ({ page }) => {
+    await boot(page, '/sea-floor.html', { down: true });
+    await page.waitForFunction(() => window.__seaFloorGlobe?.state.frames > 0, null, { timeout: 60_000 });
+    await page.evaluate(() => window.__seaFloorGlobe.flyTo(2, 165, 3.3, 50));
+    await page.waitForFunction(() => !window.__seaFloorGlobe.state.flying);
+    const s = await page.evaluate(() => window.__seaFloorGlobe.screenOf(2, 165));
+    await page.mouse.dblclick(s.x, s.y);
+    await expect(page.locator('#sf-stage-readout')).toContainText('could not be read');
+    expect(await page.evaluate(() => ({ id: window.__seaFloor.id, mode: window.__seaFloor.mode }))).toEqual({ id: 'mariana', mode: 'globe' });
 });
 
 test('NEGATIVE CONTROL: no cast archive ⇒ depths stay, no temperature is invented', async ({ page }) => {

@@ -131,16 +131,17 @@ export const UNLOGGED_PRS = {
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
     { id: 'sea-floor', date: '2026-11-22', pr: null,
-      title: 'Sea Floor: the ocean\'s trenches in 3D, with the deepest real temperature casts', kind: 'simulation',
+      title: 'Sea Floor: a 3D globe of the ocean floor you can dive beneath', kind: 'simulation',
       section: 'earth-orbit', icon: 'fluid',
-      summary: 'A new page maps 28 trenches, fracture-zone deeps, isolated basins and abyssal plains, shows the deepest '
-             + 'temperature profiles ever archived near each one, and lets you fire an echo sounder to see how depth is actually measured.',
+      summary: 'A new page shows the whole ocean floor as a relief globe. Click anywhere on the sea and dive under the surface to the '
+             + 'bottom; at 28 trenches and abyssal plains the water on the way down is the deepest real temperature profile ever archived there.',
       highlights: [
-          'Temperature is from 221 real casts in NOAA\'s World Ocean Database, including a 1992 cast to 10,861 m in the Mariana Trench. Where a cast stops short of the floor the rest is modelled and drawn dashed.',
+          'Turn the globe, drain the ocean with one tick, and click any point of sea to read its depth. Dive there and the page loads the sea floor around it at 1.8 km detail and flies you under.',
+          'On the way down a readout gives your depth, the pressure, how much sunlight is left and the height of the floor below you. About 1 % of surface light remains at 115 m and none below a few hundred metres.',
+          'Temperature is from 221 real casts in NOAA\'s World Ocean Database, including a 1992 cast to 10,861 m in the Mariana Trench. Where no cast lies within 150 km the page shows no temperature at all.',
           'The water at the bottom of Challenger Deep is 2.46 °C, a full degree warmer than the coldest water 6 km above it. Compression alone does that, and the page shows it on the measured profile.',
-          'Fire the sounder: an echo from 10.8 km takes 13.9 seconds, and at the 1500 m/s a sounder assumes it reads about 370 m too shallow. A wide beam reads shallower still, from an echo off the trench wall.',
-          'The model for the unmeasured water is tested on the casts themselves. Started below 6 km it is right to about 0.01 °C; started at 4.5 km in the Atlantic it is wrong, because colder Antarctic water lies underneath, and the page says so.',
-          'Depth is a global grid with cells about 1.8 km across, mostly predicted from satellite gravity. It can differ from a ship\'s sounding by a few hundred metres, and both figures are shown.',
+          'Fire the echo sounder: an echo from 10.8 km takes 13.9 seconds, and at the 1500 m/s a sounder assumes it reads about 370 m too shallow. A wide beam reads shallower still, from an echo off the trench wall.',
+          'Under water the sea is drawn clear and the floor is lit artificially, because real sea water lets you see only tens of metres. The page says so on the view.',
       ],
       links: [{ href: 'sea-floor.html' }] },
     { id: 'bz-column', date: '2026-11-20', pr: 1085,
