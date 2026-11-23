@@ -27,6 +27,7 @@ import * as R from '../js/chicxulub/reconstruct.js';
 import * as SM from '../js/chicxulub/scene-model.js';
 import fs from 'node:fs';
 import * as C from '../js/chicxulub/constraints.js';
+import * as CL from '../js/chicxulub/collapse.js';
 import { impactEnergy } from '../js/neo-space.js';
 import { EBM_HEAT_CAPACITY, EBM_FEEDBACK } from '../js/volcano-engine.js';
 
@@ -471,6 +472,26 @@ section('10. constraints: fit, tests, and the system of variables');
     ok(near(C.unitToParam('speedKms', C.paramToUnit('speedKms', 23)), 23, 1e-9), 'variable ↔ slider round trip');
     // every fitted row responds to at least one variable (no decorative rows)
     ok(st.J.every((row) => row.some((x) => Math.abs(x) > 1e-3)), 'every fitted row moves with at least one variable');
+}
+
+section('11. crater collapse: a depth-averaged Bingham layer (MEASURED OUT — the record, unused by the page)');
+{
+    const dtc = M.transientFromFinal(155e3), L = 16500;
+    const run = (o = {}) => CL.collapseRun(dtc, { impactorM: L, ...o });
+    const base = run();
+    ok(base.massError < 1e-12, `staggered scheme conserves mass (${base.massError.toExponential(1)})`);
+    ok(base.frozenAtS > 300 && base.frozenAtS < 900 * 1.5, `the collapse freezes in minutes (${(base.frozenAtS / 60).toFixed(1)} min)`);
+    ok(base.peakUpliftKm > 20, `the central uplift overshoots tens of km above the surface (${base.peakUpliftKm.toFixed(0)} km)`);
+    ok(near(CL.calibratedYield(), CL.cavityStress(M.SCALING.simpleToComplexKm * 1000 / 1.25), 1e-12), 'the yield strength is the D_c cavity\'s own static stress (one calibration)');
+    const still = CL.collapseRun(dtc, { yieldPa: CL.cavityStress(dtc) * 1.05, ejectaRim: false });
+    ok(still.steps === 1 && still.etaKm.every((v, i) => Math.fround(v) === still.frames[0].etaKm[i]) && still.peakUpliftKm < 0, 'a cavity held by more than its own stress does not move at all (frozen state is exact)');
+    // the three measured failures
+    const up = [240, 480, 960].map((n) => run({ cells: n }).peakUpliftKm);
+    ok(up[2] / up[0] > 1.3, `FAILURE 1: the central uplift does not converge with the grid (${up.map((u) => u.toFixed(0)).join(' / ')} km)`);
+    const ringOverEdge = [1, 1.5].map((rf) => { const m = run({ fluidisedRadii: rf }).morphology; const ring = m.peaks.filter((p) => p.rKm > 0.05 * m.rimRadiusKm).sort((a, b) => b.prominenceKm - a.prominenceKm)[0]; return ring ? ring.rKm / (rf * dtc / 2000) : NaN; });
+    ok(ringOverEdge.every((x) => x > 1 && x < 1.4), `FAILURE 2: a ring sits at the assumed fluidised edge (× ${ringOverEdge.map((x) => x.toFixed(2)).join(', ')}), so it is the parameter, not a prediction`);
+    ok(base.morphology.finalDiameterKm > 2.5 * 155, `FAILURE 3: a rigid-base layer draws down a basin ${base.morphology.finalDiameterKm.toFixed(0)} km wide (measured 155)`);
+    ok(CL.COLLAPSE.verified === false && !fs.readFileSync(new URL('../js/chicxulub-page.js', import.meta.url), 'utf8').includes('collapse.js'), 'rheology flagged unverified; the page does not use this model');
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

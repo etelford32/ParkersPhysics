@@ -1,7 +1,7 @@
 # Chicxulub reconstruction — status and next steps
 
 *Written 2026-11-23. Page: `chicxulub.html`. Kernels: `js/chicxulub/*`. Gates:
-`node tests/chicxulub.mjs` (341 checks) and `tests/chicxulub-page.spec.js` (8).*
+`node tests/chicxulub.mjs` (350 checks) and `tests/chicxulub-page.spec.js` (8).*
 
 ## 1. Where it stands
 
@@ -84,15 +84,36 @@ Each step names what it would change and how we would know it worked.
 - **Done when:** the recovery phase and its slider mark can be added back and
   the gate's "still cold at 30 yr" pin is replaced by a held-out check.
 
-### E. A physical crater collapse — *larger, optional*
+### E. A physical crater collapse — *first attempt measured out, 2026-11-23*
 
-- Replace the interpolation with an axisymmetric model of the transient
-  cavity's collapse (acoustic-fluidisation-style rheology, as in the published
-  hydrocodes), or bake frames from a real iSALE run if one can be obtained.
-- Honest alternative: keep the sketch, but time its phases from a published
-  simulation's frames rather than from a coefficient.
-- **Done when:** the peak-ring radius comes OUT of the model instead of being
-  drawn at the measured value.
+- **Tried: a depth-averaged Bingham layer** (`js/chicxulub/collapse.js`):
+  axisymmetric, staggered grid so a frozen surface stays exactly frozen,
+  yield strength calibrated once on Earth's simple-to-complex transition,
+  acoustic-fluidisation viscosity and decay (recalled), the model's own
+  ejecta blanket as the rim. It conserves mass to 1e-15, freezes in
+  5–15 minutes and throws up a central uplift tens of km high — and **does
+  not make a peak ring**:
+  1. the central uplift does not converge with the grid (45 / 55 / 70 km at
+     240 / 480 / 960 cells);
+  2. where a ring appears it sits at the ASSUMED edge of the fluidised zone
+     (1.1–1.3 × that radius at 60, 155 and 300 km craters) — the parameter,
+     not a prediction;
+  3. a layer on a rigid base fills the cavity only from the sides, so the
+     basin comes out 3–4× too wide.
+  Pinned in the gate (§11); the page does not use it.
+- **Why, and what it needs instead:** a peak ring forms where the collapsing
+  uplift flows outward OVER the rim material slumping in — the overturned
+  stratigraphy the IODP core found. A single-valued surface cannot overturn.
+  It takes an axisymmetric (r, z) continuum code: incompressible
+  viscoplastic flow with a free surface, the same rheology (yield calibrated
+  on D_c, decaying fluidisation), material tracers so the overturn can be
+  seen. A particle-in-cell / material-point scheme fits that best (no mesh
+  tangling). **Several sessions**, not one: the solver, its own gates
+  (a Bingham slump with a known run-out, a viscous drop with a known decay
+  rate, mass and grid convergence), then Chicxulub. Done when the ring's
+  radius converges with the grid and does not track any one parameter.
+- **Honest alternative** (unchanged, needs step A): time the stage's sketch
+  from a published hydrocode's frames.
 
 ### F. Visuals — *needs a GPU session*
 
