@@ -73,6 +73,10 @@ A closing or sliding rate is the rigid rotation of one plate relative to the oth
   was written from the textbook derivation and is checked by its own identities and by planted-plate
   recovery, not against published thicknesses for these trenches (no literature access at build time).
 
+A site's thickness is quoted only from FIVE such fits 80 km apart along the trench (median and full range,
+at least three passing), with seamounts masked by a stated rule; a single cross-section is never quoted
+where five are available.
+
 ## Wide windows — the same source, further out
 
 `<id>.wide.bin.gz` (the 17 sites of kind `trench`): ±5° of latitude at 2 arc-minutes (3.7 km), sampled

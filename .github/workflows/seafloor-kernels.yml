@@ -5,7 +5,8 @@
 #                          grids vs their index; the adiabat vs REAL withheld casts with two
 #                          controls that must lose; the page model; "no physics in the renderer";
 #                          the trench model on Bird's plates + Slab2 (planted-plate recovery with and without
-#                          a regional slope, the wide windows, the reach test, recorded rejections).
+#                          a regional slope, the wide windows, the reach test, seamount masking, five stations
+#                          along each trench, recorded rejections).
 #
 # The browser gate (tests/sea-floor.spec.js) reads only baked files and is run locally.
 # The bakes (scripts/build-seafloor-*.py) need the network and are run by hand.

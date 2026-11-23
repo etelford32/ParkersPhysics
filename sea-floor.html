@@ -120,6 +120,12 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
 .sf-grid3 { display:grid; grid-template-columns:minmax(220px, .8fr) minmax(0, 1.2fr) minmax(0, 1.2fr); gap:16px; align-items:start; }
 @media (max-width: 1180px) { .sf-grid3 { grid-template-columns:minmax(0, 1fr); } }
 .sf-h3 { font-size:.8rem; font-weight:650; margin-bottom:4px; } .sf-h3 small { font-weight:400; color:var(--sf-ink-3); font-size:.7rem; }
+.sf-stations { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px; font-size:.72rem; align-items:center; color:var(--sf-ink-3); }
+.sf-stations:empty { display:none; }
+.sf-stations button { font:inherit; color:var(--sf-ink-2); background:transparent; border:1px solid var(--sf-line, #26324a); border-radius:6px; padding:3px 8px; min-height:28px; cursor:pointer; display:inline-flex; gap:6px; align-items:center; }
+.sf-stations button[aria-pressed="true"] { color:var(--sf-ink); border-color:var(--sf-s1); background:rgba(57,135,229,.14); }
+.sf-stations button i { width:8px; height:8px; border-radius:50%; border:1.5px solid var(--sf-ink-3); display:inline-block; }
+.sf-stations button.ok i { background:var(--sf-s2); border-color:var(--sf-s2); }
 .sf-method { font-size:.74rem; color:var(--sf-ink-2); line-height:1.6; }
 .sf-method p + p { margin-top:6px; } .sf-method b { color:var(--sf-ink); } .sf-method a { color:var(--sf-accent); }
 </style>
@@ -183,6 +189,7 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
       <div id="sf-plates-facts"><div class="sf-empty">Loading the plate model…</div></div>
       <div>
         <h3 class="sf-h3">The bending plate <small>sea floor seaward of the trench, against the elastic-plate model</small></h3>
+        <div class="sf-stations" id="sf-flex-stations" role="group" aria-label="Cross-sections along the trench"></div>
         <div class="sf-keys" id="sf-flex-keys"></div>
         <div class="sf-read" id="sf-flex-read"></div>
         <div class="sf-chart" id="sf-flex-chart"></div>
@@ -266,7 +273,11 @@ details.sf-table td, details.sf-table th { text-align:right; padding:2px 6px; bo
       sections run 500 km seaward, using a wider and coarser window (3.7 km grid) beyond the detailed one. It is an "effective" thickness because a real plate cracks as it bends, so it reads thinner
       than the cold plate really is.
       A fit is only kept when the rise stands clear of the scatter, the sea floor beyond it returns to the fitted slope, the slope is no steeper than a cooling plate's, and the thickness changes by
-      less than a quarter when the farthest quarter of the profile is left out. Most trenches fail those tests on this grid, and the page then shows the profile without a thickness.
+      less than a quarter when the farthest quarter of the profile is left out.
+      Seamounts are left out by rule: sea floor standing more than 2.5 times the scatter (and at least 100 m) above the fitted plate, in runs no wider than 50 km and no more than a fifth of the
+      profile in all, is masked and the fit repeated. The masked stretches are shaded on the chart.</p>
+    <p><b>Five sections, not one.</b> At the named trenches the same fit is made at five cross-sections 80 km apart, walked along the trench itself. A thickness is quoted only when at least
+      three of the five pass, as their median, with their full range beside it. That range is the real uncertainty: along 320 km of one trench the fitted thickness differs by a factor of 1.3 to 3.5.
       The rock constants are textbook values, and the thicknesses have not been checked against published ones.</p>
     <p><b>Diving anywhere.</b> The 28 marked sites are stored with the page. Anywhere else, the sea floor is read at the moment you dive from the same public tiles, at the same 1.8 km detail.
       Temperature is shown only where an archived cast lies within 150 km of your point; elsewhere the page shows pressure and light but no temperature.</p>

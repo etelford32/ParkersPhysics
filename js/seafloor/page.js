@@ -8,7 +8,7 @@
  */
 import { SEAFLOOR_SITES } from './sites.js';
 import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs, loadWideGrid } from './load.js';
-import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, flexureReference, FAMILY_STYLE } from './trench-model.js';
+import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, flexureReference, quotedThickness, FAMILY_STYLE } from './trench-model.js';
 import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint, customSite, castsNear, cameraReport, ambientColor, worldTexture } from './page-model.js';
 import { BEAMS } from './sounder.js';
 import { MODEL_GAP_WARN_M } from './profile.js';
@@ -18,7 +18,7 @@ import { DIVE_MAX_LAT } from './free-dive.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const NS = 'http://www.w3.org/2000/svg';
-const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
+const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, trenchKey: '', station: 0, wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
 window.__seaFloor = S;
 
 // ── tiny SVG helpers ─────────────────────────────────────────────────────────
@@ -359,7 +359,13 @@ function pushBoundaries() {
 }
 function computeTrench() {
     const c = cur(), id = S.custom ? null : S.id, w = id ? S.wides.get(id) : null;
-    S.trench = S.plates && S.detail && !S.detail.land ? trenchModel({ plates: S.plates, slabs: S.slabs, grid: c.grid, detail: S.detail, wide: w && w !== 'loading' && w !== 'down' ? w : null }) : null;
+    const wide = w && w !== 'loading' && w !== 'down' ? w : null, ok = S.plates && S.detail && !S.detail.land;
+    // five stations × several fits is ~0.1 s: recomputed only when the point, the grids or the plate models change
+    const key = ok ? [S.custom ? 'c' : S.id, S.detail.point.lat, S.detail.point.lon, !!wide, !!S.slabs].join('|') : '';
+    if (key && key === S.trenchKey && S.trench) return;
+    if (key !== S.trenchKey) S.station = 0;
+    S.trenchKey = key;
+    S.trench = ok ? trenchModel({ plates: S.plates, slabs: S.slabs, grid: c.grid, detail: S.detail, wide }) : null;
     // the wide window is fetched only for a site that has one, only once the plate model says a plate bends here
     if (id && c.meta && c.meta.wide && !S.wides.has(id) && S.trench && S.trench.profile) {
         S.wides.set(id, 'loading');
@@ -385,11 +391,12 @@ const REASON = {
     'far-field-not-level': 'the sea floor beyond the rise does not return to a level (seamounts or a sloping plate)',
     'rise-within-the-scatter': 'the rise is no bigger than the scatter of the depths',
     'slope-implausible': 'the fit needs a steeper regional slope than a cooling plate has',
+    'too-much-masked': 'more than a fifth of the profile would have to be left out as seamounts',
     'not-stable-with-reach': 'the answer changes when the farthest quarter of the profile is left out',
 };
 function renderPlates() {
     const facts = $('sf-plates-facts'), t = S.trench;
-    for (const id of ['sf-flex-chart', 'sf-deep-chart', 'sf-flex-keys', 'sf-deep-keys', 'sf-flex-read', 'sf-deep-read', 'sf-plates-note']) $(id).textContent = '';
+    for (const id of ['sf-flex-chart', 'sf-deep-chart', 'sf-flex-stations', 'sf-flex-keys', 'sf-deep-keys', 'sf-flex-read', 'sf-deep-read', 'sf-plates-note']) $(id).textContent = '';
     if (S.tectonics !== 'ok') { $('sf-plates-sub').textContent = ''; facts.innerHTML = `<div class="sf-empty">${S.tectonics === 'loading' ? 'Loading the plate model…' : 'The plate model could not be loaded, so no plate motions or slabs are shown. Nothing is substituted.'}</div>`; return; }
     if (!t) { facts.innerHTML = '<div class="sf-empty">No sounding point.</div>'; return; }
     const s = t.setting, lab = motionLabel(s);
@@ -410,15 +417,25 @@ function renderPlates() {
         rows.push(['Mapped down to', `${Math.round(sl.maxDepthKm)} km`]);
     } else if (S.slabs && s.near && s.family === 'subduction') rows.push(['Subducted plate', '<small>no Slab2 surface along this line</small>']);
     else if (!S.slabs) rows.push(['Subducted plate', '<small>the slab model could not be loaded</small>']);
-    const f = t.flexure;
+    const al = t.along, st = al ? (al.stations.find((o) => o.offsetKm === S.station) || al.stations.find((o) => o.offsetKm === 0)) : null;
+    const view = st ? { profile: st.profile, flexure: st.flexure, why: st.flexure ? null : 'profile-too-short', station: st } : t, f = view.flexure, q = quotedThickness(t);
+    if (q && !q.single) {
+        const r = [Math.round(q.teMin), Math.round(q.teMax)];
+        rows.push(['Effective plate thickness', `<b>${Math.round(q.teKm)} km</b> <small>median of the ${q.good} of ${q.of} cross-sections that pass, along ${q.spanKm} km of trench; they range ${r[0]}–${r[1]} km${q.teMax > 2 * q.teMin ? ', so it varies strongly along the trench' : ''}</small>`]);
+    } else if (al && t.flexure) rows.push(['Effective plate thickness', `not quoted <small>${al.good === 0 ? 'none' : `only ${al.good}`} of ${al.stations.length} cross-sections along the trench pass${al.good === 0 ? '' : '; three are needed'}</small>`]);
+    else if (q) rows.push(['Effective plate thickness', `<b>${q.teKm.toFixed(0)} km</b> <small>from this one cross-section${Math.round(q.teMin) !== Math.round(q.teMax) ? `; ${Math.round(q.teMin)}–${Math.round(q.teMax)} km when its farthest quarter is left out` : ''}</small>`]);
     if (f && f.quality === 'good') {
-        rows.push(['Outer rise', `<b>${Math.round(f.wb)} m</b> high, ${Math.round(f.xb)} km seaward of the trench <small>modelled fit</small>`]);
-        const r = f.teRange.map((v) => Math.round(v));
-        rows.push(['Effective plate thickness', `<b>${f.elastic.teKm.toFixed(0)} km</b> <small>elastic-plate fit${r[0] !== r[1] ? `; ${r[0]}–${r[1]} km when the farthest quarter of the profile is left out` : '; unchanged when the farthest quarter of the profile is left out'}</small>`]);
+        rows.push([st && st.offsetKm ? 'Outer rise, this section' : 'Outer rise', `<b>${Math.round(f.wb)} m</b> high, ${Math.round(f.xb)} km seaward of the trench <small>modelled fit</small>`]);
         rows.push(['Regional slope', `${Math.abs(f.slope) < 0.05 ? 'level' : `${Math.abs(f.slope).toFixed(1)} m per km, ${f.slope > 0 ? 'deepening' : 'shoaling'} seaward`} <small>fitted with the rise</small>`]);
     }
     facts.innerHTML = `<dl class="sf-dl">${rows.map((r) => `<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join('')}</dl>`;
-    renderFlex(t); renderDeep(t);
+    const bar = $('sf-flex-stations');
+    if (al && al.stations.length > 1) {
+        bar.innerHTML = '<span>Along the trench:</span>' + al.stations.map((o) => { const g = o.flexure && o.flexure.quality === 'good';
+            return `<button type="button" data-station="${o.offsetKm}" class="${g ? 'ok' : ''}" aria-pressed="${o === st}" title="${g ? 'passes every test' : 'rejected'}"><i></i>${o.offsetKm === 0 ? 'here' : (o.offsetKm > 0 ? '+' : '−') + Math.abs(o.offsetKm) + ' km'}${g ? ` · ${Math.round(o.flexure.elastic.teKm)} km` : ''}</button>`; }).join('');
+        for (const b of bar.querySelectorAll('button')) b.addEventListener('click', () => { S.station = +b.dataset.station; renderPlates(); });
+    }
+    renderFlex(view); renderDeep(t);
     const notes = [];
     if (s.orogen) notes.push('Bird flags this stretch as lying in a zone of diffuse deformation, where rigid-plate rates are least reliable.');
     if (s.near && s.obliquityDeg > 70 && s.family !== 'sliding') notes.push('The plates here move almost parallel to the boundary: it is mostly sliding, not closing.');
@@ -443,16 +460,17 @@ function renderFlex(t) {
         const curve = []; for (let v = 0; v <= xMax; v += 2) curve.push(`${x(v).toFixed(1)},${y(flexureReference(v, f) - flexureHeight(v, f)).toFixed(1)}`);
         svg.appendChild(el('path', { d: 'M' + curve.join('L'), fill: 'none', stroke: 'var(--sf-s2)', 'stroke-width': 2, 'stroke-dasharray': good ? '' : '5 4', 'stroke-opacity': good ? 1 : 0.6 }));
     }
+    for (const r of (f ? f.masked : [])) svg.appendChild(el('rect', { x: x(r.x0 - 1), y: m.t, width: Math.max(2, x(r.x1 + 1) - x(r.x0 - 1)), height: H - m.t - m.b, fill: '#8f98ad', 'fill-opacity': .16, class: 'sf-masked' }));
     let d = '', pen = false; for (const p of t.profile) { if (p.depth == null || p.x < xMin) { pen = false; continue; } d += `${pen ? 'L' : 'M'}${x(p.x).toFixed(1)},${y(p.depth).toFixed(1)}`; pen = true; }
     svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--sf-s1)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
     if (good) { svg.appendChild(el('circle', { cx: x(f.xb), cy: y(flexureReference(f.xb, f) - f.wb), r: 4.5, fill: 'var(--sf-s2)', stroke: '#0b1120', 'stroke-width': 2 })); svg.appendChild(el('text', { x: x(f.xb), y: y(flexureReference(f.xb, f) - f.wb) - 9, 'text-anchor': 'middle', class: 't-strong' }, `outer rise, ${Math.round(f.wb)} m`)); }
     const cross = el('line', { y1: m.t, y2: H - m.b, stroke: '#e3eaf6', 'stroke-opacity': .5, visibility: 'hidden' }); svg.appendChild(cross);
     const hit = el('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' }); svg.appendChild(hit);
     const firstWide = t.profile.find((p) => p.src === 'wide' && p.depth != null && p.x > 0), wst = S.custom ? null : S.wides.get(S.id);
-    const tail = firstWide ? ` <small>Beyond ${Math.round(firstWide.x)} km the profile is read from a wider, coarser window (3.7 km grid).</small>` : wst === 'loading' ? ' <small>Loading the wider window…</small>' : wst === 'down' ? ' <small>The wider window could not be loaded; this is the near field only.</small>' : '';
+    const tail = firstWide ? (firstWide.x < 20 ? ' <small>This cross-section is read from the wider, coarser window (3.7 km grid).</small>' : ` <small>Beyond ${Math.round(firstWide.x)} km the profile is read from a wider, coarser window (3.7 km grid).</small>`) : wst === 'loading' ? ' <small>Loading the wider window…</small>' : wst === 'down' ? ' <small>The wider window could not be loaded; this is the near field only.</small>' : '';
     const base0 = !f ? esc(WHY[t.why] || '') : good
-        ? `The curve fits to <b>${Math.round(f.rms)} m</b>; a straight slope fits to ${Math.round(f.lineRms)} m and a flat floor to ${Math.round(f.flatRms)} m.`
-        : `<b>No stiffness is quoted here:</b> ${f.reasons.map((r) => REASON[r] || r).join('; ')}. <small>The dashed curve is the rejected fit.</small>`;
+        ? `The curve fits to <b>${Math.round(f.rms)} m</b>; a straight slope fits to ${Math.round(f.lineRms)} m and a flat floor to ${Math.round(f.flatRms)} m.${f.maskedKm ? ` ${Math.round(f.maskedKm)} km left out as seamounts.` : ''}`
+        : `<b>${t.station && t.station.offsetKm ? 'This cross-section is rejected' : 'No stiffness is quoted here'}:</b> ${f.reasons.map((r) => REASON[r] || r).join('; ')}. <small>The dashed curve is the rejected fit.</small>`;
     const base = base0 + tail;
     $('sf-flex-read').innerHTML = base;
     hit.addEventListener('pointermove', (e) => { const r = svg.getBoundingClientRect(), xv = ((e.clientX - r.left) / r.width * W - m.l) / (W - m.l - m.r) * (xMax - xMin) + xMin; let b = pts[0]; for (const p of pts) if (Math.abs(p.x - xv) < Math.abs(b.x - xv)) b = p;
@@ -461,7 +479,7 @@ function renderFlex(t) {
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); $('sf-flex-read').innerHTML = base; });
     host.appendChild(svg);
     const ln = (c, dash, label) => `<span><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="${c}" stroke-width="2" ${dash ? `stroke-dasharray="${dash}"` : ''}/></svg>${label}</span>`;
-    $('sf-flex-keys').innerHTML = ln('var(--sf-s1)', '', 'Sea floor, median of nine sections') + (f ? ln('var(--sf-s2)', good ? '' : '5 4', good ? 'Elastic-plate model' : 'Elastic-plate fit (rejected)') + ln('#8f98ad', '2 4', 'Undisturbed sea floor in the fit') : '');
+    $('sf-flex-keys').innerHTML = ln('var(--sf-s1)', '', 'Sea floor, median of nine sections') + (f ? ln('var(--sf-s2)', good ? '' : '5 4', good ? 'Elastic-plate model' : 'Elastic-plate fit (rejected)') + ln('#8f98ad', '2 4', 'Undisturbed sea floor in the fit') + (f.masked.length ? '<span><svg width="14" height="10"><rect width="14" height="10" fill="#8f98ad" fill-opacity=".3"/></svg>Left out as seamounts</span>' : '') : '');
 }
 function renderDeep(t) {
     const host = $('sf-deep-chart'), sl = t.slab;

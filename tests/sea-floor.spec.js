@@ -167,7 +167,9 @@ test('diving at a named site shows the measured water on the way down', async ({
     await boot(page, '/sea-floor.html?site=mariana');
     await page.waitForFunction(() => window.__seaFloor.mode === 'local' && window.__seaFloorStage?.state.vertices > 10000, null, { timeout: 60_000 });
     await page.click('#sf-dive');
-    await page.waitForFunction(() => window.__seaFloorStage.state.underwater && !window.__seaFloorStage.state.flying, null, { timeout: 60_000 });
+    await page.waitForFunction(() => window.__seaFloorStage.state.underwater && !window.__seaFloorStage.state.flying, null, { timeout: 60_000 }).catch(async () => {
+        throw new Error('dive did not settle: ' + JSON.stringify(await page.evaluate(() => ({ s: { ...window.__seaFloorStage.state }, cam: window.__seaFloorStage.camera(), btn: document.querySelector('#sf-dive').textContent, mode: window.__seaFloor.mode, when: window.__seaFloor.diveWhenReady, y: window.scrollY, vis: document.visibilityState, focus: document.hasFocus() }))));
+    });
     const hud = page.locator('#sf-dive-hud');
     await expect(hud).toContainText('°C');
     await expect(hud).toContainText(/measured|modelled/);
@@ -217,16 +219,31 @@ const tectonics = (page) => page.waitForFunction(() => { const s = window.__seaF
 const stateOf = (page, name) => page.evaluate((n) => { const o = window[n]; return typeof o.state === 'function' ? o.state() : o.state; }, name);
 
 test('plates: boundaries on the globe and the block, the bending plate, the slab', async ({ page }) => {
-    await boot(page, '/sea-floor.html?site=izu-bonin'); await tectonics(page);
-    const t = await page.evaluate(() => { const t = window.__seaFloor.trench; return { fam: t.setting.family, down: t.setting.down.name, q: t.flexure.quality, te: t.flexure.elastic.teKm, slab: t.slab.code, reach: t.flexure.reachKm, slope: t.flexure.slope, wide: t.wide }; });
-    expect(t.fam).toBe('subduction'); expect(t.down).toBe('Pacific'); expect(t.q).toBe('good'); expect(t.slab).toBe('izu');
+    await boot(page, '/sea-floor.html?site=kuril'); await tectonics(page);
+    const t = await page.evaluate(() => { const t = window.__seaFloor.trench, a = t.along, te = a.stations.filter((s) => s.flexure?.quality === 'good').map((s) => s.flexure.elastic.teKm).sort((x, y) => x - y);
+        return { fam: t.setting.family, down: t.setting.down.name, slab: t.slab.code, reach: t.flexure.reachKm, wide: t.wide, n: a.stations.length, good: a.good, quotable: a.quotable, med: a.teMedian, te, masked: t.flexure.masked.length, slope: t.flexure.slope }; });
+    expect(t.fam).toBe('subduction'); expect(t.down).toBe('Pacific'); expect(t.slab).toBe('kur');
     expect(t.wide).toBe(true); expect(t.reach).toBeGreaterThan(450);                                    // the fit ran on the wide window
-    await expect(page.locator('#sf-plates-facts')).toContainText('Regional slope');
-    await expect(page.locator('#sf-plates-facts')).toContainText(`${Math.abs(t.slope).toFixed(1)} m per km`);
+    expect(t.n).toBe(5); expect(t.quotable).toBe(true); expect(t.good).toBeGreaterThanOrEqual(3);
+    // the page prints the kernel's MEDIAN over the passing stations, with their range
+    const facts = page.locator('#sf-plates-facts');
+    await expect(facts).toContainText('Effective plate thickness');
+    await expect(facts).toContainText(`${Math.round(t.med)} km`);
+    await expect(facts).toContainText(`${t.good} of 5 cross-sections`);
+    await expect(facts).toContainText(`${Math.round(t.te[0])}–${Math.round(t.te[t.te.length - 1])} km`);
+    await expect(facts).toContainText('Regional slope');
     await expect(page.locator('#sf-flex-read')).toContainText('wider, coarser window');
-    await expect(page.locator('#sf-plates-facts')).toContainText('Pacific');
-    await expect(page.locator('#sf-plates-facts')).toContainText(`${t.te.toFixed(0)} km`);            // the page prints the kernel's thickness
-    await expect(page.locator('#sf-plates-facts')).toContainText('Effective plate thickness');
+    // five stations; the passing ones are marked; choosing one redraws ITS section
+    const chips = page.locator('#sf-flex-stations button');
+    await expect(chips).toHaveCount(5); await expect(page.locator('#sf-flex-stations button.ok')).toHaveCount(t.good);
+    await expect(page.locator('#sf-flex-stations button[aria-pressed="true"]')).toHaveText(/here/);
+    await expect(page.locator('#sf-flex-chart .sf-masked')).toHaveCount(t.masked);                      // what was left out as seamounts is drawn
+    const before = await page.locator('#sf-flex-chart svg path').last().getAttribute('d');
+    await chips.first().click();
+    await expect(page.locator('#sf-flex-stations button[aria-pressed="true"]')).toHaveText(/160 km/);
+    expect(await page.locator('#sf-flex-chart svg path').last().getAttribute('d')).not.toBe(before);
+    await expect(page.locator('#sf-flex-read')).toContainText('read from the wider, coarser window');
+    await chips.nth(2).click();
     await expect(page.locator('#sf-flex-chart svg path')).toHaveCount(2);                            // sea floor + model
     await expect(page.locator('#sf-deep-chart svg path')).toHaveCount(2);                            // sea floor + slab top
     await expect(page.locator('#sf-plate-keys')).toContainText('Bird 2003');
@@ -242,7 +259,13 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     // a trench whose fit is REJECTED says why and prints no thickness
     await page.goto('/sea-floor.html?site=mariana', { waitUntil: 'load' }); await tectonics(page);
     await expect(page.locator('#sf-flex-read')).toContainText('No stiffness is quoted here');
-    await expect(page.locator('#sf-plates-facts')).not.toContainText('Effective plate thickness');
+    await expect(page.locator('#sf-plates-facts')).toContainText('none of 5 cross-sections');
+    await expect(page.locator('#sf-flex-stations button.ok')).toHaveCount(0);
+    // RECORDED: one clean section is not enough — Izu–Bonin's centre passes, only 2 of its 5 stations do, and no thickness is quoted
+    await page.goto('/sea-floor.html?site=izu-bonin', { waitUntil: 'load' }); await tectonics(page);
+    await expect(page.locator('#sf-plates-facts')).toContainText('not quoted');
+    await expect(page.locator('#sf-plates-facts')).toContainText('only 2 of 5 cross-sections');
+    await expect(page.locator('#sf-flex-read')).toContainText('The curve fits to');
     // a transform fault has no bending plate and no slab
     await page.goto('/sea-floor.html?site=romanche', { waitUntil: 'load' }); await tectonics(page);
     await expect(page.locator('#sf-flex-chart')).toContainText('no plate sinks');
@@ -251,10 +274,11 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
 
 test('NEGATIVE CONTROL: wide window down ⇒ the Kuril plate is not fitted, and the page says the window is missing', async ({ page }) => {
     await boot(page, '/sea-floor.html?site=kuril'); await tectonics(page);
-    await expect(page.locator('#sf-plates-facts')).toContainText('Effective plate thickness');        // with the window: a fit
+    await expect(page.locator('#sf-plates-facts')).toContainText('cross-sections that pass');         // with the window: a thickness
     await page.route('**/data/seafloor/kuril.wide.bin.gz', (r) => r.fulfill({ status: 503, body: '' }));
     await page.goto('/sea-floor.html?site=kuril', { waitUntil: 'load' }); await tectonics(page);
     await expect(page.locator('#sf-plates-facts')).not.toContainText('Effective plate thickness');
+    await expect(page.locator('#sf-flex-stations button')).toHaveCount(0);
     await expect(page.locator('#sf-flex-read')).toContainText('wider window could not be loaded');
     await expect(page.locator('#sf-flex-read')).toContainText('110 km is needed');
 });

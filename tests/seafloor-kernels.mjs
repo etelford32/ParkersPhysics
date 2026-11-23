@@ -356,6 +356,31 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     { const steep = tilted.map((p) => ({ x: p.x, depth: p.depth + 4 * p.x })); ok(TM.fitFlexure(steep).reasons.includes('slope-implausible'), 'a slope steeper than a cooling plate\'s is refused'); }
     { const kink = tilted.map((p) => ({ x: p.x, depth: p.depth + (p.x > 400 ? 6 * (p.x - 400) : 0) })), fk = TM.fitFlexure(kink); ok(fk.quality === 'poor', `a profile whose far quarter bends away is rejected (${fk.reasons.join(', ')})`); }
     ok(TM.fitFlexure(tilted, { stability: 0 }).stability === null, 'the reach test can be switched off (A/B)');
+    // SEAMOUNTS: masked one-sidedly, by rule, and never on the trench wall
+    { const mount = (x, c, h, w) => h * Math.exp(-(((x - c) / w) ** 2)), te1 = TM.elasticFromRise(30, 84).teKm;
+      const mk = (fn) => tilted.map((p) => ({ x: p.x, depth: p.depth - fn(p.x) }));
+      ok(ft.maskedKm === 0 && ft.masked.length === 0, 'a clean plate: nothing is masked, so the mask cannot bias it');
+      const two = mk((x) => mount(x, 140, 900, 12) + mount(x, 330, 600, 10)), fm = TM.fitFlexure(two), fu = TM.fitFlexure(two, { mask: false });
+      ok(fm.quality === 'good' && Math.abs(fm.elastic.teKm - te1) < 0.05 * te1 && Math.abs(fm.wb - 300) < 30 && fm.masked.length === 2 && fm.masked[0].x0 < 140 && fm.masked[0].x1 > 140 && fm.masked[1].x0 < 330 && fm.masked[1].x1 > 330, `two planted seamounts are found (${fm.masked.map((r) => `${r.x0}–${r.x1} km`).join(', ')}) and the plate recovered: T_e ${fm.elastic.teKm.toFixed(1)} km, rise ${fm.wb.toFixed(0)} m`);
+      ok(fu.quality === 'poor' && fu.rms > 5 * fm.rms && fu.maskedKm === 0, `NEGATIVE CONTROL: unmasked, the same profile is rejected (${fu.reasons.join(', ')}; T_e ${fu.elastic.teKm.toFixed(1)} km, misfit ${fu.rms.toFixed(0)} m against ${fm.rms.toFixed(0)} m)`);
+      const three = TM.fitFlexure(mk((x) => mount(x, 140, 900, 12) + mount(x, 260, 600, 10) + mount(x, 410, 1200, 14)));
+      ok(three.reasons.includes('too-much-masked') && three.quality === 'poor', 'a profile that is a fifth seamounts is refused, not cleaned until it fits');
+      const bare = tilted.map((p) => ({ x: p.x, depth: 5600 + 1.1 * p.x + 60 * rnd() - mount(p.x, 140, 900, 12) - mount(p.x, 330, 600, 10) })), fb = TM.fitFlexure(bare);
+      ok(fb.quality === 'poor', `NEGATIVE CONTROL: seamounts on a plate with NO bend do not become a rise (${fb.reasons.slice(0, 2).join(', ')})`);
+      const wall = TM.fitFlexure(mk((x) => mount(x, 14, 500, 5) + mount(x, 330, 600, 10)));
+      ok(wall.masked.length >= 1 && wall.masked.every((r) => r.x0 >= wall.x0), `a block on the trench wall (14 km) is NOT masked; the seamount at 330 km is (${wall.masked.map((r) => `${r.x0}–${r.x1}`).join(', ')})`);
+      const plateau = TM.fitFlexure(mk((x) => (x > 200 && x < 330 ? 800 : 0)));
+      ok(plateau.maskedKm === 0 && plateau.quality === 'poor', 'a 130 km plateau is too wide to be a seamount: not masked, and the fit is rejected'); }
+    // ALONG THE TRENCH: a synthetic north–south trench of ONE plate — every station must find the same plate
+    { const lon0 = 0.6, step = 2 / 60, nx = 331, ny = 301, north = 5, west = -5.5, z = new Int16Array(nx * ny), pl = { x0: 30, xb: 84, wb: 300 };
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const lat = north - j * step, lon = west + i * step, xk = (lon - lon0) * 111.19 * Math.cos(lat * Math.PI / 180);
+          z[j * nx + i] = -Math.round(xk >= 0 ? 5600 + 0.6 * xk - TM.flexureHeight(xk, pl) : 5600 - TM.flexureHeight(0, pl) + 30 * xk) ; }
+      const g = BA.makeGrid({ id: 'synthetic', nx, ny, north, west, step_deg: step }, z);
+      const al = TM.alongTrench({ wide: g, lat: 0, lon: lon0, axisDeg: 0, acrossDeg: 90, seaward: +1 }), te1 = TM.elasticFromRise(30, 84).teKm;
+      ok(al.stations.length === 5 && al.stations.map((q) => q.offsetKm).join() === '-160,-80,0,80,160' && al.spanKm === 320, 'five stations, 80 km apart');
+      ok(al.stations.every((q) => Math.abs(q.lon - lon0) < 0.06 && Math.abs(q.lat - q.offsetKm / 111.19) < 0.08), 'each station sits back on the trench, 80 km further along it');
+      ok(al.good === 5 && al.quotable && al.stations.every((q) => Math.abs(q.flexure.elastic.teKm - te1) < 0.1 * te1) && al.teMax / al.teMin < 1.15, `one plate, five answers: ${al.stations.map((q) => q.flexure.elastic.teKm.toFixed(1)).join(', ')} km (planted ${te1.toFixed(1)})`);
+      ok(TM.quotedThickness({ along: al, flexure: al.stations[2].flexure }).good === 5 && TM.quotedThickness({ along: { ...al, quotable: false }, flexure: al.stations[2].flexure }) === null && TM.quotedThickness(null) === null, 'the quoting rule: stations when there are stations, and nothing when too few pass'); }
 
     // real data: Bird's plates and Slab2 at the baked sites
     const gz = (p) => JSON.parse(zlib.gunzipSync(rd(p)).toString());
@@ -393,8 +418,22 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     ok(model('kuril', { wide: null }).why === 'profile-too-short' && model('izu-bonin', { wide: null }).flexure.reachKm < 260, 'without the wide window the Kuril profile is too short to fit at all');
     ok(java.flexure.quality === 'poor' && hel.flexure.quality === 'poor', `RECORDED: Java (${java.flexure.reasons.join(', ')}) and Hellenic (${hel.flexure.reasons.join(', ')}) passed only on a level floor and the short window; they no longer do`);
     ok(mar.flexure.quality === 'poor' && tonga.flexure.quality === 'poor' && jp.flexure.quality === 'poor', `RECORDED, not tuned: Mariana (${mar.flexure.reasons.join(', ')}), Tonga (${tonga.flexure.reasons.join(', ')}) and Japan (${jp.flexure.reasons.join(', ')}) are rejected`);
-    let good = 0, sub = 0; for (const s of SEAFLOOR_SITES) { const t = model(s.id); if (t.setting.near && t.setting.family === 'subduction') sub++; if (t.flexure && t.flexure.quality === 'good') { good++; ok(t.setting.family === 'subduction', `${s.id}: a thickness only at a subduction zone`); } }
-    ok(sub === 15 && good === 3, `${good} of ${sub} subduction sites pass the fit's tests — most do not, and the page says so`);
+    let good = 0, sub = 0, stGood = 0, stAll = 0, stGoodU = 0; const quoted = [], quotedU = [];
+    for (const s of SEAFLOOR_SITES) { const t = model(s.id); if (!(t.setting.near && t.setting.family === 'subduction')) { ok(!t.flexure || t.flexure.quality !== 'good' || false, `${s.id}: no thickness away from a subduction zone`); continue; }
+        sub++; if (t.flexure && t.flexure.quality === 'good') good++;
+        if (!t.along) continue;
+        const u = model(s.id, { fit: { mask: false } }), q = TM.quotedThickness(t);
+        stAll += t.along.stations.length; stGood += t.along.good; stGoodU += u.along.good;
+        if (q) quoted.push(`${s.id} ${q.teKm.toFixed(0)} (${q.teMin.toFixed(0)}–${q.teMax.toFixed(0)}, ${q.good}/${q.of})`); if (TM.quotedThickness(u)) quotedU.push(s.id);
+        for (const st of t.along.stations) if (st.flexure) ok(st.flexure.masked.every((r) => r.x0 >= st.flexure.x0) && st.flexure.maskedShare <= TM.MASK.maxShare + 1e-9, `${s.id} ${st.offsetKm}: nothing masked on the trench wall, and no more than a fifth`);
+        const st = t.along.stations; for (let k = 1; k < st.length; k++) { const d = BA.distanceKm(st[k - 1].lat, st[k - 1].lon, st[k].lat, st[k].lon); ok(d > 50 && d < 115, `${s.id}: stations ${st[k - 1].offsetKm} and ${st[k].offsetKm} are ${d.toFixed(0)} km apart along the trench`); } }
+    ok(sub === 15 && good === 3, `${good} of ${sub} centre sections pass`);
+    ok(stAll === 75 && stGood === 25 && stGoodU === 22, `along the trenches ${stGood} of ${stAll} sections pass (${stGoodU} with the mask off)`);
+    ok(quoted.length === 4 && ['kuril', 'japan', 'aleutian', 'middle-america'].every((id) => quoted.some((q) => q.startsWith(id + ' '))), `QUOTED: ${quoted.join('; ')}`);
+    ok(quotedU.join() === 'kuril,aleutian,middle-america', `mask off (A/B): ${quotedU.join(', ')} — Japan is the one site the mask adds`);
+    { const qi = TM.quotedThickness(izu), qt = TM.quotedThickness(tonga); ok(qi === null && qt === null && izu.along.good === 2 && tonga.along.good === 2 && izu.flexure.quality === 'good', 'RECORDED: Izu–Bonin gives a clean centre section but passes at only 2 of 5 stations — not quoted; nor is Tonga'); }
+    { const lone = model('izu-bonin', { wide: null }), q1 = TM.quotedThickness(lone); ok(lone.along === null && q1 && q1.single && q1.of === 1, 'without the wide window there are no stations: one section, flagged `single`'); }
+    { const jq = TM.quotedThickness(jp), mq = TM.quotedThickness(model('middle-america')); ok(mq.teKm < 9 && jq.teKm > 14 && jq.teMax / jq.teMin > 1.8 && jp.setting.ageMa > 100, `a young plate reads thin (Middle America ${mq.teKm.toFixed(0)} km) and an old one thicker and far less certain (Japan ${jq.teKm.toFixed(0)} km, ${jq.teMin.toFixed(0)}–${jq.teMax.toFixed(0)})`); }
     // what is NOT a trench
     const rom = model('romanche'), nep = model('ne-pacific');
     ok(rom.why === 'not-subduction' && rom.flexure === null && rom.slab === null && rom.setting.family === 'sliding', 'Romanche: a transform fault — no bending plate, no slab');
