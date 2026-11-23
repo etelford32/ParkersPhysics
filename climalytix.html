@@ -306,6 +306,37 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
     font-size:.76rem; padding:5px 12px; min-height:30px; cursor:pointer; }
 .cx-place-ghost:hover { background:rgba(250,178,25,.1); }
 
+.cx-btn-quiet { background:none; border-color:var(--cx-line); color:var(--cx-muted); }
+.cx-btn-quiet:hover { color:var(--cx-ink); }
+#cx-sethome-btn[data-armed] { color:#04211a; background:var(--cx-home); border-color:var(--cx-home); font-weight:700; }
+.cx-place .cx-pl-edit { color:var(--cx-muted); padding:5px 2px 5px 4px; font-size:.78rem; }
+.cx-place .cx-pl-edit:hover { color:var(--cx-ink); }
+.cx-place .cx-pl-name { background:#050a14; border:0; color:var(--cx-ink); font-size:.78rem; padding:5px 11px; min-height:30px; width:150px; outline:none; }
+.cx-place:has(.cx-pl-name) { border-color:var(--cx-accent); }
+#cx-glance { flex:1 1 100%; border-top:1px solid var(--cx-line); padding-top:8px; }
+#cx-glance[hidden] { display:none; }
+#cx-glance summary { cursor:pointer; font-size:.8rem; font-weight:700; color:var(--cx-ink); }
+.cx-gl-n { font-weight:400; color:var(--cx-muted); margin-left:4px; }
+.cx-gl-n::before { content:"· "; }
+.cx-gl-scroll { overflow-x:auto; margin-top:8px; }
+#cx-glance table { border-collapse:collapse; width:100%; min-width:460px; font-size:.8rem; font-variant-numeric:tabular-nums; }
+#cx-glance th, #cx-glance td { text-align:left; padding:6px 10px 6px 0; border-top:1px solid var(--cx-line); white-space:nowrap; }
+#cx-glance thead th { border-top:0; font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--cx-faint); font-weight:600; }
+#cx-glance tbody th { font-weight:400; }
+#cx-glance tr[data-here="1"] th .cx-gl-go { color:var(--cx-accent); font-weight:700; }
+.cx-gl-go { background:none; border:0; color:var(--cx-ink); font:inherit; cursor:pointer; padding:0; text-align:left; }
+.cx-gl-go:hover { text-decoration:underline; }
+.cx-gl-t { font-weight:700; }
+.cx-gl-none { color:var(--cx-caution); white-space:normal !important; }
+.cx-gl-wait { color:var(--cx-faint); }
+#cx-glance-note { margin:8px 0 0; font-size:.68rem; color:var(--cx-faint); }
+#cx-map-pick { position:absolute; left:0; top:0; z-index:6; display:flex; align-items:center; gap:8px; padding:7px 8px 7px 12px; border-radius:10px;
+    background:rgba(6,12,22,.94); border:1px solid rgba(0,198,255,.45); box-shadow:0 10px 28px rgba(0,0,0,.5);
+    font-family:ui-monospace, Menlo, Consolas, monospace; font-size:.74rem; color:var(--cx-ink); white-space:nowrap; }
+#cx-map-pick[hidden] { display:none; }
+#cx-map-pick:not([hidden]) + #cx-map-tip { display:none; }   /* the offer replaces the hover readout */
+#cx-map-pick .cx-btn { font-family:inherit; min-height:34px; padding:4px 12px; }
+
 /* The pitch: one line while there is little to lose, a card once the reader has built something. */
 #cx-places-gate { flex:1 1 100%; margin:0; font-size:.78rem; color:var(--cx-muted); }
 #cx-places-gate a { color:var(--cx-accent); }
@@ -457,9 +488,21 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
       <span id="cx-site-time" hidden></span>
       <button type="button" id="cx-save-btn" class="cx-btn" aria-pressed="false" hidden>☆ Save place</button>
       <button type="button" id="cx-home-btn" class="cx-btn" hidden>Return home</button>
+      <button type="button" id="cx-sethome-btn" class="cx-btn cx-btn-quiet" hidden>⌂ Make home</button>
+      <button type="button" id="cx-share-btn" class="cx-btn cx-btn-quiet" title="Copy a link that opens Climalytix at this place" hidden>Copy link</button>
     </div>
     <div id="cx-places" aria-label="Your places" hidden></div>
     <div id="cx-places-gate" hidden></div>
+    <details id="cx-glance" hidden>
+      <summary>Your places right now <span id="cx-glance-n" class="cx-gl-n"></span></summary>
+      <div class="cx-gl-scroll">
+        <table>
+          <thead><tr><th scope="col">Place</th><th scope="col">Now</th><th scope="col">Next 24 h</th><th scope="col">Wind</th><th scope="col">Precip</th></tr></thead>
+          <tbody id="cx-glance-body"></tbody>
+        </table>
+      </div>
+      <p id="cx-glance-note"></p>
+    </details>
   </section>
 
   <section id="cx-map" class="cx-card" aria-label="Location map">
@@ -601,6 +644,11 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
       <canvas id="cx-map-flow" aria-hidden="true"></canvas>
       <div id="cx-map-notice" role="status" hidden><span></span><button type="button" class="cx-btn cx-retry" hidden>Retry</button></div>
       <div id="cx-map-key" hidden><div class="cx-mk-title"></div><div class="cx-mk-body"></div></div>
+      <div id="cx-map-pick" role="dialog" aria-label="Analyse this point" hidden>
+        <span data-pick-where></span>
+        <button type="button" class="cx-btn cx-btn-primary" data-pick="go">Analyse here</button>
+        <button type="button" class="cx-btn" data-pick="no" aria-label="Dismiss">×</button>
+      </div>
       <div id="cx-map-tip" hidden></div>
       <div id="cx-map-scale"><i></i><span></span></div>
       <div id="cx-map-ctl" aria-label="Map controls">

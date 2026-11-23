@@ -32,7 +32,7 @@
 
 import {
     emptyPlaces, normalizePlaces, mergePlaces, samePlaces,
-    recordVisit, setSaved, forgetPlace, clearHistory, makeSaveIntent, validSaveIntent,
+    recordVisit, setSaved, forgetPlace, clearHistory, makeSaveIntent, validSaveIntent, setLabel,
 } from './places.js';
 
 export const PLACES_KEY = 'pp_climalytix_places_v1';
@@ -185,4 +185,5 @@ export function setSaveIntent(loc) {
 export const rememberVisit = (loc, now = Date.now()) => land(recordVisit(T.doc, loc, now));
 export const savePlace = (loc, saved, now = Date.now()) => land(setSaved(T.doc, loc, saved, now));
 export const forget = (id, now = Date.now()) => land(forgetPlace(T.doc, id, now));
+export const renamePlace = (id, label, now = Date.now()) => land(setLabel(T.doc, id, label, now));
 export const clearRecent = (now = Date.now()) => land(clearHistory(T.doc, now));

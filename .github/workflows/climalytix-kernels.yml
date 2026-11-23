@@ -71,6 +71,10 @@
 #                            "in your account" only after a sync lands; match
 #                            highlighting, the 30-minute save-intent; source
 #                            rules (no copy in the page, no query in telemetry)
+#   climalytix-glance.mjs    "your places right now": interpolation by instant
+#                            (nearest-frame = NEGATIVE CONTROL), wind as
+#                            components, the 24 h range, degraded route bodies;
+#                            place labels through the merge; the share link
 #   climalytix-layer-state.mjs  what the Temperature controls may claim: archive
 #                            down ⇒ ticked but sub-toggles / slider / key off,
 #                            a notice + Retry; off is never a failure
@@ -150,6 +154,8 @@ jobs:
         run: node tests/climalytix-places.mjs
       - name: location search — the sign-up pitch rules
         run: node tests/climalytix-pitch.mjs
+      - name: location search — glance board, labels, share link
+        run: node tests/climalytix-glance.mjs
       - name: SiteSeries store + resampler
         run: node tests/climalytix-series.mjs
       - name: catalogue + adapters + workspace

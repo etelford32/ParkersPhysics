@@ -67,8 +67,15 @@ export function cleanPlace(raw) {
         del: ms(raw.del),
     };
     if (detail && detail !== city) out.detail = detail;
+    // The reader's own name for the place ("Cabin"), and when they last set or cleared it.
+    const label = text(raw.label, 40), labelAt = ms(raw.labelAt);
+    if (label) out.label = label;
+    if (labelAt) out.labelAt = labelAt;
     return out;
 }
+
+/** What to call a place: the reader's label if they gave one, else its own name. */
+export const placeName = (p) => (p && (p.label || p.city)) || '';
 
 export function emptyPlaces() { return { v: PLACES_VERSION, clearedAt: 0, places: [] }; }
 
@@ -117,6 +124,11 @@ function joinRecords(a, b) {
         del: Math.max(a.del, b.del),
     };
     if (newer.detail) out.detail = newer.detail;
+    // A label is a decision like a save: the newest stamp wins, and a CLEARED label (stamp, no text) wins too.
+    const la = a.labelAt || 0, lb = b.labelAt || 0;
+    const lab = la > lb ? a : lb > la ? b : ((a.label || '') >= (b.label || '') ? a : b);
+    if (lab.label) out.label = lab.label;
+    if (la || lb) out.labelAt = Math.max(la, lb);
     return out;
 }
 
@@ -153,6 +165,17 @@ export function setSaved(doc, loc, saved, now) {
     const old = find(d, c.id);
     if (!old && !saved) return d;
     return put(d, { ...(old || c), pin: saved ? 1 : 0, pinAt: Math.max(ms(now), (old?.pinAt || 0) + 1) });
+}
+
+/** Name a place (empty text clears the name). Only a known place can be named. */
+export function setLabel(doc, id, label, now) {
+    const d = normalizePlaces(doc);
+    const old = find(d, id);
+    if (!old || !isNum(now)) return d;
+    const rec = { ...old, labelAt: Math.max(ms(now), (old.labelAt || 0) + 1) };
+    const t = text(label, 40);
+    if (t && t !== old.city) rec.label = t; else delete rec.label;
+    return put(d, rec);
 }
 
 /** Take one place out of the history (a saved place stays saved). */
@@ -270,6 +293,7 @@ export function suggest(query, { home = null, doc = null, cities = [], limit = 8
         seen.add(c.id);
         const row = { kind, id: c.id, lat: c.lat, lon: c.lon, city: c.city };
         if (c.detail) row.detail = c.detail;
+        if (c.label) row.label = c.label;
         out.push(row);
     };
     const own = [
@@ -284,7 +308,7 @@ export function suggest(query, { home = null, doc = null, cities = [], limit = 8
     const xy = parseCoordinates(q);
     if (xy) add('coords', { ...xy, city: formatCoords(xy.lat, xy.lon), detail: 'Coordinates' });
     for (const rank of [0, 1]) {
-        for (const [kind, p] of own) if (matchRank(q, `${p.city} ${p.detail || ''}`) === rank) add(kind, p);
+        for (const [kind, p] of own) if (matchRank(q, `${p.label || ''} ${p.city} ${p.detail || ''}`.trim()) === rank) add(kind, p);
     }
     for (const rank of [0, 1]) {
         const hits = cities.filter((c) => matchRank(q, `${c.n} ${c.c}`) === rank)
@@ -358,4 +382,18 @@ export function validSaveIntent(raw, now, ttlMs = SAVE_INTENT_TTL_MS) {
     const at = ms(raw?.at);
     if (!c || !at || !isNum(now) || now < at || now - at > ttlMs) return null;
     return c;
+}
+
+/** A link that opens Climalytix at this place for anyone — Home included (a bare URL means "my Home", not "this place"). */
+export function shareUrl(base, site) {
+    const c = cleanPlace(site);
+    const u = new URL(String(base));
+    for (const k of ['lat', 'lon', 'name', 'resume']) u.searchParams.delete(k);
+    u.hash = '';
+    if (c) {
+        u.searchParams.set('lat', c.lat.toFixed(4));
+        u.searchParams.set('lon', c.lon.toFixed(4));
+        u.searchParams.set('name', c.city);
+    }
+    return u.toString();
 }

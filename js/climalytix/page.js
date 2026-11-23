@@ -55,14 +55,18 @@ import { tempToRampFrac } from '../temp-ramp.js';
 import { exposurePaint, EXPOSURE_FULL_LOG2 } from './terrain.js';
 import { orographicPaint, formatW, OROGRAPHIC_FULL_MS } from './orographic.js';
 import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
-import { homeState, visit, sameLocation, cleanLoc } from '../climate-lab/lab-home.js';
+import { visit, sameLocation, cleanLoc, setHome, accountHome, resolveHome } from '../climate-lab/lab-home.js';
+import { loadUserLocation } from '../user-location.js';
 import { geocodeCandidates, reverseGeocode } from '../user-location.js';
 import {
     suggest, parseCoordinates, formatCoords, savedPlaces, recentPlaces, isSaved, placeId, highlightParts, exampleRows,
+    placeName, shareUrl,
 } from './places.js';
+import { glanceFromNwp, glancePlan, glanceReason, compass, GLANCE_TTL_MS } from './places-glance.js';
+import { nwpPath } from './point-tile.js';
 import {
     openPlaces, placesDoc, placesStatus, rememberVisit, savePlace, forget, clearRecent, PLACES_EVENT,
-    dismissPitch, setSaveIntent,
+    dismissPitch, setSaveIntent, renamePlace,
 } from './places-store.js';
 import { pitch, gateNote } from './places-pitch.js';
 import { MAJOR_CITIES } from '../data/major-cities.js';
@@ -108,15 +112,28 @@ function saveWorkspace(ws, { source = 'local' } = {}) {
 
 // ── Site ────────────────────────────────────────────────────────────────────
 
+/**
+ * HOME on this page: the account's Home if it has one, else where this device
+ * was pointed when the page OPENED — read before a ?lat&lon link or a search
+ * moves the view. (lab-home's `homeState` answers "the current view" for an
+ * account with no Home yet, which made every place such a reader looked at
+ * read HOME and hid the one button that could give them a Home.)
+ */
+let bootDevice = null;
+function currentHome() {
+    return resolveHome({ account: accountHome(null), device: bootDevice }).home;
+}
+
 function resolveSite() {
+    bootDevice = cleanLoc(loadUserLocation());
+    const home = currentHome();
     const p = new URLSearchParams(location.search);
     const lat = Number(p.get('lat')), lon = Number(p.get('lon'));
     if (p.has('lat') && p.has('lon') && Number.isFinite(lat) && Number.isFinite(lon)) {
         const c = visit({ lat, lon, city: p.get('name') || `${lat.toFixed(2)}, ${lon.toFixed(2)}` });
-        if (c) return { site: c, fromUrl: true, ...homeState({ auth: null }) };
+        if (c) return { site: c, fromUrl: true, home };
     }
-    const st = homeState({ auth: null });
-    return { site: st.view || st.home || null, ...st };
+    return { site: bootDevice || home || null, home };
 }
 
 const atHome = (loc = S.site) => !!(S.home && loc && sameLocation(S.home, loc));
@@ -127,10 +144,13 @@ function renderSiteBar() {
     $('#cx-site-coords').textContent = s ? formatCoords(s.lat, s.lon) : 'Search for a place to analyse';
     const home = atHome();
     const badge = $('#cx-site-badge');
-    badge.hidden = !s;
+    badge.hidden = !s || !S.home;                    // no Home yet ⇒ nothing to be 'visiting' from
     badge.textContent = home ? 'HOME' : 'VISITING';
     badge.dataset.kind = home ? 'home' : 'visit';
     $('#cx-home-btn').hidden = !(S.home && s && !home);
+    $('#cx-share-btn').hidden = !s;
+    disarmSetHome();
+    $('#cx-sethome-btn').hidden = !s || home;
     renderSiteTime();
     renderPlaces();
 }
@@ -321,12 +341,8 @@ function onSearchKey(ev) {
 function locateMe() {
     if (!navigator.geolocation) { say('This browser cannot share a position — search for a place instead.'); return; }
     say('Asking your browser where you are…', 'info');
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-        const lat = pos.coords.latitude, lon = pos.coords.longitude;
-        let loc = { lat, lon, city: formatCoords(lat, lon) };
-        try { loc = { ...(await reverseGeocode(lat, lon)), lat, lon }; } catch {}
-        say('');
-        goTo(loc, 'locate');
+    navigator.geolocation.getCurrentPosition((pos) => {
+        nameAndGo(pos.coords.latitude, pos.coords.longitude, 'locate');
     }, (err) => {
         say(err?.code === 1 ? 'Position not shared — search for a place instead.' : 'Could not get a position — search for a place instead.');
     }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
@@ -341,8 +357,8 @@ function currentPitch() {
     const doc = placesDoc(), st = placesStatus();
     return pitch({
         ...st,
-        saved: savedPlaces(doc).map((p) => p.city),
-        recent: recentPlaces(doc).filter((p) => !atHome(p)).map((p) => p.city),
+        saved: savedPlaces(doc).map(placeName),
+        recent: recentPlaces(doc).filter((p) => !atHome(p)).map(placeName),
     });
 }
 
@@ -357,10 +373,11 @@ function renderPlaces() {
     save.title = saved ? 'Remove from your saved places' : st.scope === 'account' ? 'Keep this place in your account' : 'Keep this place — free account';
 
     const here = s ? placeId(s.lat, s.lon) : '';
-    const tip = (p) => esc(p.detail ? [p.city, p.detail].join(' — ') : p.city);
+    const tip = (p) => esc([p.label ? p.city : '', p.detail || ''].filter(Boolean).join(' — ') || p.city);
     const chip = (p, kind) => `<span class="cx-place" data-kind="${kind}" data-id="${p.id}"${p.id === here ? ' data-here="1"' : ''}>`
-        + `<button type="button" class="cx-pl-go" title="${tip(p)}">${esc(p.city)}</button>`
-        + `<button type="button" class="cx-pl-x" aria-label="${kind === 'saved' ? 'Remove from saved' : 'Remove from history'}: ${esc(p.city)}">×</button></span>`;
+        + `<button type="button" class="cx-pl-go" title="${tip(p)}">${esc(placeName(p))}</button>`
+        + (kind === 'saved' ? `<button type="button" class="cx-pl-edit" aria-label="Rename ${esc(placeName(p))}" title="Rename">✎</button>` : '')
+        + `<button type="button" class="cx-pl-x" aria-label="${kind === 'saved' ? 'Remove from saved' : 'Remove from history'}: ${esc(placeName(p))}">×</button></span>`;
     const pins = savedPlaces(doc);
     const recent = recentPlaces(doc).filter((p) => !atHome(p)).slice(0, RECENT_CHIPS);
     // Signed out, the Saved row is shown EMPTY: the feature is visible before it is asked for.
@@ -368,10 +385,12 @@ function renderPlaces() {
         ? '<button type="button" class="cx-place-ghost" data-gate="ghost">☆ Save places with a free account</button>' : '';
     const host = $('#cx-places');
     host.hidden = !pins.length && !recent.length;
-    host.innerHTML = (pins.length || ghost ? `<span class="cx-pl-h">Saved</span>${pins.map((p) => chip(p, 'saved')).join('')}${ghost}` : '')
+    // A half-typed name is never wiped by a background re-render (the stable-controls rule).
+    if (!host.querySelector('.cx-pl-name')) host.innerHTML = (pins.length || ghost ? `<span class="cx-pl-h">Saved</span>${pins.map((p) => chip(p, 'saved')).join('')}${ghost}` : '')
         + (recent.length ? `<span class="cx-pl-h">Recent</span>${recent.map((p) => chip(p, 'recent')).join('')}`
             + '<button type="button" id="cx-places-clear">Clear history</button>' : '');
     renderPitch();
+    renderGlance();
 }
 
 /** Draws exactly what places-pitch.js `pitch()` returns — no copy or thresholds live here. */
@@ -453,6 +472,147 @@ function onPitchClick(ev) {
     }
 }
 
+/** Rename a saved place in place: Enter or leaving the box keeps it, Escape does not, an empty box clears the name. */
+function startRename(el, p) {
+    el.innerHTML = `<input class="cx-pl-name" type="text" maxlength="40" aria-label="Name for ${esc(p.city)}" placeholder="${esc(p.city)}">`;
+    const input = el.querySelector('input');
+    input.value = p.label || '';
+    let done = false;
+    const finish = (keep) => {
+        if (done) return;
+        done = true;
+        const v = input.value;
+        input.remove();                                   // lets renderPlaces redraw the row
+        if (keep && v.trim() !== (p.label || '')) { renamePlace(p.id, v); note('rename'); }
+        else renderPlaces();
+    };
+    input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.focus();
+    input.select();
+}
+
+// ── Make this Home · share ──────────────────────────────────────────────────
+
+let homeArm = null;
+function disarmSetHome() {
+    clearTimeout(homeArm);
+    homeArm = null;
+    const b = $('#cx-sethome-btn');
+    b.textContent = '⌂ Make home';
+    b.removeAttribute('data-armed');
+}
+
+/**
+ * Home is ACCOUNT data and the alert engine follows it, so this is a two-step
+ * button (arm, then confirm) and it reports what actually happened.
+ */
+async function onSetHome() {
+    if (!S.site) return;
+    const scope = placesStatus().scope;
+    if (scope === 'session') { openPlacesGate('home'); return; }
+    if (scope === 'pending') { say('Finish signing in from the email we sent, then you can set your Home.', 'info'); return; }
+    const b = $('#cx-sethome-btn');
+    if (!b.dataset.armed) {
+        b.dataset.armed = '1';
+        b.textContent = `Confirm: make ${S.site.city} Home`;
+        say('Home is where your account opens and where your alerts are evaluated.', 'info');
+        homeArm = setTimeout(() => { disarmSetHome(); say(''); }, 6000);
+        return;
+    }
+    disarmSetHome();
+    const site = S.site;
+    say('Saving your Home…', 'info');
+    const res = await setHome(site, { signedIn: true });
+    if (res.ok && res.scope === 'account') {
+        S.home = site;
+        syncUrl();
+        renderSiteBar();
+        say(`${site.city} is now your Home.`, 'info');
+        note('set_home');
+    } else {
+        say(`Home was not changed — ${res.error || 'the account did not accept it'}.`);
+    }
+}
+
+async function onShare() {
+    if (!S.site) return;
+    const url = shareUrl(location.href, S.site);
+    try {
+        await navigator.clipboard.writeText(url);
+        say(`Link to ${S.site.city} copied.`, 'info');
+    } catch {
+        say(url, 'info');                                 // no clipboard access: show it to copy by hand
+    }
+    note('share');
+}
+
+/** Name a point (one reverse lookup, on an explicit request) and go there; the coordinates stand in if it has no name. */
+async function nameAndGo(lat, lon, via) {
+    let loc = { lat, lon, city: formatCoords(lat, lon) };
+    try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 2500);
+        loc = { ...(await reverseGeocode(lat, lon, { signal: ctl.signal })), lat, lon };
+        clearTimeout(t);
+    } catch { /* unnamed ground is still a place */ }
+    say('');
+    return goTo(loc, via);
+}
+
+// ── Your places right now ───────────────────────────────────────────────────
+
+const GL = { cache: new Map(), key: '' };
+
+function glanceRows() { return glancePlan(placesDoc(), S.home); }
+
+function renderGlance() {
+    const box = $('#cx-glance');
+    const rows = glanceRows();
+    const show = placesStatus().scope !== 'session' && rows.some((r) => r.kind === 'saved');
+    box.hidden = !show;
+    if (!show) return;
+    $('#cx-glance-n').textContent = String(rows.length);
+    if (!box.open) return;
+    const now = Date.now();
+    const here = S.site ? placeId(S.site.lat, S.site.lon) : '';
+    const cell = (r) => {
+        const c = GL.cache.get(r.id);
+        if (!c || c.loading) return '<td colspan="4" class="cx-gl-wait">Loading…</td>';
+        const g = c.glance;
+        if (g.state !== 'ok') return `<td colspan="4" class="cx-gl-none">Our archive: ${esc(glanceReason(g.reason))}. Nothing is substituted.</td>`;
+        const range = g.hiC == null ? '—' : `${esc(fmtText('temp', g.loC, S.units))} … ${esc(fmtText('temp', g.hiC, S.units))}`;
+        const wind = g.windMs == null ? '—' : `${esc(fmtText('wind', g.windMs, S.units))}${g.windDirDeg == null ? '' : ` ${compass(g.windDirDeg)}`}`;
+        const rain = g.precipMm == null ? '—' : esc(fmtText('precip', g.precipMm, S.units));
+        return `<td class="cx-gl-t">${g.tempC == null ? '—' : esc(fmtText('temp', g.tempC, S.units))}</td><td>${range}</td><td>${wind}</td><td>${rain}</td>`;
+    };
+    $('#cx-glance-body').innerHTML = rows.map((r) => `<tr data-id="${r.id}" data-kind="${r.kind}"${r.id === here ? ' data-here="1"' : ''}>`
+        + `<th scope="row"><button type="button" class="cx-gl-go">${r.kind === 'home' ? '⌂ ' : '★ '}${esc(r.name)}</button></th>${cell(r)}</tr>`).join('');
+    const run = [...GL.cache.values()].find((c) => c.glance?.run)?.glance.run;
+    $('#cx-glance-note').textContent = `From Climalytix’s own GFS archive${run ? ` (run ${run})` : ''}, interpolated to this minute between 3-hourly frames. Range and precipitation are the next 24 h.`;
+    for (const r of rows) {
+        const c = GL.cache.get(r.id);
+        if (c && (c.loading || now - c.at < GLANCE_TTL_MS)) continue;
+        GL.cache.set(r.id, { loading: true, at: now });
+        fetch(nwpPath(r), { headers: { Accept: 'application/json' } })
+            .then((res) => (res.ok ? res.json() : null)).catch(() => null)
+            .then((body) => {
+                GL.cache.set(r.id, { loading: false, at: Date.now(), glance: glanceFromNwp(body, Date.now()) });
+                renderGlance();
+            });
+    }
+}
+
+function onGlanceClick(ev) {
+    const tr = ev.target.closest('tr[data-id]');
+    if (!tr || !ev.target.classList.contains('cx-gl-go')) return;
+    const r = glanceRows().find((x) => x.id === tr.dataset.id);
+    if (r) goTo(r.kind === 'home' ? S.home : (placesDoc().places.find((p) => p.id === r.id) || r), 'glance');
+}
+
 function onPlacesClick(ev) {
     if (ev.target.id === 'cx-places-clear') { clearRecent(); note('clear'); return; }
     if (ev.target.dataset.gate) { note('pitch_cta', { via: 'ghost' }); openPlacesGate('ghost'); return; }
@@ -460,6 +620,7 @@ function onPlacesClick(ev) {
     if (!el) return;
     const p = placesDoc().places.find((x) => x.id === el.dataset.id);
     if (!p) return;
+    if (ev.target.classList.contains('cx-pl-edit')) { startRename(el, p); return; }
     if (ev.target.classList.contains('cx-pl-x')) {
         if (el.dataset.kind === 'saved') savePlace(p, false); else forget(p.id);
         return;
@@ -1312,6 +1473,9 @@ function mountLocationMap() {
             sym: fmt('temp', 0, S.units).sym,
         }),
         onFrame: renderHeatRail,
+        // A click on the map offers that ground as the site (map.js asks first; this is the "yes").
+        onPick: (lat, lon) => { nameAndGo(lat, lon, 'map'); },
+        formatCoords,
         formatWind: (ms) => fmtText('wind', ms, S.units),
         onWind: renderFlowRail,
         onAq: renderAqRail,
@@ -1664,9 +1828,13 @@ function wireControls() {
     $('#cx-save-btn').addEventListener('click', toggleSave);
     $('#cx-places').addEventListener('click', onPlacesClick);
     $('#cx-places-gate').addEventListener('click', onPitchClick);
+    $('#cx-sethome-btn').addEventListener('click', onSetHome);
+    $('#cx-share-btn').addEventListener('click', onShare);
+    $('#cx-glance').addEventListener('toggle', () => { renderGlance(); if ($('#cx-glance').open) note('glance_open'); });
+    $('#cx-glance-body').addEventListener('click', onGlanceClick);
     setInterval(renderSiteTime, 30_000);
     window.addEventListener(PLACES_EVENT, () => { renderPlaces(); if (!$('#cx-suggest').hidden) renderSuggest(); });
-    window.addEventListener('auth-changed', () => { openPlaces(); S.home = homeState({ auth: null }).home; renderSiteBar(); });
+    window.addEventListener('auth-changed', () => { openPlaces(); S.home = currentHome(); renderSiteBar(); });
     document.addEventListener('keydown', (ev) => {
         if (ev.key !== '/' || ev.ctrlKey || ev.metaKey || ev.altKey) return;
         const t = ev.target;
@@ -1687,6 +1855,7 @@ function wireControls() {
     $('#cx-units').addEventListener('change', (e) => {
         saveWorkspace({ ...S.ws, units: { preset: e.target.value } });
         renderPanels();
+        renderGlance();
         renderHeatTicks();
         syncMapKey();                     // the on-map key's title carries the unit (it kept the old one)
         S.map?.unitsChanged();            // isotherm levels + tip + rail re-format in the new unit
@@ -1758,6 +1927,7 @@ export function boot() {
             return {
                 site: S.site,
                 pitch: currentPitch(),
+                glance: glanceRows().map((r) => ({ ...r, ...(GL.cache.get(r.id)?.glance || { state: 'loading' }) })),
                 places: { ...placesStatus(), saved: savedPlaces(placesDoc()).map((p) => p.city), recent: recentPlaces(placesDoc()).map((p) => p.city) },
                 utcOffsetS: S.utcOffsetS,
                 workspace: S.ws,
