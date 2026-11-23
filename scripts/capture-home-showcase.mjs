@@ -58,6 +58,20 @@ const GPU    = flag('--gpu');
 // --preview <dir>: posters only, written to <dir>, manifest untouched — the
 // loop for composing a shot (edit the recipe's `shots`, look, repeat).
 const PREVIEW = opt('--preview', '');
+// --moon-map <file>: moon.html loads its albedo map from Wikimedia. Where that
+// host is unreachable the Moon is a grey fallback sphere; this serves a REAL
+// lunar albedo mosaic from disk in its place (same equirectangular layout,
+// 0° longitude at the centre). The HEIGHT map is never substituted — a
+// look-alike bump image is not LOLA, and the page draws a smooth sphere
+// rather than relief it cannot vouch for.
+const MOON_MAP = opt('--moon-map', '');
+// --replay <dir>: answer same-origin /api/* requests from RECORDED production
+// responses — a file named after the path with '/' → '__' and '.json'
+// (/api/cme/skill → api__cme__skill.json). For routes the capture machine
+// cannot serve itself (the skill ledger needs the production database). Only
+// real, unedited response bodies belong in that directory; a route with no
+// file falls through to the dev server untouched.
+const REPLAY = opt('--replay', '');
 const NOCLIP = flag('--no-clip') || !!PREVIEW;
 const PORT   = Number(opt('--port', '8765'));
 let   BASE   = opt('--base', '');
@@ -123,7 +137,9 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
     const c = slide.capture;
     const ctx = await browser.newContext({
         viewport: VIEW,
-        deviceScaleFactor: 1,
+        // A recipe may ask for a denser buffer (`scale: 2`) when its crop is a
+        // short 2D canvas that would otherwise be upsampled into the 1280 thumbnail.
+        deviceScaleFactor: c.scale || 1,
         recordVideo: NOCLIP ? undefined : { dir: tmpDir, size: VIEW },
         reducedMotion: 'no-preference',
         colorScheme: 'dark',
@@ -149,6 +165,16 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
     // of the same images (assets/earth, see its SOURCES.md; the test fixtures
     // do the same). The night map falls back to the lights-only extract, so an
     // offline capture's night side is darker than production's.
+    if (REPLAY) await page.route('**/api/**', async (route) => {
+        const u = new URL(route.request().url());
+        const file = path.join(REPLAY, u.pathname.replace(/^\//, '').replace(/\//g, '__') + '.json');
+        if (u.origin !== new URL(BASE).origin || !existsSync(file)) return route.fallback();
+        return route.fulfill({ status: 200, contentType: 'application/json', body: await readFile(file) });
+    });
+    if (MOON_MAP && !WIKI_OK) await page.route('https://upload.wikimedia.org/**', async (route) => {
+        if (!/Moon_texture_nasa_lro_lola/.test(route.request().url())) return route.fulfill({ status: 404, body: '' });
+        return route.fulfill({ status: 200, contentType: 'image/jpeg', headers: { 'access-control-allow-origin': '*' }, body: await readFile(MOON_MAP) });
+    });
     if (!CDN_OK) await page.route('https://unpkg.com/three-globe@*/example/img/*', async (route) => {
         const local = EARTH_LOCAL[route.request().url().split('/').pop().split('?')[0]];
         if (!local) return route.fulfill({ status: 404, body: '' });
@@ -293,6 +319,11 @@ await ensureServer();
 let CDN_OK = false;
 try { const r = await fetch('https://unpkg.com/three-globe@2.31.0/example/img/earth-water.png', { method: 'HEAD', signal: AbortSignal.timeout(5000) }); CDN_OK = r.ok; } catch {}
 if (!CDN_OK) console.log('unpkg unreachable — EarthView maps served from assets/earth');
+let WIKI_OK = false;
+if (MOON_MAP) {
+    try { const r = await fetch('https://upload.wikimedia.org/wikipedia/commons/4/4f/Moon_bump.jpg', { method: 'HEAD', signal: AbortSignal.timeout(5000) }); WIKI_OK = r.ok; } catch {}
+    if (!WIKI_OK) console.log(`Wikimedia unreachable — the Moon's albedo map served from ${MOON_MAP} (no relief)`);
+}
 const args = GPU ? ['--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await chromium.launch({ headless: true, args });
 const todo = CAPTURED_SLIDES.filter(s => !ONLY.length || ONLY.includes(s.id));

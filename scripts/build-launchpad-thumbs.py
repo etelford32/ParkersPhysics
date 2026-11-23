@@ -82,10 +82,15 @@ def main():
     for s in slides:
         im = Image.open(ROOT / s['poster']).convert('RGB')
         w, h = im.size
-        th = round(w / ASPECT)                    # centre-crop to 16:9
-        if th < h:
+        th = round(w / ASPECT)                    # crop to 16:9 — never squash
+        if th < h:                                # too tall: centre-crop the height
             top = (h - th) // 2
             im = im.crop((0, top, w, top + th))
+        elif th > h:                              # too wide: crop the width about the focus x
+            tw_src = round(h * ASPECT)            # (a resize alone stretched wide stills vertically)
+            fx = FOCUS.get(s['id'], [50, 50])[0] / 100
+            left = min(max(round(fx * w - tw_src / 2), 0), w - tw_src)
+            im = im.crop((left, 0, left + tw_src, h))
         for tw in WIDTHS:
             out = OUT_DIR / f"{s['id']}-{tw}.jpg"
             im.resize((tw, round(tw / ASPECT)), Image.LANCZOS).save(out, 'JPEG', quality=84, optimize=True, progressive=True)

@@ -123,8 +123,13 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // Default framing leaves the disc a third of the frame; close in
             // so the photosphere and the loop arcades carry the card.
             prep: 'const S=window.__sun; if(S&&S.camera){S.camera.position.multiplyScalar(0.72); S.controls?.update?.();}',
-            shots: [{ wheel: -240, n: 5 }, { drag: [0.5, 0.5, 0.42, 0.44], wait: 600 }],
-            settleMs: 12000,
+            // No drag: the OBSERVED disk (today's SDO frame) is pinned to the
+            // Sun–Earth line, so the camera stays on it and the frame shows
+            // the real Sun wherever sdo.gsfc.nasa.gov is reachable.
+            // Five notches: the disc fills the frame's height, which also puts the
+            // browse JPEG's burned-in caption (drawn by the off-limb layer) out of frame.
+            shots: [{ wheel: -240, n: 5, wait: 800 }],
+            settleMs: 16000,
             clipMs: 7000,
         },
     },
@@ -140,10 +145,72 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         capture: {
             url: '/flux-rope-live.html',
             crop: '#frl-gl',
-            ready: '!!document.querySelector("#frl-gl")',
+            scale: 2,
+            // Ready = the train is RUNNING (the HUD prints an apex), not merely a
+            // canvas in the DOM: the page resets its clock when the provider
+            // settles, which silently undid a scrub made before that.
+            ready: '/AU/.test(document.getElementById("frl-hud-r")?.textContent || "")',
             hide: ['nav'],
+            // The replay opens with the leader a speck beside the Sun. Pause, then
+            // scrub the page's OWN time slider to +36 h — the leader closing on
+            // Earth with the follower in flight behind it — and close in.
+            shots: [
+                { eval: 'const b = document.getElementById("frl-play"); if (b && b.textContent.trim() !== "▶") b.click(); const t = document.getElementById("frl-time"); if (t) { t.value = "36"; t.dispatchEvent(new Event("input", { bubbles: true })); }', wait: 2000 },
+                { wheel: -240, n: 2, wait: 600 },
+            ],
             settleMs: 12000,
             clipMs: 7000,
+        },
+    },
+    {
+        id: 'bz',
+        does: 'Follow the Sun’s field from L1 down to the ground.',
+        claim: 'Every minute of wind three L1 spacecraft have measured, drawn where it is now on its way in — then the bow shock, the magnetopause and both GOES magnetometers, each marked measured, estimated or forecast.',
+        model: 'Multi-spacecraft L1 fusion · Shue + Farris boundaries',
+        data: 'NOAA SWPC RTSW · GOES magnetometers',
+        scale: 'L1 → geostationary orbit',
+        verb: 'Read the column',
+        accent: '#5aa2ff',
+        capture: {
+            // Needs services.swpc.noaa.gov (L1 + GOES). With it blocked the
+            // canvas draws nothing upstream and this stays a plate. USGS ground
+            // data is a separate rung and is not in this frame.
+            url: '/bz.html',
+            crop: '#bz-planet',
+            scale: 2,          // a 420 px-tall 2D canvas: shoot it at 2× so the thumbnail is not upsampled
+            ready: '!!window.__bzColumn && /nT/.test(document.getElementById("bz-read")?.textContent || "")',
+            hide: ['nav', '#bz-planet-tip'],
+            settleMs: 5000,
+            clipMs: 6000,
+        },
+    },
+    {
+        id: 'cme-forecast',
+        does: 'See every CME forecast locked before impact — and how it scored.',
+        claim: 'Arrival windows are frozen at issue time and never rewritten; each is then scored against the shock L1 actually recorded, beside ENLIL and two baselines on the same events.',
+        model: 'Flux-rope ensemble · drag-based + ballistic baselines',
+        data: 'NASA DONKI · NOAA SWPC L1 · issue-locked ledger',
+        scale: 'Sun → L1, 1–4 days',
+        verb: 'Open the ledger',
+        accent: '#b48cff',
+        capture: {
+            // Needs the production skill ledger (/api/cme/skill reads the
+            // database). On a machine without it, record that route's real
+            // response and pass `--replay <dir>`; with neither the calendar is
+            // empty and this stays a plate. The frame is SEPTEMBER 2026 on
+            // purpose — the month with scored arrivals — reached with the
+            // calendar's own Previous button; it is an archive view and the
+            // calendar's own title says which month.
+            url: '/cme-forecast.html',
+            crop: '#cmef-view-calendar',
+            scale: 2,
+            ready: 'document.querySelectorAll("#cmef-calendar-grid > *").length > 20 && /Ledger ran/.test(document.getElementById("cmef-feed-label")?.textContent || "")',
+            hide: ['nav', '#cmef-tooltip'],
+            shots: [
+                { eval: 'const t = () => (document.getElementById("cmef-calendar-title")?.textContent || "") + " " + (document.getElementById("cmef-calendar-range")?.textContent || ""); for (let i = 0; i < 6 && !/September 2026/.test(t()); i++) document.getElementById("cmef-calendar-prev")?.click();', wait: 1500 },
+            ],
+            settleMs: 3000,
+            clipMs: 5000,
         },
     },
     {
@@ -340,9 +407,13 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             crop: '#c',
             ready: '!!window.__moonLab',
             hide: ['nav', '#hud', '#info-panel', '#descent-hud', '#view-toggle', '.view-toggle', '#synth-legend'],
-            // Default framing looks at the terminator; swing the camera to
-            // the sunlit hemisphere so the relief and maria read.
-            prep: 'const L=window.__moonLab; if(L){const d=L.camera.position.length(); L.camera.position.set(1,0.15,0.3).normalize().multiplyScalar(d); L.controls?.update?.();}',
+            // "Earth's view" puts the camera on the Earth's direction, so the
+            // disc shows the capture day's real phase and libration.
+            // The still is the SURFACE: the exosphere atoms, sodium tail, quake and
+            // anomaly markers and the landing-site plates are switched off (they
+            // read as noise at thumbnail size); the page's own toggles do it.
+            prep: 'for (const id of ["lyr-quakes","lyr-anomalies","lyr-hops","lyr-rad-ring","lyr-exo","lyr-natail","lyr-apollo","lyr-artemis","lyr-colony"]) { const c = document.getElementById(id); if (c && c.checked) c.click(); } document.getElementById("vt-earthview")?.click()',
+            shots: [{ wheel: -240, n: 1, wait: 800 }],
             settleMs: 9000,
             clipMs: 7000,
         },
@@ -457,8 +528,15 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         capture: {
             url: '/bootes-void.html',
             crop: '#bv-stage',
+            scale: 2,
             ready: '!!globalThis.__bootesLab',
             hide: ['nav'],
+            // The vector field's arrows bury the structure at thumbnail size, so the
+            // still shows the void itself: tracer galaxies, the filaments and nodes
+            // of its wall, the R_eff shell and the catalogued clusters. The page's
+            // own layer toggle does it.
+            prep: 'const c = document.querySelector(\'[data-bv-control="layer:field"]\'); if (c && c.checked) c.click();',
+            shots: [{ drag: [0.5, 0.5, 0.58, 0.44], wait: 800 }],
             settleMs: 10000,
             clipMs: 7000,
         },

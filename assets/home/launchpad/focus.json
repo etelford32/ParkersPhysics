@@ -1,12 +1,62 @@
 {
-  "earth": [34, 44],
-  "sun": [60, 42],
-  "mars": [60, 46],
-  "solar-system": [50, 50],
-  "galactic-map": [50, 46],
-  "glacier-watch": [56, 42],
-  "launch-planner": [50, 46],
-  "earth-interior": [47, 52],
-  "volcanoes": [50, 42],
-  "climalytix": [46, 50]
+  "earth": [
+    34,
+    44
+  ],
+  "sun": [
+    50,
+    50
+  ],
+  "mars": [
+    60,
+    46
+  ],
+  "solar-system": [
+    50,
+    50
+  ],
+  "galactic-map": [
+    50,
+    46
+  ],
+  "glacier-watch": [
+    56,
+    42
+  ],
+  "launch-planner": [
+    50,
+    46
+  ],
+  "earth-interior": [
+    47,
+    52
+  ],
+  "volcanoes": [
+    50,
+    42
+  ],
+  "climalytix": [
+    46,
+    50
+  ],
+  "bz": [
+    64,
+    50
+  ],
+  "moon": [
+    50,
+    50
+  ],
+  "flux-rope-live": [
+    52,
+    50
+  ],
+  "bootes-void": [
+    50,
+    46
+  ],
+  "cme-forecast": [
+    50,
+    40
+  ]
 }

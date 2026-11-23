@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T23:45:29.534Z",
+  "generatedAt": "2026-11-23T00:12:03.547Z",
   "slides": [
     {
       "id": "earth",
@@ -23,11 +23,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/sun.html",
-      "capturedAt": "2026-11-22T22:13:25.231Z",
+      "capturedAt": "2026-11-22T23:59:31.227Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 166778,
-        "clip": 74074
+        "poster": 163772,
+        "clip": 142298
       }
     },
     {
@@ -37,11 +37,39 @@
       "width": 884,
       "height": 418,
       "source": "/flux-rope-live.html",
-      "capturedAt": "2026-11-09T17:14:27.372Z",
+      "capturedAt": "2026-11-23T00:07:44.347Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 8976,
-        "clip": 48228
+        "poster": 69823,
+        "clip": 97157
+      }
+    },
+    {
+      "id": "bz",
+      "poster": "assets/home/showcase/bz.jpg",
+      "clip": "assets/home/showcase/bz.webm",
+      "width": 1168,
+      "height": 420,
+      "source": "/bz.html",
+      "capturedAt": "2026-11-23T00:01:15.652Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 73342,
+        "clip": 91959
+      }
+    },
+    {
+      "id": "cme-forecast",
+      "poster": "assets/home/showcase/cme-forecast.jpg",
+      "clip": "assets/home/showcase/cme-forecast.webm",
+      "width": 1076,
+      "height": 880,
+      "source": "/cme-forecast.html",
+      "capturedAt": "2026-11-23T00:12:03.515Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 149184,
+        "clip": 163309
       }
     },
     {
@@ -177,11 +205,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/moon.html",
-      "capturedAt": "2026-11-09T17:35:17.232Z",
+      "capturedAt": "2026-11-23T00:03:49.369Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 179966,
-        "clip": 493975
+        "poster": 186246,
+        "clip": 226311
       }
     },
     {
@@ -261,11 +289,11 @@
       "width": 1022,
       "height": 680,
       "source": "/bootes-void.html",
-      "capturedAt": "2026-11-09T17:39:48.071Z",
+      "capturedAt": "2026-11-23T00:08:49.402Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 150965,
-        "clip": 1058372
+        "poster": 201214,
+        "clip": 618828
       }
     }
   ]
