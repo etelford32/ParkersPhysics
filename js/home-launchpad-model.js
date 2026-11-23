@@ -9,7 +9,9 @@
  * the live magnetosphere + personal sky console (now live-sky.html) with
  * three things whose only job is to send a visitor INTO a simulation:
  *
- *   1. RECENT — a carousel of the simulations most recently built or improved.
+ *   1. RECENT — a carousel of the simulations most recently built or improved
+ *      that have a cinematic capture (`carouselEligible`: a real photograph,
+ *      and not one of the instrument pages in CAROUSEL_EXCLUDE).
  *      It is DERIVED FROM THE BUILD LOG (js/dev-log.js DEV_LOG): one slide per
  *      simulation, carrying that simulation's NEWEST log entry. Nothing is
  *      curated here. Shipping a sprint already ends with a log entry
@@ -43,6 +45,7 @@
 import { DEV_LOG, dateMs, isFresh } from './dev-log.js';
 import { SIMULATIONS, SIM_COUNT } from './simulations-catalog.js';
 import { SITE_SECTIONS } from './site-sections.js';
+import { LAUNCHPAD_MEDIA } from './home-launchpad-media.js';
 
 /** The permanent real-time simulations, in display order (owner's list). */
 export const FIXTURE_IDS = Object.freeze([
@@ -62,6 +65,28 @@ export const FIXTURE_LIVE = Object.freeze({
     'mars':         'MOLA terrain you can descend to, with today’s season and local time from JPL.',
     'sun':          'Today’s solar disk from SDO, NOAA’s active regions, and flares and CMEs as they launch.',
 });
+
+/**
+ * Pages that never FRONT the carousel (owner, 2026-11-23: the carousel opened
+ * on Bz Column's line diagram and "looks like shit"). The carousel's job is to
+ * pull a visitor into a simulation, and a chart, a calendar or a table does not
+ * do that at hero size — these pages stay in the catalogue, the showcase and
+ * the build-log strip, they just never lead the first screen. Each entry says
+ * why. Add a page here when its screen is an instrument, not a scene.
+ */
+export const CAROUSEL_EXCLUDE = Object.freeze({
+    'bz':           'a 2D instrument diagram (field arrows on a line), not a scene',
+    'cme-forecast': 'an arrival calendar — a table of dates, not a scene',
+});
+
+/**
+ * May this simulation front a carousel slide? Only with a real capture (a
+ * glyph plate is fine for a tile, not for the hero) and only if it is not an
+ * instrument page. `media` is injectable for the gate.
+ */
+export function carouselEligible(sim, media = LAUNCHPAD_MEDIA) {
+    return !!sim && !!media[sim.id] && !CAROUSEL_EXCLUDE[sim.id];
+}
 
 /** Carousel length. Eight is a carousel; twenty is a second catalogue. */
 export const RECENT_MAX = 8;
@@ -91,13 +116,13 @@ const newestFirst = (log) => [...log].sort((a, b) => dateMs(b.date) - dateMs(a.d
  * The carousel: one slide per simulation, newest log entry first.
  * @returns {{ sim, entry, href, fresh }[]}
  */
-export function recentSlides({ log = DEV_LOG, catalog = SIMULATIONS, max = RECENT_MAX, nowMs = NaN } = {}) {
+export function recentSlides({ log = DEV_LOG, catalog = SIMULATIONS, max = RECENT_MAX, nowMs = NaN, eligible = carouselEligible } = {}) {
     const seen = new Set();
     const out = [];
     for (const entry of newestFirst(log)) {
         if (entry.kind === 'platform') continue;
         const hit = simForEntry(entry, catalog);
-        if (!hit || seen.has(hit.sim.id)) continue;
+        if (!hit || seen.has(hit.sim.id) || !eligible(hit.sim)) continue;
         seen.add(hit.sim.id);
         out.push({ sim: hit.sim, entry, href: hit.href, fresh: Number.isFinite(nowMs) && isFresh(entry, nowMs) });
         if (out.length >= max) break;

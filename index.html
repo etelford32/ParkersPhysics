@@ -293,6 +293,19 @@ img{display:block}
   .lp-dots{left:16px}
   .lp-log a{grid-template-columns:48px minmax(0,1fr)}
   .lp-log-kind{display:none}
+  /* PHONE FIRST SCREEN (owner, 2026-11-23: "we need conversions, sign-ups and
+     usage"): the pictures sell the simulations, so on a phone the stats strip
+     yields its ~300 px to the carousel, which now starts on the first screen.
+     The stats still show from 561 px up. */
+  .lp-stats{display:none !important}
+  .hero-badge{font-size:.58rem;letter-spacing:.08em;padding:6px 12px}
+  .hero-sub{font-size:.95rem;line-height:1.5}
+  .lp-cta .hero-cta-note{font-size:.7rem}
+  .lp-head{margin-bottom:16px;row-gap:14px}
+  /* #hero lifts these over the generic .hero-cta rules further down, which
+     re-add a 24 px margin and centre (narrow) the buttons on phones. */
+  #hero .lp-cta{margin-top:0;align-items:stretch}
+  #hero .lp-cta>.btn-secondary{width:100%;box-sizing:border-box}
 }
 @media (prefers-reduced-motion:reduce){
   .hero-badge::before,.lp-live::before,.lp-recent[aria-busy="true"]::before{animation:none}
@@ -833,7 +846,7 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
           setTimeout(function () { h.classList.remove('lp-title-pending'); }, 900);
         })();
         </script>
-        <p class="hero-sub" data-lp-sub>New simulations and upgrades land here first, <em>straight from the build log</em>. Six real-time worlds are always one click away.</p>
+        <p class="hero-sub" data-lp-sub>Fly down to Mars, follow a solar storm to Earth, scrub tomorrow’s weather on a live globe — <em>real NASA and NOAA data, free to explore</em>.</p>
         <dl class="lp-stats" data-lp-stats hidden></dl>
       </div>
       <!-- THE ASK (2026-11-22, owner request): one-tap sign-up ABOVE the

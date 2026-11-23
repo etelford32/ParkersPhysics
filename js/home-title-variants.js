@@ -22,7 +22,7 @@ export const TITLE_VARIANTS = Object.freeze({
     control: {
         a: 'Watch space weather happen.',
         b: 'Live.',
-        sub: 'New simulations and upgrades land here first, <em>straight from the build log</em>. Six real-time worlds are always one click away.',
+        sub: 'Fly down to Mars, follow a solar storm to Earth, scrub tomorrow’s weather on a live globe — <em>real NASA and NOAA data, free to explore</em>.',
     },
     scale: {
         a: 'From Earth’s core to the cosmic web.',

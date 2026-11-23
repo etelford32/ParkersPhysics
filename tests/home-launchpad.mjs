@@ -57,7 +57,8 @@ section('carousel: one slide per simulation, newest first, derived from the buil
         if (s.fresh !== false) fail('fresh must be false when no clock is handed in');
     }
     // The newest simulation-bearing log entry leads.
-    const lead = [...DEV_LOG].sort((a, b) => (a.date < b.date ? 1 : -1)).find((e) => e.kind !== 'platform' && M.simForEntry(e));
+    const lead = [...DEV_LOG].sort((a, b) => (a.date < b.date ? 1 : -1)).find((e) => e.kind !== 'platform' && M.carouselEligible(M.simForEntry(e)?.sim));
+    for (const s of slides) if (!M.carouselEligible(s.sim)) fail(`${s.sim.id} fronts a slide without a cinematic capture`);
     if (slides[0].entry !== lead) fail(`lead slide is ${slides[0].entry.id}, newest eligible entry is ${lead.id}`);
 });
 
@@ -70,7 +71,7 @@ section('carousel follows the log: a new entry moves its simulation to the front
     if (moved[0].sim.id !== last.id || moved[0].entry.id !== 'synthetic') fail('a newer entry did not move its simulation to the front');
     if (moved.filter((s) => s.sim.id === last.id).length !== 1) fail('the moved simulation appears twice');
     // A simulation that was NOT in the carousel enters it.
-    const outsider = SIMULATIONS.find((s) => !base.some((b) => b.sim.id === s.id));
+    const outsider = SIMULATIONS.find((s) => M.carouselEligible(s) && !base.some((b) => b.sim.id === s.id));
     const entered = M.recentSlides({ log: [mk({ links: [{ href: outsider.href }] }), ...DEV_LOG] });
     if (entered[0].sim.id !== outsider.id) fail('a newly logged simulation did not enter the carousel');
     // CONTROL: a newer platform entry changes nothing.
@@ -79,6 +80,15 @@ section('carousel follows the log: a new entry moves its simulation to the front
     // CONTROL: an entry whose links are not simulations changes nothing.
     const none = M.recentSlides({ log: [mk({ links: [{ href: 'pricing.html', label: 'Pricing' }] }), ...DEV_LOG] });
     if (none.map((s) => s.entry.id).join() !== base.map((s) => s.entry.id).join()) fail('a non-simulation entry changed the carousel');
+    // CONTROL: an instrument page (Bz Column) logged newest still never leads —
+    // the owner's 2026-11-23 rule — and neither does a simulation with no capture.
+    const bz = SIMULATIONS.find((s) => s.id === 'bz');
+    const bzNew = M.recentSlides({ log: [mk({ links: [{ href: bz.href }] }), ...DEV_LOG] });
+    if (bzNew.some((s) => s.sim.id === 'bz')) fail('Bz Column fronted a carousel slide');
+    const noPic = SIMULATIONS.find((s) => !M.carouselEligible(s) && !M.CAROUSEL_EXCLUDE[s.id]);
+    if (noPic && M.recentSlides({ log: [mk({ links: [{ href: noPic.href }] }), ...DEV_LOG] }).some((s) => s.sim.id === noPic.id)) fail(`${noPic.id} (no capture) fronted a slide`);
+    // …and with the filter switched off (the negative control) Bz WOULD lead.
+    if (M.recentSlides({ log: [mk({ links: [{ href: bz.href }] }), ...DEV_LOG], eligible: () => true })[0].sim.id !== 'bz') fail('negative control: without the filter Bz should lead');
     // fresh is relative to the clock handed in.
     const t = Date.parse('2099-01-05T00:00:00Z');
     const f = M.recentSlides({ log: [mk({}), ...DEV_LOG], nowMs: t });
