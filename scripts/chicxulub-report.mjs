@@ -38,26 +38,27 @@ console.log(`  iridium alone: 55 ng/cm² → ${e(m55)} kg → ${f(M.diameterFrom
 console.log(`  speed a ${f(M.diameterFromMass(m55, 2200) / 1000)} km body needs for a 155 km crater: ${f(R.speedForCrater(M.diameterFromMass(m55, 2200) / 1000))} km/s`);
 
 console.log('\n══ 3. The trajectory, backwards ══');
-const lat = O.CRATER.centre.latDeg;
+const lat = R.TRAJECTORY_SITE.latDeg, azShift = R.TRAJECTORY_SITE.bearingShiftDeg;
+console.log(`  site at 66 Ma (plate model): ${f(lat, 2)}°N (today ${f(R.TRAJECTORY_SITE.todayLatDeg, 2)}°N); today's bearings turn ${f(azShift)}° clockwise`);
 const ast = R.reconstructImpactor({ scenario: 'asteroid' });
 for (const v of [12, 20, 30]) {
-    const fam = R.orbitFamily({ latDeg: lat, speedKms: v });
+    const fam = R.orbitFamily({ latDeg: lat, speedKms: v, fromAzimuthDeg: 45 + azShift });
     const g = fam.rows[0].geocentric;
     console.log(`  v = ${v} km/s: v∞ ${f(g.vInfKms)} km/s, Earth bends the path ${f(g.bendDeg)}°; classes over the day: ` +
         Object.entries(fam.share).filter(([, s]) => s > 0).map(([c, s]) => `${c} ${(s * 100).toFixed(0)}%`).join(', '));
 }
 const speeds = [14, 17, 20, 24, 28, 34];
-const hc = R.hourConstraint({ latDeg: lat, speeds, speedWeights: speeds.map(R.asteroidSpeedDensity) });
+const hc = R.hourConstraint({ latDeg: lat, azimuthShiftDeg: azShift, speeds, speedWeights: speeds.map(R.asteroidSpeedDensity) });
 console.log(`  main-belt-like orbit possible for ${(hc.overall * 100).toFixed(0)}% of (hour × speed × angle × bearing × season); best local hour ${f(hc.bestHour)} h`);
 console.log('  by local hour: ' + hc.hours.filter((_, i) => i % 4 === 0).map((h, i) => `${String(h).padStart(2, '0')}h ${(hc.fraction[i * 4] * 100).toFixed(0)}%`).join('  '));
-const ex = R.backtrack({ speedKms: 20, angleDeg: 55, latDeg: lat, localHour: hc.bestHour });
+const ex = R.backtrack({ speedKms: 20, angleDeg: 55, fromAzimuthDeg: 45 + azShift, latDeg: lat, localHour: hc.bestHour });
 console.log(`  example at ${f(hc.bestHour)} h, 20 km/s: a ${f(ex.orbit.aAu, 2)} au, e ${f(ex.orbit.e, 2)}, i ${f(ex.orbit.incDeg)}°, q ${f(ex.orbit.qAu, 2)}, Q ${f(ex.orbit.QAu, 2)} au, T_J ${f(ex.orbit.tisserand, 2)} (${ex.cls}); radiant ecliptic lat ${f(ex.radiant.eclLatDeg)}°`);
 
 console.log('\n══ 4. What it did (asteroid-scenario median impactor) ══');
 const w = M.forward({ diameterKm: ast.diameterKm.med, speedKms: ast.speedKms.med, angleDeg: ast.angleDeg.med, density: ast.density.med, fDep: ast.fDep.med });
 console.log(`  energy ${e(w.energyJ)} J = ${e(w.megatons)} Mt;  transient ${f(w.transientKm, 0)} km × ${f(w.transientDepthKm, 0)} km deep, excavated to ${f(w.excavationDepthKm, 0)} km; final ${f(w.finalKm, 0)} km; melt ${e(w.meltKm3)} km³; Mw ${f(w.seismicM)}; fireball ${f(w.fireballKm, 0)} km`);
 for (const s of O.EJECTA_SITES) {
-    const r = M.greatCircle(lat, O.CRATER.centre.lonDeg, s.latDeg, s.lonDeg) / 1000;
+    const r = R.siteDistanceKm(s);          // at 66 Ma where the plate model has the site
     const x = M.effectsAt(w, r);
     console.log(`  ${s.name.padEnd(22)} ${f(r, 0).padStart(5)} km: quake ${f(x.seismic.arrivalS / 60)} min; ejecta ${f(x.ejecta.arrivalS / 60)} min, ${f(x.ejecta.thicknessM * 100, 1)} cm (observed ${s.thicknessM == null ? '—' : f(s.thicknessM * 100, 1) + ' cm'}); blast ${f(x.blast.arrivalS / 3600)} h, ${f(x.blast.windMs, 0)} m/s; tsunami ${f(x.tsunami.heightM, 0)} m`);
 }

@@ -23,6 +23,9 @@ const CLASS = Object.freeze({
     unbound: { color: NONE, label: 'no bound orbit (ruled out)' },
 });
 const LAT = O.CRATER.centre.latDeg, LON = O.CRATER.centre.lonDeg;
+// the trajectory is evaluated where the plate model puts the crater at 66 Ma,
+// with today's bearings turned by the plate's rotation since then
+const TLAT = R.TRAJECTORY_SITE.latDeg, AZ_SHIFT = R.TRAJECTORY_SITE.bearingShiftDeg;
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fx = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : x.toFixed(d));
@@ -180,7 +183,7 @@ const SEASON = (lon) => (lon < 8 ? 'March equinox' : lon > 82 ? 'June solstice' 
 function bearingName(az) { return ['north', 'north-north-east', 'north-east', 'east-north-east', 'east'][Math.round(az / 22.5)] ?? `${az}°`; }
 
 function drawOrbit() {
-    const b = R.backtrack({ speedKms: T.v, angleDeg: T.th, fromAzimuthDeg: T.az, latDeg: LAT, localHour: T.hr, sunLonDeg: T.sun });
+    const b = R.backtrack({ speedKms: T.v, angleDeg: T.th, fromAzimuthDeg: T.az + AZ_SHIFT, latDeg: TLAT, localHour: T.hr, sunLonDeg: T.sun });
     const o = b.orbit, W = 520, H = 300, cx = 200, cy = 150, s = 26;       // px per au
     const earthAng = (T.sun + 180) * Math.PI / 180;
     const ring = (a, label, dash) => `<circle cx="${cx}" cy="${cy}" r="${a * s}" fill="none" stroke="${GRID}" stroke-width="1" ${dash ? 'stroke-dasharray="3 4"' : ''}/><text x="${cx + a * s * 0.707 + 4}" y="${cy - a * s * 0.707}" fill="${MUTED}" font-size="10">${label}</text>`;
@@ -223,7 +226,7 @@ function drawOrbit() {
 }
 
 function drawHours() {
-    const fam = R.orbitFamily({ latDeg: LAT, speedKms: T.v, angleDeg: T.th, fromAzimuthDeg: T.az, sunLonDeg: T.sun, hours: 48 });
+    const fam = R.orbitFamily({ latDeg: TLAT, speedKms: T.v, angleDeg: T.th, fromAzimuthDeg: T.az + AZ_SHIFT, sunLonDeg: T.sun, hours: 48 });
     const W = 520, H = 92, l = 8, r = 8, w = (W - l - r) / 48;
     let cells = '';
     fam.rows.forEach((row, i) => {
@@ -261,7 +264,7 @@ $('chx-hours').addEventListener('click', (e) => {
 // ── step 3: effects with distance ───────────────────────────────────────────
 const R_MIN = 150, R_MAX = 20000;
 const sliderKm = (f) => R_MIN * (R_MAX / R_MIN) ** f;
-const SITES = O.EJECTA_SITES.map((s) => ({ ...s, rKm: M.greatCircle(LAT, LON, s.latDeg, s.lonDeg) / 1000 }));
+const SITES = O.EJECTA_SITES.map((s) => ({ ...s, rKm: R.siteDistanceKm(s), rTodayKm: M.greatCircle(LAT, LON, s.latDeg, s.lonDeg) / 1000 }));
 function renderEffects() {
     const rKm = sliderKm(Number($('chx-r').value)), x = M.effectsAt(FWD, rKm);
     $('chx-r-o').textContent = `${rKm < 1000 ? Math.round(rKm / 10) * 10 : Math.round(rKm / 100) * 100} km`;
@@ -298,7 +301,7 @@ function drawEjecta(rSel) {
     const xt = [200, 500, 1000, 2000, 5000, 10000, 20000].map((r) => `<text x="${x(r)}" y="${H - 20}" fill="${MUTED}" font-size="11" text-anchor="middle">${r.toLocaleString('en-US')}</text>`).join('');
     const dots = SITES.filter((s) => s.thicknessM != null).map((s) => {
         const pred = M.ejectaThickness(FWD.transientKm * 1000, s.rKm * 1000);
-        const txt = `${s.name}\nmeasured ${fx(s.thicknessM * 100, 1)} cm · this law ${fx(pred * 100, 1)} cm\n${Math.round(s.rKm)} km away today\n${s.verified ? 'thickness checked' : 'thickness from memory'}`;
+        const txt = `${s.name}\nmeasured ${fx(s.thicknessM * 100, 1)} cm · this law ${fx(pred * 100, 1)} cm\n${Math.round(s.rKm)} km away 66 million years ago${Math.abs(s.rKm - s.rTodayKm) > 5 ? ` (${Math.round(s.rTodayKm)} km today: the plate has moved)` : ' (same today: same plate)'}\n${s.verified ? 'thickness checked' : 'thickness from memory'}`;
         const whisk = s.hiM ? `<line x1="${x(s.rKm)}" x2="${x(s.rKm)}" y1="${y(s.hiM)}" y2="${y(Math.max(s.loM || s.thicknessM, 0.002))}" stroke="${INK2}" stroke-width="1.5"/>` : '';
         return `${whisk}<circle cx="${x(s.rKm)}" cy="${y(s.thicknessM)}" r="6.5" fill="${SURFACE}"/><circle cx="${x(s.rKm)}" cy="${y(s.thicknessM)}" r="4.5" fill="${INK}"/>
           <circle cx="${x(s.rKm)}" cy="${y(s.thicknessM)}" r="14" fill="transparent" data-tip="${esc(txt)}"/>
@@ -620,7 +623,7 @@ renderTiles(); drawPosterior(); renderEvidence(); renderEffects(); renderClimate
 T.v = Math.round(base.speedKms.med * 2) / 2; $('chx-v').value = T.v;
 {
     const speeds = [14, 17, 20, 24, 28, 34];
-    HOURS = R.hourConstraint({ latDeg: LAT, speeds, speedWeights: speeds.map(R.asteroidSpeedDensity), hours: 48 });
+    HOURS = R.hourConstraint({ latDeg: TLAT, azimuthShiftDeg: AZ_SHIFT, speeds, speedWeights: speeds.map(R.asteroidSpeedDensity), hours: 48 });
     T.hr = HOURS.bestHour; $('chx-hr').value = T.hr;
 }
 renderTrajectory();

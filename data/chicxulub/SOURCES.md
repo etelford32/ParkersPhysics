@@ -60,7 +60,7 @@ prints the reconstruction; `node tests/chicxulub.mjs` gates it.
 
 ## Still missing (`OPEN_DATA`)
 
-Yucatán palaeolatitude and rotation at 66 Ma · Collins 2020 centre offsets in
+a spin-axis (palaeomagnetic) position at 66 Ma · Collins 2020 centre offsets in
 km · Nesvorný 2021 impact-speed distribution · a fitted ejecta thickness table
 with K–Pg distances · GCM land/ocean splits · the gravity and magnetic grids.
 
@@ -77,9 +77,19 @@ FITTED to and rows that are HELD OUT and only predicted.
 |---|---|
 | inner rim 155 km | peak ring 85 km (through a recalled "half the rim" rule) |
 | El Mimbral 50 cm, Raton 1.5 cm (blanket law) | outer ring 190 km, as if it were the rim |
-| global iridium 55 ng/cm² | Beloc 46 cm (distance at the time unknown) |
+| global iridium 55 ng/cm² | Beloc 46 cm (at its 66 Ma distance, 1078 km, from the plate model) |
 | trajectory angle 45–60° | published energy 1–4×10²³ J |
 | priors: asteroid speed, CM density | published magnitude 10–11 |
 
 Checking a recalled row changes what it can be used for: Raton's 1.5 cm and
 the peak-ring ratio are the two recalled values the result leans on most.
+
+## Geography at 66 Ma
+
+The crater's latitude and compass, and each ejecta site's distance at the
+time, come from the Müller et al. 2019 plate model (see `data/paleo/SOURCES.md`;
+CC BY-SA 4.0), read by `js/paleo/rotations.js` and written into
+`js/chicxulub/paleo-sites.js` by `scripts/build-chicxulub-paleo.mjs`. This is
+the first input on the page read directly from its source's own files, not
+from memory or a search result. Its frame is the mantle's, not the spin
+axis's.

@@ -244,7 +244,7 @@ export const EXTINCTION = row({
 
 // ── 9. Still missing ────────────────────────────────────────────────────────
 export const OPEN_DATA = Object.freeze([
-    'Yucatán palaeolatitude and rotation at 66 Ma (the trajectory uses present coordinates)',
+    'a palaeomagnetic (spin-axis) position for the Yucatán at 66 Ma (the plate model used is mantle-framed) and the obliquity then',
     'Collins et al. 2020 model inputs and the measured centre offsets in km (read the paper)',
     'Nesvorný et al. 2021 impact-speed distribution for ≥10 km carbonaceous impactors',
     'a fitted ejecta thickness–distance table (Belize, Brazos, Raton, Tanis with K–Pg distances)',

@@ -36,11 +36,16 @@
  * some hours give an ordinary asteroid orbit, some a comet's, some no bound
  * orbit at all. `orbitFamily` maps it.
  *
- * WHAT THE TRAJECTORY ASSUMES, AND SAYS: present-day site coordinates (the
- * Yucatán's 66 Ma latitude and rotation are in OPEN_DATA), today's obliquity
- * and a circular 1 au orbit for Earth (neither is knowable 66 Myr back — the
- * Solar System is chaotic past ~50 Myr), and the published "from the
- * northeast" read as azimuth 45° ± 30°.
+ * WHAT THE TRAJECTORY ASSUMES, AND SAYS: the site where the PLATE MODEL puts
+ * it at 66 Ma (`TRAJECTORY_SITE`, from js/chicxulub/paleo-sites.js — Müller
+ * et al. 2019 through js/paleo/rotations.js: 21.95°N instead of today's
+ * 21.33°N, and the local compass turned ~12° clockwise, so the published
+ * "from the northeast", measured in today's geography, is turned by the same
+ * amount), today's obliquity and a circular 1 au orbit for Earth (neither is
+ * knowable 66 Myr back — the Solar System is chaotic past ~50 Myr), and the
+ * published bearing read as azimuth 45° ± 30°. The model's frame is the
+ * MANTLE's, not the spin axis's: true polar wander of a few degrees is not in
+ * the latitude, and the page says so.
  */
 
 import {
@@ -48,6 +53,28 @@ import {
     R_EARTH, MU_EARTH, V_ESC,
 } from './impact-model.js';
 import { CRATER, EJECTA_SITES } from './observations.js';
+import { PALEO_SITES, PALEO_BEARING_SHIFT_DEG, PALEO_AGE_MA, PALEO_MODEL } from './paleo-sites.js';
+
+/**
+ * Where the trajectory is evaluated: the crater's 66 Ma latitude, and the turn
+ * to add to any bearing measured in today's geography.
+ */
+const PALEO_KEY = { 'Beloc': 'beloc', 'El Mimbral': 'el-mimbral', 'Raton Basin': 'raton', 'Tanis': 'tanis' };
+/**
+ * A site's distance from the crater AT 66 Ma (km) — the plate model's, where
+ * the site is in it; otherwise today's great circle. Every effect that travels
+ * over the surface (shaking, debris, blast, tsunami) is timed on this.
+ */
+export function siteDistanceKm(site) {
+    const key = PALEO_KEY[site.name.split(',')[0]];
+    const p = key && PALEO_SITES[key];
+    return p ? p.distance66Km : greatCircle(CRATER.centre.latDeg, CRATER.centre.lonDeg, site.latDeg, site.lonDeg) / 1000;
+}
+
+export const TRAJECTORY_SITE = Object.freeze({
+    latDeg: PALEO_SITES.chicxulub.at66.latDeg, todayLatDeg: CRATER.centre.latDeg,
+    bearingShiftDeg: PALEO_BEARING_SHIFT_DEG, ageMa: PALEO_AGE_MA, model: PALEO_MODEL,
+});
 
 /**
  * The ejecta sections the reconstruction is FITTED to (`fit: true` in the
@@ -330,12 +357,12 @@ export function orbitMap({ latDeg, angleDeg = 55, fromAzimuthDeg = 45, sunLonDeg
  * "Main-belt-like" = asteroidal class, aphelion between 1.8 and 4.5 au,
  * inclination under 35° — the delivered-from-the-belt population.
  */
-export function hourConstraint({ latDeg, speeds, speedWeights, angles = [45, 50, 55, 60], azimuths = [15, 30, 45, 60, 75], sunLons = [0, 30, 60, 90], hours = 48 } = {}) {
+export function hourConstraint({ latDeg, speeds, speedWeights, angles = [45, 50, 55, 60], azimuths = [15, 30, 45, 60, 75], azimuthShiftDeg = 0, sunLons = [0, 30, 60, 90], hours = 48 } = {}) {
     const beltLike = new Float64Array(hours), any = new Float64Array(hours);
     for (let s = 0; s < speeds.length; s++) for (const angleDeg of angles) for (const fromAzimuthDeg of azimuths) for (const sunLonDeg of sunLons) {
         const w = (speedWeights?.[s] ?? 1) * angleDensity(angleDeg);
         for (let i = 0; i < hours; i++) {
-            const b = backtrack({ speedKms: speeds[s], angleDeg, fromAzimuthDeg, latDeg, localHour: i * 24 / hours, sunLonDeg });
+            const b = backtrack({ speedKms: speeds[s], angleDeg, fromAzimuthDeg: fromAzimuthDeg + azimuthShiftDeg, latDeg, localHour: i * 24 / hours, sunLonDeg });
             any[i] += w;
             const o = b.orbit;
             if (b.cls === 'asteroidal' && o.QAu > 1.8 && o.QAu < 4.5 && o.incDeg < 35) beltLike[i] += w;

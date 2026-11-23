@@ -1,7 +1,7 @@
 # Chicxulub reconstruction — status and next steps
 
 *Written 2026-11-23. Page: `chicxulub.html`. Kernels: `js/chicxulub/*`. Gates:
-`node tests/chicxulub.mjs` (350 checks) and `tests/chicxulub-page.spec.js` (8).*
+`node tests/chicxulub.mjs` (360 checks), `node tests/paleo-rotations.mjs` (23) and `tests/chicxulub-page.spec.js` (8).*
 
 ## 1. Where it stands
 
@@ -58,14 +58,37 @@ Each step names what it would change and how we would know it worked.
 - **Done when:** the loosest direction in `stiffness` is tighter than ×2
   without the speed prior, or we can say why it cannot be.
 
-### C. Palaeo-geography — *one kernel, three consumers*
+### C. Palaeo-geography — *done 2026-11-23 (two of three consumers)*
 
-- A pure `paleo.js`: rotate present coordinates to 66 Ma (published Euler
-  poles for North America, Caribbean, and the crater's own plate).
-- Feeds (1) the trajectory's latitude and bearing, (2) ejecta distances,
-  (3) a land/sea mask on the globe so the tsunami ring stops at coasts.
-- **Done when:** Beloc moves from held-out to fitted and stops being a 1.7σ
-  miss, or stays a miss for a reason we can state.
+- **Built on a real published model, not recalled poles.** Müller et al. 2019
+  (EarthByte, CC BY-SA 4.0) is baked by `scripts/build-paleo-model.py`
+  (sha-pinned) into `data/paleo/` and read by the shared kernel
+  `js/paleo/rotations.js`. `scripts/build-chicxulub-paleo.mjs` turns it into the
+  66 Ma site table `js/chicxulub/paleo-sites.js`.
+- **The gate** (`tests/paleo-rotations.mjs`, 23 checks): every file row is
+  reproduced exactly, interpolation is the rotation-space geodesic, round
+  trips, rigidity and refusals. It also checks the model against an
+  INDEPENDENT dataset: the last 5 Myr of motion agree with Bird's PB2002 to
+  15 % in speed and 6° in direction, and the sign flip is the negative control.
+- **Results, measured:**
+  - the crater was at 21.95°N, 74.53°W in the mantle frame (today 21.33°N,
+    89.50°W). Its compass has since turned 12.2° clockwise, so "from the
+    north-east" in today's geography becomes ~57° then;
+  - the trajectory hardly moves: main-belt share 22 % vs 23 %, best hour 10 h
+    both;
+  - **Beloc was 1078 km from the crater, not 1796.** It rides the Caribbean
+    plate. At that distance the held-out debris prediction is 33.6 cm against
+    the 46 cm measured: **−0.29σ, where it was −1.7σ.** It stays HELD OUT. A
+    prediction that lands is stronger evidence than a fit, and the deposit is
+    reworked. Moving it into the fit is the owner's call;
+  - El Mimbral, Raton and Tanis ride the crater's own plate, so their
+    distances, and the fit, are unchanged (gated).
+- **Not done:** the land/sea mask on the globe. The coastlines are baked, but
+  they are TODAY's coastlines carried back. A K–Pg shoreline needs a
+  palaeogeography dataset, which belongs to the deep-time Earth simulation
+  (`DEEP_TIME_EARTH_PLAN.md`).
+- **Still assumed:** the mantle frame, not the spin axis (true polar wander
+  of a few degrees is missing), and today's obliquity.
 
 ### D. Climate that can recover — *first attempt measured out, 2026-11-23*
 
@@ -138,9 +161,9 @@ C before B because the new ejecta rows need palaeo-distances; D last of the
 four because it needs the masses A confirms. E only if the page should make
 claims about the peak ring.
 
-If A stays blocked here, the best work available in this environment is **C**
-(pure geometry from published poles, testable against known plate motions)
-— **D** was tried here and now waits on A (see its entry).
+If A stays blocked here, **C** is done (above) and the next best is **B**,
+now that the ejecta distances are the 66 Ma ones. **D** was tried here and
+now waits on A (see its entry).
 
 ## 5. Decisions needed from the owner
 

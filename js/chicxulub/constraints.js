@@ -43,6 +43,7 @@
 import * as M from './impact-model.js';
 import * as O from './observations.js';
 import { DEFAULTS, EJECTA_FIT, SPEED_PRIOR, asteroidSpeedDensity } from './reconstruct.js';
+import { PALEO_SITES } from './paleo-sites.js';
 
 const RAD = Math.PI / 180;
 
@@ -61,6 +62,10 @@ export const unitToParam = (key, u) => fromU(PARAMS.find((p) => p.key === key), 
 
 const dist = (s) => M.greatCircle(O.CRATER.centre.latDeg, O.CRATER.centre.lonDeg, s.latDeg, s.lonDeg);
 const BELOC = O.EJECTA_SITES.find((s) => s.name.startsWith('Beloc'));
+// Haiti sits on the Caribbean plate and has moved since: its distance from the
+// crater at 66 Ma is the plate model's (js/chicxulub/paleo-sites.js). The
+// other ejecta sites ride the same plate as the crater, so theirs are today's.
+export const BELOC_DISTANCE_KM = Object.freeze({ today: PALEO_SITES.beloc.distanceTodayKm, at66: PALEO_SITES.beloc.distance66Km });
 
 /** Everything the model predicts for one set of variables. */
 export function predict(v) {
@@ -73,7 +78,8 @@ export function predict(v) {
         massKg: mass, energyJ: energy, seismicM: M.seismicMagnitude(energy),
         iridium: M.iridiumFluence({ massKg: mass, abundanceNgG: DEFAULTS.abundanceNgG, fDep: v.fDep }),
         speedKms: v.speedKms, angleDeg: v.angleDeg, density: v.density,
-        ejectaBeloc: M.ejectaThickness(Dtc, dist(BELOC)),
+        ejectaBeloc: M.ejectaThickness(Dtc, BELOC_DISTANCE_KM.at66 * 1000),
+        ejectaBelocToday: M.ejectaThickness(Dtc, dist(BELOC)),
     };
     EJECTA_FIT.forEach((e, i) => { out[`ejecta${i}`] = M.ejectaThickness(Dtc, e.distanceKm * 1000); });
     return out;
@@ -124,9 +130,9 @@ export const ROWS = Object.freeze([
     { id: 'outerRing', group: 'held', label: 'Outer ring, if IT were the rim', unit: 'km', log: true, get: (p) => p.finalKm,
       obs: O.CRATER.rimDiameterKm.value, sigma: 0.10, kind: 'measured', verified: 'search',
       basis: 'measured 180–200 km; tests which ring the scaling law describes' },
-    { id: 'beloc', group: 'held', label: `Debris at Beloc (${Math.round(dist(BELOC) / 1000)} km today)`, unit: 'cm', scale: 100, log: true, get: (p) => p.ejectaBeloc,
+    { id: 'beloc', group: 'held', label: `Debris at Beloc (${Math.round(BELOC_DISTANCE_KM.at66)} km at 66 Ma; ${Math.round(BELOC_DISTANCE_KM.today)} today)`, unit: 'cm', scale: 100, log: true, get: (p) => p.ejectaBeloc,
       obs: BELOC.thicknessM, sigma: Math.log(3), kind: 'measured', verified: 'search',
-      basis: 'Haiti has moved since: its distance then is not known, so it is not fitted' },
+      basis: 'distance at 66 Ma from a plate model (Müller et al. 2019); reworked deposit, so not fitted' },
     { id: 'energy', group: 'held', label: 'Published energy', unit: 'J', log: true, get: (p) => p.energyJ,
       obs: Math.sqrt(O.ENERGY.joules.lo * O.ENERGY.joules.hi), sigma: Math.log(O.ENERGY.joules.hi / O.ENERGY.joules.lo) / 2 + 0.2, kind: 'inferred', verified: 'search',
       basis: 'other reconstructions: 1–4×10²³ J' },

@@ -28,6 +28,8 @@ import * as SM from '../js/chicxulub/scene-model.js';
 import fs from 'node:fs';
 import * as C from '../js/chicxulub/constraints.js';
 import * as CL from '../js/chicxulub/collapse.js';
+import * as PS from '../js/chicxulub/paleo-sites.js';
+import { execFileSync } from 'node:child_process';
 import { impactEnergy } from '../js/neo-space.js';
 import { EBM_HEAT_CAPACITY, EBM_FEEDBACK } from '../js/volcano-engine.js';
 
@@ -414,7 +416,7 @@ section('10. constraints: fit, tests, and the system of variables');
     ok(Object.keys(held).length === 5, 'five held-out rows');
     ok(held.outerRing < -2, `the outer ring as the rim is ${held.outerRing.toFixed(1)}σ off — the law describes the inner rim (pinned as measured)`);
     ok(Math.abs(held.peakRing) < 2 && Math.abs(held.quake) < 2 && Math.abs(held.energy) < 2, `peak ring ${held.peakRing.toFixed(1)}σ, quake ${held.quake.toFixed(1)}σ, energy ${held.energy.toFixed(1)}σ — predicted within 2σ`);
-    ok(held.beloc < -1, `Beloc is under-predicted (${held.beloc.toFixed(1)}σ) at today's distance — it was closer then`);
+    ok(Math.abs(held.beloc) < 1, `Beloc, at its 66 Ma distance from the plate model, is predicted within 1σ (${held.beloc.toFixed(1)}σ; at today's distance it missed by −1.7σ — §12)`);
     // NEGATIVE CONTROL: fitting the outer ring instead breaks the ejecta rows
     const outer = M.forward({ diameterKm: f.vars.diameterKm * (190 / f.pred.finalKm) ** (1 / (M.SCALING.finalExp * M.SCALING.expL)), speedKms: f.vars.speedKms, angleDeg: f.vars.angleDeg, density: f.vars.density });
     const eOuter = C.evaluate({ ...f.vars, diameterKm: outer.input.diameterKm });
@@ -492,6 +494,29 @@ section('11. crater collapse: a depth-averaged Bingham layer (MEASURED OUT — t
     ok(ringOverEdge.every((x) => x > 1 && x < 1.4), `FAILURE 2: a ring sits at the assumed fluidised edge (× ${ringOverEdge.map((x) => x.toFixed(2)).join(', ')}), so it is the parameter, not a prediction`);
     ok(base.morphology.finalDiameterKm > 2.5 * 155, `FAILURE 3: a rigid-base layer draws down a basin ${base.morphology.finalDiameterKm.toFixed(0)} km wide (measured 155)`);
     ok(CL.COLLAPSE.verified === false && !fs.readFileSync(new URL('../js/chicxulub-page.js', import.meta.url), 'utf8').includes('collapse.js'), 'rheology flagged unverified; the page does not use this model');
+}
+
+section('12. the geography at 66 Ma (plate model: js/paleo/rotations.js, gated by tests/paleo-rotations.mjs)');
+{
+    let fresh = true;
+    try { execFileSync(process.execPath, [new URL('../scripts/build-chicxulub-paleo.mjs', import.meta.url).pathname, '--check'], { stdio: 'pipe' }); } catch { fresh = false; }
+    ok(fresh, 'js/chicxulub/paleo-sites.js is exactly what the plate model gives (regenerate with scripts/build-chicxulub-paleo.mjs)');
+    const P = PS.PALEO_SITES;
+    ok(P.chicxulub.today.latDeg === O.CRATER.centre.latDeg && P.chicxulub.today.lonDeg === O.CRATER.centre.lonDeg, 'the bake used the evidence table\'s crater centre');
+    ok(O.EJECTA_SITES.every((s) => { const k = { Beloc: 'beloc', 'El Mimbral': 'el-mimbral', 'Raton Basin': 'raton', Tanis: 'tanis' }[s.name.split(',')[0]]; return P[k].today.latDeg === s.latDeg && P[k].today.lonDeg === s.lonDeg; }), '…and its ejecta-site coordinates');
+    const same = ['el-mimbral', 'raton', 'tanis'].every((k) => Math.abs(P[k].distance66Km - P[k].distanceTodayKm) < 0.5);
+    ok(same && P['el-mimbral'].chain.includes(101) && P.chicxulub.chain.includes(101), 'the fitted ejecta sites ride the crater\'s own plate: their distances are unchanged, so the fit is untouched');
+    ok(P.beloc.distance66Km < 0.65 * P.beloc.distanceTodayKm, `Beloc was ${P.beloc.distance66Km.toFixed(0)} km from the crater, not ${P.beloc.distanceTodayKm.toFixed(0)}`);
+    const t = C.evaluate(C.fit().vars), bel = t.rows.find((r) => r.id === 'beloc');
+    const today = C.predict(C.fit().vars).ejectaBelocToday;
+    const zToday = Math.log(today / O.EJECTA_SITES.find((s) => s.name.startsWith('Beloc')).thicknessM) / Math.log(3);
+    ok(Math.abs(bel.z) < 1 && zToday < -1.3, `HELD-OUT Beloc, at its 66 Ma distance: z ${bel.z.toFixed(2)}; at today's distance it was ${zToday.toFixed(2)} — a prediction, never fitted`);
+    ok(Math.abs(R.TRAJECTORY_SITE.latDeg - P.chicxulub.at66.latDeg) < 1e-12 && Math.abs(R.TRAJECTORY_SITE.bearingShiftDeg - PS.PALEO_BEARING_SHIFT_DEG) < 1e-12, 'the trajectory reads the 66 Ma latitude and bearing turn');
+    ok(PS.PALEO_BEARINGS.every(([b, b66]) => Math.abs(((b66 - b - PS.PALEO_BEARING_SHIFT_DEG + 540) % 360) - 180) < 0.01), 'every bearing turns by the same angle (a rigid rotation)');
+    const hcP = R.hourConstraint({ latDeg: R.TRAJECTORY_SITE.latDeg, azimuthShiftDeg: R.TRAJECTORY_SITE.bearingShiftDeg, speeds: [14, 20, 28], speedWeights: [14, 20, 28].map(R.asteroidSpeedDensity), hours: 24 });
+    const hcT = R.hourConstraint({ latDeg: R.TRAJECTORY_SITE.todayLatDeg, speeds: [14, 20, 28], speedWeights: [14, 20, 28].map(R.asteroidSpeedDensity), hours: 24 });
+    ok(Math.abs(hcP.overall - hcT.overall) < 0.05 && hcP.bestHour === hcT.bestHour, `the orbit answer barely moves with the 66 Ma geography (main-belt share ${(hcP.overall * 100).toFixed(0)} % vs ${(hcT.overall * 100).toFixed(0)} % today; best hour ${hcP.bestHour} h both) — measured`);
+    ok(/mantle/.test(PS.PALEO_MODEL.frame) && !O.OPEN_DATA.some((s) => /palaeolatitude and rotation/.test(s)), 'the frame is disclosed as the mantle\'s; OPEN_DATA now asks for the spin-axis position instead');
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);
