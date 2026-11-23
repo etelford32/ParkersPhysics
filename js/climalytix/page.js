@@ -64,6 +64,7 @@ import {
 } from './places.js';
 import { glanceFromNwp, glancePlan, glanceReason, compass, GLANCE_TTL_MS } from './places-glance.js';
 import { nwpPath } from './point-tile.js';
+import { mountCoast } from './coast-view.js';
 import {
     openPlaces, placesDoc, placesStatus, rememberVisit, savePlace, forget, clearRecent, PLACES_EVENT,
     dismissPitch, setSaveIntent, renamePlace,
@@ -633,6 +634,22 @@ function goHome() {
     goTo(S.home, 'home');
 }
 
+/** The site's 10 m wind right now from OUR GFS series (u, v interpolated as components), or null. */
+function siteWindNow() {
+    const w = S.results.get('gfs')?.wind;
+    if (!w?.times?.length) return null;
+    const now = Date.now(), t = w.times;
+    if (now < t[0] || now > t[t.length - 1]) return null;
+    let i = 0;
+    while (i < t.length - 2 && t[i + 1] <= now) i++;
+    const f = (now - t[i]) / (t[i + 1] - t[i]);
+    const mix = (a) => (a[i] == null || a[i + 1] == null ? null : a[i] + (a[i + 1] - a[i]) * f);
+    const u = mix(w.u), v = mix(w.v);
+    if (u == null || v == null) return null;
+    const speedMs = Math.hypot(u, v);
+    return { speedMs, fromDeg: speedMs === 0 ? null : (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360 };
+}
+
 // ── Loading ─────────────────────────────────────────────────────────────────
 
 function loadAll({ only = null } = {}) {
@@ -657,8 +674,9 @@ function loadAll({ only = null } = {}) {
                 S.utcOffsetS = r.utcOffsetS;
                 S.offsetKnown = true;
                 renderSiteTime();
+                S.coast?.refresh();
             }
-            if (id === 'gfs') renderRose();
+            if (id === 'gfs') { renderRose(); S.coast?.refresh(); }
             renderCatalog();
             renderPanels();
         });
@@ -669,6 +687,7 @@ function loadAll({ only = null } = {}) {
 
 function loadMapField(site, signal) {
     S.map?.setSite(site);
+    S.coast?.setSite(site);
     S.field = { state: 'loading', body: null, note: 'Loading the temperature field…' };
     S.map?.setField('loading', null, S.field.note);
     loadField(site, { signal, win: fieldWin(site) }).then((r) => {
@@ -1856,6 +1875,7 @@ function wireControls() {
         saveWorkspace({ ...S.ws, units: { preset: e.target.value } });
         renderPanels();
         renderGlance();
+        S.coast?.refresh();
         renderHeatTicks();
         syncMapKey();                     // the on-map key's title carries the unit (it kept the old one)
         S.map?.unitsChanged();            // isotherm levels + tip + rail re-format in the new unit
@@ -1918,6 +1938,11 @@ export function boot() {
     renderControls();
     renderSiteBar();
     mountLocationMap();
+    S.coast = mountCoast($('#cx-coast'), {
+        fmtText: (q, v, o) => fmtText(q, v, S.units, o),
+        utcOffsetS: () => S.utcOffsetS,
+        windNow: siteWindNow,
+    });
     loadAll();
     startSync();
     // Test + console hook (inert unless read).
@@ -1926,6 +1951,7 @@ export function boot() {
         get state() {
             return {
                 site: S.site,
+                coast: S.coast?.state ?? null,
                 pitch: currentPitch(),
                 glance: glanceRows().map((r) => ({ ...r, ...(GL.cache.get(r.id)?.glance || { state: 'loading' }) })),
                 places: { ...placesStatus(), saved: savedPlaces(placesDoc()).map((p) => p.city), recent: recentPlaces(placesDoc()).map((p) => p.city) },

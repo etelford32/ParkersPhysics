@@ -75,6 +75,12 @@
 #                            (nearest-frame = NEGATIVE CONTROL), wind as
 #                            components, the 24 h range, degraded route bodies;
 #                            place labels through the merge; the share link
+#   climalytix-coast.mjs     the Coast card: the dispersion relation and its
+#                            limits, energy conserved through shoaling, tide
+#                            extrema of a known sinusoid, a shoreline at a
+#                            known distance and facing (no-cos φ = NEGATIVE
+#                            CONTROL), the marine route's 200+expired paths and
+#                            its core-only retry
 #   climalytix-layer-state.mjs  what the Temperature controls may claim: archive
 #                            down ⇒ ticked but sub-toggles / slider / key off,
 #                            a notice + Retry; off is never a failure
@@ -156,6 +162,8 @@ jobs:
         run: node tests/climalytix-pitch.mjs
       - name: location search — glance board, labels, share link
         run: node tests/climalytix-glance.mjs
+      - name: coast — waves, tide, shoreline, marine route
+        run: node tests/climalytix-coast.mjs
       - name: SiteSeries store + resampler
         run: node tests/climalytix-series.mjs
       - name: catalogue + adapters + workspace

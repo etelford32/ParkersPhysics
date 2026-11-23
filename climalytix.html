@@ -337,6 +337,28 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
 #cx-map-pick:not([hidden]) + #cx-map-tip { display:none; }   /* the offer replaces the hover readout */
 #cx-map-pick .cx-btn { font-family:inherit; min-height:34px; padding:4px 12px; }
 
+/* Coast card */
+#cx-coast { grid-column:1 / -1; }
+#cx-coast[hidden] { display:none; }
+#cx-coast h2 .cx-role { margin-left:8px; vertical-align:middle; }
+.cx-co-lead { margin:0 0 6px; font-size:.9rem; line-height:1.5; }
+.cx-co-note { margin:6px 0; font-size:.7rem; color:var(--cx-faint); line-height:1.5; max-width:920px; }
+.cx-co-warn { margin:8px 0; font-size:.8rem; color:var(--cx-caution); }
+.cx-co-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin:12px 0; }
+.cx-co-tile { border:1px solid var(--cx-line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; background:rgba(255,255,255,.02); }
+.cx-co-tile span { font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--cx-faint); }
+.cx-co-tile b { font-size:1.35rem; font-variant-numeric:tabular-nums; }
+.cx-co-tile small { font-size:.72rem; color:var(--cx-muted); }
+.cx-co-list { margin:8px 0 12px; padding-left:18px; font-size:.84rem; line-height:1.6; color:var(--cx-muted); max-width:920px; }
+.cx-co-list b { color:var(--cx-ink); }
+.cx-co-tide-wrap { border-top:1px solid var(--cx-line); padding-top:10px; margin-top:6px; }
+.cx-co-tide { width:100%; max-width:760px; height:auto; display:block; }
+.cx-co-line { fill:none; stroke:var(--cx-accent); stroke-width:2; stroke-linejoin:round; }
+.cx-co-zero { stroke:var(--cx-line); stroke-dasharray:3 4; }
+.cx-co-now { stroke:var(--cx-caution); stroke-width:1.5; }
+.cx-co-ex circle { fill:var(--cx-ink); }
+.cx-co-ex text { fill:var(--cx-muted); font-size:10px; text-anchor:middle; font-family:ui-monospace, Menlo, Consolas, monospace; }
+
 /* The pitch: one line while there is little to lose, a card once the reader has built something. */
 #cx-places-gate { flex:1 1 100%; margin:0; font-size:.78rem; color:var(--cx-muted); }
 #cx-places-gate a { color:var(--cx-accent); }
@@ -672,6 +694,11 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
     <h2>Datasets</h2>
     <div id="cx-catalog-list"></div>
   </aside>
+
+  <section id="cx-coast" class="cx-card" aria-label="Coast" hidden>
+    <h2>Coast <span class="cx-role" data-role="bootstrap" title="Sea state from a bootstrap source until the Climalytix data engine serves it">Bootstrap</span></h2>
+    <div id="cx-coast-body"></div>
+  </section>
 
   <section id="cx-explore" class="cx-card" aria-label="Explore">
     <h2>Explore</h2>
