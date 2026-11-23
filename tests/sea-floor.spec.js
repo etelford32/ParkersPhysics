@@ -232,6 +232,8 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     await expect(facts).toContainText(`${t.good} of 5 cross-sections`);
     await expect(facts).toContainText(`${Math.round(t.te[0])}–${Math.round(t.te[t.te.length - 1])} km`);
     await expect(facts).toContainText('Regional slope');
+    await expect(facts).toContainText('Published, near the trench'); await expect(facts).toContainText('Garcia et al. 2019'); await expect(facts).toContainText('within the published range');
+    await expect(facts).toContainText('Published, before it bends'); await expect(facts).toContainText('Sea-floor age');
     await expect(page.locator('#sf-flex-read')).toContainText('wider, coarser window');
     // five stations; the passing ones are marked; choosing one redraws ITS section
     const chips = page.locator('#sf-flex-stations button');

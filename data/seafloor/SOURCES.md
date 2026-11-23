@@ -71,7 +71,23 @@ A closing or sliding rate is the rigid rotation of one plate relative to the oth
   thickness is printed only when the fit passes its tests, one of which is that it survives leaving
   out the farthest quarter of the profile; E, ν and the densities are textbook constants. The formula
   was written from the textbook derivation and is checked by its own identities and by planted-plate
-  recovery, not against published thicknesses for these trenches (no literature access at build time).
+  recovery, and since 2026-11-23 against two published tables (below).
+
+## Published trench measurements — the check, not an input
+
+`js/seafloor/trench-literature.js`, transcribed from the papers' own tables on 2026-11-23:
+
+- Garcia, E. S. M., Sandwell, D. T. & Bassett, D. (2019), Outer trench slope flexure and faulting at
+  Pacific basin subduction zones, Geophys. J. Int. 218, 708–728, doi:10.1093/gji/ggz155 — Table 2.
+  PDF read from the Sandwell lab's publication list (topex.ucsd.edu).
+- Zhang, F., Lin, J., Zhou, Z., Yang, H. & Zhan, W. (2018), Geophys. J. Int. 212, 1429–1449 — Tables 1
+  and 3. PDF read from the co-author's publication list (cuhk.edu.hk). The printed "Te reduction"
+  column is reproduced from the transcribed thicknesses in all 28 rows (the transcription gate).
+- Levitt, D. A. & Sandwell, D. T. (1995), JGR 100, 379–400 — read for its conclusion (large scatter in
+  single-profile thicknesses); its scanned table is not transcribed.
+
+Not obtained: Hunter & Watts (2016, GJI 207, 288–316) — the repository link returned 404; Bry & White
+(2007). The sea-floor ages shown come from Garcia's table (Müller et al. age grid), not from the grid itself.
 
 A site's thickness is quoted only from FIVE such fits 80 km apart along the trench (median and full range,
 at least three passing), with seamounts masked by a stated rule; a single cross-section is never quoted

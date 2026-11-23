@@ -8,6 +8,7 @@
  */
 import { SEAFLOOR_SITES } from './sites.js';
 import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs, loadWideGrid } from './load.js';
+import { publishedFor, compareWithPublished } from './trench-literature.js';
 import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, flexureReference, quotedThickness, FAMILY_STYLE } from './trench-model.js';
 import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint, customSite, castsNear, cameraReport, ambientColor, worldTexture } from './page-model.js';
 import { BEAMS } from './sounder.js';
@@ -399,7 +400,8 @@ function renderPlates() {
     for (const id of ['sf-flex-chart', 'sf-deep-chart', 'sf-flex-stations', 'sf-flex-keys', 'sf-deep-keys', 'sf-flex-read', 'sf-deep-read', 'sf-plates-note']) $(id).textContent = '';
     if (S.tectonics !== 'ok') { $('sf-plates-sub').textContent = ''; facts.innerHTML = `<div class="sf-empty">${S.tectonics === 'loading' ? 'Loading the plate model…' : 'The plate model could not be loaded, so no plate motions or slabs are shown. Nothing is substituted.'}</div>`; return; }
     if (!t) { facts.innerHTML = '<div class="sf-empty">No sounding point.</div>'; return; }
-    const s = t.setting, lab = motionLabel(s);
+    const s = t.setting, lab = motionLabel(s), q0 = quotedThickness(t);
+    const lit = S.detail && !S.detail.land ? compareWithPublished(t, q0, publishedFor(S.detail.point.lat, S.detail.point.lon, S.custom ? null : S.id)) : null;
     $('sf-plates-sub').textContent = s.near ? `${s.left.name} and ${s.right.name} plates` : (s.plateHere ? `inside the ${s.plateHere.name} plate` : '');
     const rows = [];
     rows.push(['Nearest boundary', `${esc(s.className)} <small>${Math.round(s.km).toLocaleString('en-US')} km away · ${esc(s.left.name)} / ${esc(s.right.name)}</small>`]);
@@ -408,6 +410,7 @@ function renderPlates() {
         if (s.family === 'subduction' || s.family === 'closing') rows.push(['Head-on part', `${Math.round(Math.max(0, s.closing))} mm/yr <small>plus ${Math.round(Math.abs(s.along))} mm/yr sideways; ${Math.round(s.obliquityDeg)}° off head-on</small>`]);
         if (s.down) rows.push(['Sinking plate', `${esc(s.down.name)} <small>moving ${compass(s.downBearingDeg)} under the ${esc(s.over.name)} plate</small>`]);
         if (s.ageMa != null) rows.push(['Sea-floor age at the boundary', `${Math.round(s.ageMa)} million years <small>Bird's table</small>`]);
+        else if (lit && lit.ageMa != null) rows.push(['Sea-floor age', `${Math.round(lit.ageMa)} million years <small>${lit.ageSource === 'garcia' ? 'Garcia et al. 2019, from the Müller age grid' : 'Zhang et al. 2018'}</small>`]);
         if (s.closing > 1) rows.push(['In a million years', `${Math.round(s.closing)} km of sea floor consumed here`]);
     }
     if (t.slab) {
@@ -421,9 +424,14 @@ function renderPlates() {
     const view = st ? { profile: st.profile, flexure: st.flexure, why: st.flexure ? null : 'profile-too-short', station: st } : t, f = view.flexure, q = quotedThickness(t);
     if (q && !q.single) {
         const r = [Math.round(q.teMin), Math.round(q.teMax)];
-        rows.push(['Effective plate thickness', `<b>${Math.round(q.teKm)} km</b> <small>median of the ${q.good} of ${q.of} cross-sections that pass, along ${q.spanKm} km of trench; they range ${r[0]}–${r[1]} km${q.teMax > 2 * q.teMin ? ', so it varies strongly along the trench' : ''}</small>`]);
+        rows.push(['Effective plate thickness', `<b>${Math.round(q.teKm)} km</b> <small>of the bent plate near the trench; median of the ${q.good} of ${q.of} cross-sections that pass, along ${q.spanKm} km of trench; they range ${r[0]}–${r[1]} km${q.teMax > 2 * q.teMin ? ', so it varies strongly along the trench' : ''}</small>`]);
     } else if (al && t.flexure) rows.push(['Effective plate thickness', `not quoted <small>${al.good === 0 ? 'none' : `only ${al.good}`} of ${al.stations.length} cross-sections along the trench pass${al.good === 0 ? '' : '; three are needed'}</small>`]);
     else if (q) rows.push(['Effective plate thickness', `<b>${q.teKm.toFixed(0)} km</b> <small>from this one cross-section${Math.round(q.teMin) !== Math.round(q.teMax) ? `; ${Math.round(q.teMin)}–${Math.round(q.teMax)} km when its farthest quarter is left out` : ''}</small>`]);
+    if (lit && lit.bracket && s.family === 'subduction') {
+        const parts = []; if (lit.garcia) parts.push(`${lit.garcia.teKm.toFixed(0)} km (Garcia et al. 2019)`); if (lit.zhang) parts.push(`${lit.zhang.temKm.min === lit.zhang.temKm.max ? lit.zhang.temKm.min.toFixed(0) : `${lit.zhang.temKm.min.toFixed(0)}–${lit.zhang.temKm.max.toFixed(0)}`} km (Zhang et al. 2018)`);
+        rows.push(['Published, near the trench', `${parts.join(' · ')}${lit.inside === true ? ' <small>ours falls within the published range</small>' : lit.inside === false ? ' <small>ours falls outside the published range</small>' : ''}`]);
+        if (lit.unbentKm) rows.push(['Published, before it bends', `${lit.unbentKm.min === lit.unbentKm.max ? lit.unbentKm.min : `${lit.unbentKm.min}–${lit.unbentKm.max}`} km <small>Zhang et al. 2018; the plate weakens as it bends</small>`]);
+    }
     if (f && f.quality === 'good') {
         rows.push([st && st.offsetKm ? 'Outer rise, this section' : 'Outer rise', `<b>${Math.round(f.wb)} m</b> high, ${Math.round(f.xb)} km seaward of the trench <small>modelled fit</small>`]);
         rows.push(['Regional slope', `${Math.abs(f.slope) < 0.05 ? 'level' : `${Math.abs(f.slope).toFixed(1)} m per km, ${f.slope > 0 ? 'deepening' : 'shoaling'} seaward`} <small>fitted with the rise</small>`]);

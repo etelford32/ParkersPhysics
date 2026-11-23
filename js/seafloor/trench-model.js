@@ -50,11 +50,22 @@
  * seamount chains the mask refuses (Mariana), and a plate age to set each thickness against — Bird's
  * table has one at only 3 of these sites and the age grid (Seton 2020) is unreachable.
  *
- * LIMITS, each said on the page: T_e is an EFFECTIVE thickness (a real plate yields and faults as
- * it bends, so it reads thinner than the cold lithosphere is thick); E, ν and the densities are
- * textbook constants (`ELASTIC`); the regional slope is ONE straight line over 500 km; the
- * bathymetry is a 1.8–3.7 km grid of mostly predicted depth; nothing here has been checked
- * against published thicknesses for these trenches.
+ * CHECKED AGAINST PUBLISHED WORK (2026-11-23, `trench-literature.js` — tables transcribed from the
+ * papers, never an input here). Garcia et al. 2019 and Zhang et al. 2018 both find the plate WEAKENS
+ * as it bends, so there are two thicknesses; a single-thickness fit to the trench slope (this one)
+ * measures the BENT plate. At the four quoted sites our value sits inside the range those two give for
+ * it (Middle America 6 vs 4.5 / 11.5; Kuril 16 vs 12.9 / 24.5–25.2; Japan 21 vs 21.8 / 22–30.8;
+ * Aleutian 26 vs 12.5 / 18–25.3), and our zero crossing x₀ and rise height agree with Zhang's X0 and Wb
+ * — except the Aleutian rise, which reads about twice the published height (recorded, unexplained).
+ * The two studies differ from each other by up to 2×, which is the real width of what is known.
+ * The UNBENT thickness (Zhang's TeM, 23–64 km) is NOT measured here: that needs a two-thickness plate
+ * with a break near the outer rise, which is the next model, not a re-tuning of this one.
+ *
+ * LIMITS, each said on the page: T_e is the EFFECTIVE thickness of the bent plate (a real plate
+ * yields and faults as it bends); E, ν and the densities are the constants the published studies use
+ * (`ELASTIC` ≡ Zhang et al. 2018 Table 1, gated); the regional slope is ONE straight line over 500 km
+ * where the literature removes sediment and thermal subsidence instead; the bathymetry is a
+ * 1.8–3.7 km grid of mostly predicted depth.
  */
 import { nearestStep, stepFamily, FAMILY_STYLE, CLASS_FAMILY } from '../earth-interior/plates-model.js';
 import { plateAt, velocityIn, STEP_CLASSES } from '../earth-interior/plates.js';
@@ -63,7 +74,7 @@ import { section, destination, sampleDepth, trenchAxis } from './bathy.js';
 
 export { FAMILY_STYLE, CLASS_FAMILY, stepFamily };
 
-/** Textbook constants (Turcotte & Schubert). The elastic thickness scales as E^(−1/3): ±30 % in E is ∓10 % in T_e. */
+/** The constants of the published trench studies (identical to Zhang et al. 2018, Table 1 — gated). The elastic thickness scales as E^(−1/3): ±30 % in E is ∓10 % in T_e. */
 export const ELASTIC = Object.freeze({ E: 70e9, nu: 0.25, rhoMantle: 3300, rhoWater: 1030, g: 9.81 });
 /** Past this distance a point is "mid-plate": the boundary is named but no trench is modelled. */
 export const BOUNDARY_NEAR_KM = 200;

@@ -142,6 +142,7 @@ export const DEV_LOG = [
           'New model: seaward of a trench the plate bends like a stiff sheet and pushes up a low outer rise. The page fits that curve to 500 km of sea floor at five cross-sections 80 km apart along each trench, and reads a plate thickness from it.',
           'Four trenches give an answer: about 6 km at the Middle America Trench, 16 km at Kuril, 21 km at Japan and 26 km at the Aleutian. The five sections disagree by up to a factor of two along one trench, and the page prints that range beside every number.',
           'Every fit is shown with its tests, and seamounts left out of a fit are shaded on the chart. Most trenches fail, the Mariana among them, and the page then draws the rejected curve and quotes no thickness.',
+          'Each number is shown beside two published studies of the same trench (Garcia and others 2019; Zhang and others 2018). Ours fall inside the published range for the bent plate at all four trenches, and the page also shows the published thickness of the plate before it bends, which is two to three times greater.',
           'The Romanche, Cayman and Puerto Rico deeps are shown as what Bird\'s model says they are: places where plates slide past each other, with no sinking plate.',
       ],
       links: [{ href: 'sea-floor.html?site=kuril', label: 'Sea Floor: Kuril–Kamchatka Trench' }] },

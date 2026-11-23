@@ -23,6 +23,7 @@ import * as LI from '../js/seafloor/light.js';
 import * as FD from '../js/seafloor/free-dive.js';
 import { terrariumEncode, tileLatLon, TILE_PX } from '../js/climalytix/terrain.js';
 import * as TM from '../js/seafloor/trench-model.js';
+import * as LIT from '../js/seafloor/trench-literature.js';
 import { decodePlates } from '../js/earth-interior/plates.js';
 import { decodeSlabs } from '../js/earth-interior/slabs.js';
 
@@ -434,6 +435,35 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     { const qi = TM.quotedThickness(izu), qt = TM.quotedThickness(tonga); ok(qi === null && qt === null && izu.along.good === 2 && tonga.along.good === 2 && izu.flexure.quality === 'good', 'RECORDED: Izu–Bonin gives a clean centre section but passes at only 2 of 5 stations — not quoted; nor is Tonga'); }
     { const lone = model('izu-bonin', { wide: null }), q1 = TM.quotedThickness(lone); ok(lone.along === null && q1 && q1.single && q1.of === 1, 'without the wide window there are no stations: one section, flagged `single`'); }
     { const jq = TM.quotedThickness(jp), mq = TM.quotedThickness(model('middle-america')); ok(mq.teKm < 9 && jq.teKm > 14 && jq.teMax / jq.teMin > 1.8 && jp.setting.ageMa > 100, `a young plate reads thin (Middle America ${mq.teKm.toFixed(0)} km) and an old one thicker and far less certain (Japan ${jq.teKm.toFixed(0)} km, ${jq.teMin.toFixed(0)}–${jq.teMax.toFixed(0)})`); }
+    // ── AGAINST THE LITERATURE (trench-literature.js: Garcia et al. 2019 Table 2, Zhang et al. 2018 Table 3) ──
+    { const Z = LIT.ZHANG_2018, Gc = LIT.GARCIA_2019;
+      ok(Z.rows.length === 28 && Gc.rows.length === 26 && Z.verified && Gc.verified, 'both published tables are transcribed in full');
+      // transcription checks that need no second copy of the paper: Zhang PRINTS the Te reduction, which is 1 − Tem/TeM of the same row…
+      let worst = 0; for (const r of Z.rows) worst = Math.max(worst, Math.abs(100 * (1 - r.temKm / r.teMKm) - r.reductionPct));
+      ok(worst < 1.6, `Zhang's printed "Te reduction" is reproduced from the transcribed TeM and Tem in all 28 rows (worst ${worst.toFixed(1)} points)`);
+      const red = Z.rows.map((r) => r.reductionPct); ok(Math.min(...red) >= 20 && Math.max(...red) <= 70 && Math.abs(red.reduce((a, b) => a + b, 0) / red.length - Z.teReductionPct.mean) < 1.5, 'and matches the paper\'s own summary: 20–70 %, mean 47 %');
+      // …and Garcia's table is printed in order of sea-floor age
+      ok(Gc.rows.every((r, i) => i === 0 || r.ageMa >= Gc.rows[i - 1].ageMa) && Gc.rows[0].id === 'MD01' && Gc.rows[25].id === 'MA01' && Gc.rows.every((r) => r.teKm > 3 && r.teKm < 23), 'Garcia\'s rows are in the printed age order, 3.3–21.9 km');
+      for (const k of ['E', 'nu', 'rhoWater', 'rhoMantle', 'g']) ok(Z.constants[k] === TM.ELASTIC[k], `our ${k} is the published study's`);
+      ok(LIT.publishedFor(29.8, -151.6, 'ne-pacific').garcia === null && LIT.compareWithPublished(null, null, LIT.publishedFor(29.8, -151.6, 'ne-pacific')) === null, 'nothing is published for an abyssal plain, and nothing is shown');
+      // the comparison at the four quoted trenches
+      const rowsOut = [];
+      for (const id of ['middle-america', 'kuril', 'japan', 'aleutian']) { const t = model(id), q = TM.quotedThickness(t), d = PM.siteDetail({ site: SEAFLOOR_SITES.find((x) => x.id === id), meta: index.sites.find((m) => m.id === id), grid: grids.get(id), casts: [] });
+          const c = LIT.compareWithPublished(t, q, LIT.publishedFor(d.point.lat, d.point.lon, id));
+          ok(c.garcia && c.zhang && c.inside === true, `${id}: ${q.teKm.toFixed(1)} km against Garcia ${c.garcia.teKm} (${c.garcia.id}, ${c.garcia.km.toFixed(0)} km away) and Zhang ${c.zhang.temKm.min}–${c.zhang.temKm.max} — inside the published range`);
+          ok(c.unbentKm.min > q.teKm * 0.95 && c.unbentKm.max > 1.5 * q.teKm, `${id}: the published UNBENT plate (${c.unbentKm.min}–${c.unbentKm.max} km) is thicker than our bent-plate value — a single-thickness fit measures the weakened plate`);
+          ok(c.x0Km.min <= c.zhang.x0Km.max + 25 && c.x0Km.max >= c.zhang.x0Km.min - 25, `${id}: zero crossing ${c.x0Km.min}–${c.x0Km.max} km against the published ${c.zhang.x0Km.min}–${c.zhang.x0Km.max}`);
+          rowsOut.push([id, c]); }
+      const C = Object.fromEntries(rowsOut);
+      for (const id of ['middle-america', 'kuril', 'japan']) ok(C[id].wbKm.min <= C[id].zhang.wbKm.max * 1.25 && C[id].wbKm.max >= C[id].zhang.wbKm.min * 0.8, `${id}: outer rise ${(1000 * C[id].wbKm.min).toFixed(0)}–${(1000 * C[id].wbKm.max).toFixed(0)} m against the published ${1000 * C[id].zhang.wbKm.min}–${1000 * C[id].zhang.wbKm.max} m`);
+      ok(C.aleutian.wbKm.min > 1.1 * C.aleutian.zhang.wbKm.max, `RECORDED, unexplained: the Aleutian outer rise reads ${(1000 * C.aleutian.wbKm.min).toFixed(0)}–${(1000 * C.aleutian.wbKm.max).toFixed(0)} m here against the published ${1000 * C.aleutian.zhang.wbKm.min}–${1000 * C.aleutian.zhang.wbKm.max} m`);
+      // the two published studies disagree with each other by more than our fit disagrees with either
+      const spread = rowsOut.map(([, c]) => c.bracket.hi / c.bracket.lo); ok(Math.max(...spread) > 1.9 && Math.min(...spread) > 1.2, `the published near-trench values themselves span a factor of ${Math.min(...spread).toFixed(1)}–${Math.max(...spread).toFixed(1)} at these trenches`);
+      // sea-floor age, which Bird's table lacks at most sites, now comes with the comparison
+      ok(Math.abs(C['middle-america'].ageMa - 22.73) < 1e-9 && C.kuril.ageMa > 110 && C.aleutian.ageMa > 50 && C.aleutian.ageMa < 60, 'sea-floor age from the published table: Middle America 23 Ma, Aleutian 54 Ma, Kuril 119 Ma');
+      ok(TM.quotedThickness(model('middle-america')).teKm < TM.quotedThickness(model('aleutian')).teKm && C['middle-america'].ageMa < C.aleutian.ageMa, 'and the youngest quoted plate is the thinnest');
+      const lit = rd('js/seafloor/trench-literature.js').toString(), tmSrc = rd('js/seafloor/trench-model.js').toString();
+      ok(!/^import[^\n]*trench-literature/m.test(tmSrc) && !/from '\.\/trench-model/.test(lit), 'the model never reads the published numbers (they check it; they are not an input)'); }
     // what is NOT a trench
     const rom = model('romanche'), nep = model('ne-pacific');
     ok(rom.why === 'not-subduction' && rom.flexure === null && rom.slab === null && rom.setting.family === 'sliding', 'Romanche: a transform fault — no bending plate, no slab');
