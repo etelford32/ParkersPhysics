@@ -353,6 +353,24 @@ section('9. the 3-D scene kernel');
     ok(near(cl.coldestK, cl.targetCoolingK, 0.05) && near(SM.skyAt(cl.coldestS).tempK, -cl.coldestK, 0.05) && cl.coldestS > cl.darkEndS, `coldest (−${cl.coldestK.toFixed(1)} K) after the light returns`);
     ok(SM.skyAt(SM.LONG_END_S).tempK < -1, `the one-reservoir box is still ${(-SM.skyAt(SM.LONG_END_S).tempK).toFixed(1)} K cold at 30 yr — recovery is NOT claimed (pinned as measured)`);
     ok(!SM.PHASES.includes('recovery'), 'no recovery phase is offered');
+    {   // the two-layer box: same cold, exact heat budget, and (measured) still no recovery
+        const soot = O.CLIMATE_TARGETS.find((c) => c.id === 'soot');
+        const tau0 = M.opticalDepth(soot.massTg, soot.agent), lifetimeYr = M.lifetimeFromDarkness(tau0, soot.darkYears);
+        const Ct = M.impliedOceanDepth({ tau0, lifetimeYr, targetCoolingK: soot.peakCoolingK }).heatCapacity;
+        const one = M.impactWinter({ tau0, lifetimeYr, heatCapacity: Ct, years: 30 });
+        const run = (g, extra = {}) => M.impactWinterLayered({ tau0, lifetimeYr, totalHeatCapacity: Ct, years: 30, stableExchange: g, ...extra });
+        const mid = run(M.LAYERED.stableExchange), end = (r) => r.T[r.T.length - 1];
+        ok(Math.abs(mid.peakCoolingK - one.peakCoolingK) < 0.05 && Math.abs(mid.peakAtYr - one.peakAtYr) < 0.05, 'two layers cool exactly as the one box does (mixed while the surface is the colder)');
+        ok(mid.heatBalanceError < 1e-9, 'two layers: heat stored = heat in, to rounding');
+        ok(near(mid.restratifiedYr, mid.peakAtYr, 0.01) && mid.T.every((v, i) => v >= mid.Tdeep[i] - 1e-12), 'the surface is never colder than the water under it, and floats from the coldest moment on');
+        ok(Math.abs(end(run(1e4, { dt: 1 / 20000 })) - end(one)) < 0.05, 'infinite exchange is the one box again');
+        const [gLo, gHi] = M.LAYERED.exchangeRange, a = end(run(gLo)), b = end(run(gHi));
+        ok(a > b && b > end(one) && a < -M.LAYERED.recoveredWithinK && run(gLo).recoveredYr == null,
+            `MEASURED: a second ocean layer does not give a recovery — ${a.toFixed(1)} … ${b.toFixed(1)} K at 30 yr (one box ${end(one).toFixed(1)})`);
+        const cut = run(0, { years: 40 });
+        ok(cut.recoveredYr > 10 && cut.recoveredYr < 20, `even cut off from the deep water the surface needs ${cut.recoveredYr.toFixed(0)} yr — the limit is C_s/λ, not the deep ocean`);
+        ok(M.LAYERED.verified === false, 'the exchange coefficient is flagged unverified');
+    }
     const sh = SM.skyShade(cl.darkStartS * 3);
     ok(sh.dim >= 0.45 && sh.dim < 0.5 && SM.skyShade(-1).dim === 1 && near(SM.skyShade(cl.coldestS).cold, 1, 0.01), 'display shade: dim never below 0.45, cold tracks the cooling');
     const evs = SM.timelineEvents(tl);

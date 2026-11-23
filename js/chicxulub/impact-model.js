@@ -288,6 +288,59 @@ export function impliedOceanDepth({ tau0, lifetimeYr, targetCoolingK, feedback =
     const C = Math.sqrt(lo * hi);
     return { heatCapacity: C, oceanDepthM: C / OCEAN_W_YR_PER_M };
 }
+/**
+ * TWO LAYERS, so the surface can recover. The one box above gets the DEPTH of
+ * the cold right only by handing the whole ~300 m its heat capacity, and then
+ * warms that whole layer back at once — decades. A real ocean is not
+ * symmetric: a surface colder than the water under it SINKS (the column mixes,
+ * which is why so deep a layer gave up its heat), while a surface warmer than
+ * the water under it FLOATS and is only weakly tied to it.
+ *
+ *   surface layer  C_s (the volcano engine's ~60 m)   takes the forcing
+ *   lower layer    C_d = C_total − C_s
+ *   surface colder  → mixed to one temperature at once (convective adjustment)
+ *   surface warmer  → exchange γ (T_s − T_d), `LAYERED.stableExchange`
+ *
+ * While the planet cools the two layers are one box of C_total, so the peak
+ * cooling is the one box's EXACTLY (gated) and `impliedOceanDepth` still
+ * applies. What is new is the way back, and it rests on γ, which is RECALLED
+ * (the deep-ocean exchange of two-layer fits to climate models, ~0.7) and not
+ * checked. γ → ∞ is the one box again.
+ *
+ * MEASURED 2026-11-23, AND IT DOES NOT GIVE A RECOVERY — so the page does not
+ * use this and still claims none. At 30 yr the surface is −3.0 … −6.0 K across
+ * γ = 0.3 … 1.5 (one box: −7.3 K); even with the layers cut apart (γ = 0) the
+ * surface alone e-folds on C_s/λ = 6.7 yr and needs ~14 yr to come within 2 K.
+ * The limit is the ocean surface's own heat capacity over the feedback, not
+ * the deep water. A fast recovery needs LAND (almost no heat capacity) as its
+ * own box, and that needs the published land/ocean split to anchor it — do
+ * not add a land box on a recalled split. Kept as the gate's record.
+ */
+export const LAYERED = Object.freeze({ stableExchange: 0.7, exchangeRange: Object.freeze([0.3, 1.5]), recoveredWithinK: 2, verified: false });
+export function impactWinterLayered({ tau0, lifetimeYr, totalHeatCapacity, years = 30, dt = 1 / 192, surfaceHeatCapacity = EBM_HEAT_CAPACITY,
+    feedback = EBM_FEEDBACK, stableExchange = LAYERED.stableExchange, co2ForcingWm2 = 0, withinK = LAYERED.recoveredWithinK }) {
+    const Cs = Math.min(surfaceHeatCapacity, totalHeatCapacity), Cd = totalHeatCapacity - Cs, Ct = totalHeatCapacity;
+    const n = Math.round(years / dt);
+    const t = new Float64Array(n + 1), T = new Float64Array(n + 1), Tdeep = new Float64Array(n + 1), light = new Float64Array(n + 1);
+    light[0] = lightFraction(tau0, lifetimeYr, 0);
+    let Ts = 0, Td = 0, peak = 0, peakAt = 0, recovered = null, restratified = null, heatIn = 0;
+    for (let i = 0; i < n; i++) {
+        const F = -ABSORBED_SOLAR * (1 - lightFraction(tau0, lifetimeYr, (i + 0.5) * dt)) + co2ForcingWm2;
+        const net = F - feedback * Ts;                       // W m⁻² into the column
+        const ex = Cd > 0 && Ts > Td ? stableExchange * (Ts - Td) : 0;
+        heatIn += net * dt;
+        if (Cd > 0) { Ts += (net - ex) * dt / Cs; Td += ex * dt / Cd; } else Ts += net * dt / Cs;
+        if (Cd > 0 && Ts < Td) Ts = Td = (Cs * Ts + Cd * Td) / Ct;      // unstable: mix
+        else if (Cd > 0 && restratified == null && Ts > Td + 1e-9) restratified = (i + 1) * dt;
+        t[i + 1] = (i + 1) * dt; T[i + 1] = Ts; Tdeep[i + 1] = Td;
+        light[i + 1] = lightFraction(tau0, lifetimeYr, t[i + 1]);
+        if (Ts < peak) { peak = Ts; peakAt = t[i + 1]; }
+        if (recovered == null && t[i + 1] > peakAt && peak < -withinK && Ts > -withinK) recovered = t[i + 1];
+        if (recovered != null && Ts < -withinK) recovered = null;
+    }
+    return { t, T, Tdeep, light, peakCoolingK: -peak, peakAtYr: peakAt, restratifiedYr: restratified, recoveredYr: recovered,
+             heatBalanceError: Math.abs(Cs * Ts + Cd * Td - heatIn) / Math.max(1e-9, Math.abs(Ct * peak)), stableExchange };
+}
 /** CO₂ added to the air → forcing (Myhre 1998) on a stated background. */
 export function co2Forcing(co2Gt, backgroundPpm = 600) {
     const ppm = co2Gt / 7.81;

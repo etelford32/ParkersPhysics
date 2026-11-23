@@ -1,7 +1,7 @@
 # Chicxulub reconstruction — status and next steps
 
 *Written 2026-11-23. Page: `chicxulub.html`. Kernels: `js/chicxulub/*`. Gates:
-`node tests/chicxulub.mjs` (334 checks) and `tests/chicxulub-page.spec.js` (8).*
+`node tests/chicxulub.mjs` (341 checks) and `tests/chicxulub-page.spec.js` (8).*
 
 ## 1. Where it stands
 
@@ -67,15 +67,22 @@ Each step names what it would change and how we would know it worked.
 - **Done when:** Beloc moves from held-out to fitted and stops being a 1.7σ
   miss, or stays a miss for a reason we can state.
 
-### D. Climate that can recover
+### D. Climate that can recover — *first attempt measured out, 2026-11-23*
 
-- Two reservoirs (mixed layer + deep ocean) with the exchange set from a
-  published recovery time, not tuned to look right. Add sulfate and dust as
-  separate agents once their masses are confirmed (step A).
-- Hold out one published number (e.g. the ocean–land split or the time back to
-  −5 °C) to test it.
+- **Tried: a second ocean layer** (`impactWinterLayered`: surface 60 m takes
+  the forcing; mixes with the water below when colder, floats when warmer).
+  Same peak cooling, exact heat budget — and **no recovery**: −3.0 … −6.0 K
+  at 30 yr across the exchange range (one box −7.3 K). Even cut off from the
+  deep water the surface needs ~14 yr, because its own e-folding time is
+  C_s/λ = 6.7 yr. The deep ocean was not the limit. Pinned in the gate; the
+  page does not use it.
+- **What it needs instead: LAND as its own box.** Land has almost no heat
+  capacity, so it cools far more and recovers in about a year; the published
+  global mean is a land/ocean average. That takes the published land/ocean
+  split (and a recovery time to hold out) — both in step A. Do not build it
+  on a recalled split.
 - **Done when:** the recovery phase and its slider mark can be added back and
-  the gate's "still 7 K cold at 30 yr" pin is replaced by a held-out check.
+  the gate's "still cold at 30 yr" pin is replaced by a held-out check.
 
 ### E. A physical crater collapse — *larger, optional*
 
@@ -112,8 +119,7 @@ claims about the peak ring.
 
 If A stays blocked here, the best work available in this environment is **C**
 (pure geometry from published poles, testable against known plate motions)
-and the two-reservoir structure of **D** with its recovery time left as a
-flagged parameter.
+— **D** was tried here and now waits on A (see its entry).
 
 ## 5. Decisions needed from the owner
 
