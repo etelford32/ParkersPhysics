@@ -60,6 +60,27 @@
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
+#   climalytix-places.mjs    the location search: history + saved places as ONE
+#                            mergeable document (commutative, idempotent; an
+#                            unstamped delete and last-write-wins are the
+#                            NEGATIVE CONTROLS), typed coordinates, network-free
+#                            suggestions, geocoder on submit only (source-gated)
+#   climalytix-pitch.mjs     the sign-up ladder as a pure rule book: the card is
+#                            earned at 3 places, "Not now" holds until the next
+#                            step (never-dismissable is the NEGATIVE CONTROL),
+#                            "in your account" only after a sync lands; match
+#                            highlighting, the 30-minute save-intent; source
+#                            rules (no copy in the page, no query in telemetry)
+#   climalytix-glance.mjs    "your places right now": interpolation by instant
+#                            (nearest-frame = NEGATIVE CONTROL), wind as
+#                            components, the 24 h range, degraded route bodies;
+#                            place labels through the merge; the share link
+#   climalytix-coast.mjs     the Coast card: the dispersion relation and its
+#                            limits, energy conserved through shoaling, tide
+#                            extrema of a known sinusoid, a shoreline at a
+#                            known distance and facing (no-cos φ = NEGATIVE
+#                            CONTROL), the marine route's 200+expired paths and
+#                            its core-only retry
 #   climalytix-layer-state.mjs  what the Temperature controls may claim: archive
 #                            down ⇒ ticked but sub-toggles / slider / key off,
 #                            a notice + Retry; off is never a failure
@@ -84,6 +105,9 @@ on:
       - 'js/climate-lab/**'
       - 'js/earth-detail-inset.js'
       - 'js/temp-ramp.js'
+      - 'js/user-location.js'
+      - 'js/data/major-cities.js'
+      - 'js/gate-modal.js'
       - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
@@ -100,6 +124,9 @@ on:
       - 'js/climate-lab/**'
       - 'js/earth-detail-inset.js'
       - 'js/temp-ramp.js'
+      - 'js/user-location.js'
+      - 'js/data/major-cities.js'
+      - 'js/gate-modal.js'
       - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
@@ -129,6 +156,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: location search — places document, merge, suggestions
+        run: node tests/climalytix-places.mjs
+      - name: location search — the sign-up pitch rules
+        run: node tests/climalytix-pitch.mjs
+      - name: location search — glance board, labels, share link
+        run: node tests/climalytix-glance.mjs
+      - name: coast — waves, tide, shoreline, marine route
+        run: node tests/climalytix-coast.mjs
       - name: SiteSeries store + resampler
         run: node tests/climalytix-series.mjs
       - name: catalogue + adapters + workspace

@@ -35,6 +35,7 @@ import { labFixture } from './climate-lab-fixtures.mjs';
 import { normalizeArchive, degradedArchive, parseArchiveQuery } from '../../js/climalytix/archive-request.js';
 import { aqGrid, aqFieldBody, degradedAq, AQ_VARS } from '../../js/climalytix/aq-field.js';
 import { siteBody, degradedNwp, parseSite, fieldPlan, fieldBody, SCHEMA } from '../../js/climalytix/point-tile.js';
+import { parseMarineQuery, normalizeMarine, degradedMarine } from '../../js/climalytix/marine-request.js';
 import { deflateSync } from 'node:zlib';
 import { encodePng } from '../helpers/cloud-source.mjs';
 import { terrariumEncode, tileLatLon, TILE_PX } from '../../js/climalytix/terrain.js';
@@ -338,7 +339,31 @@ function demTilePng(z, x, y, heightAt = mockDem) {
     return cache.get(key);
 }
 
-export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', convection = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', modelZ = null, onTile, onRequest } = {}) {
+// ── Coast: a straight shoreline and a closed-form sea ───────────────────────
+// Land east of MOCK_COAST.lon, sea west of it, 2 km of relief per degree — so
+// the coast FACES WEST (270°) and a site `d` degrees east of the line is
+// d · 111.195 · cos φ km from the shore.
+export const MOCK_COAST = Object.freeze({ lon: -122.05, perDeg: 2000, site: { lat: 36.95, lon: -122.0, city: 'Coast Town' } });
+export const mockCoastDem = (_lat, lon) => (lon - MOCK_COAST.lon) * MOCK_COAST.perDeg;
+/** Sea level = amp · cos(2π (t − tHigh) / period): one constituent, so every high and low is known. */
+export const MOCK_TIDE = Object.freeze({ ampM: 0.9, periodMs: 12.42 * 3_600_000, tHighMs: Date.UTC(2026, 0, 1, 3, 0) });
+export const MOCK_SEA = Object.freeze({ waveM: 1.5, wavePeriodS: 10, waveDirDeg: 270, swellM: 1.2, swellPeriodS: 12, swellDirDeg: 285, sstC: 14 });
+export function marineUpstreamFixture(nowMs, site, { drop = [] } = {}) {
+    const H = 3_600_000, t0 = Math.floor(nowMs / H) * H - 24 * H;
+    const time = Array.from({ length: 145 }, (_, i) => (t0 + i * H) / 1000);
+    const flat = (v) => time.map(() => v);
+    const hourly = {
+        time,
+        wave_height: flat(MOCK_SEA.waveM), wave_period: flat(MOCK_SEA.wavePeriodS), wave_direction: flat(MOCK_SEA.waveDirDeg),
+        swell_wave_height: flat(MOCK_SEA.swellM), swell_wave_period: flat(MOCK_SEA.swellPeriodS), swell_wave_direction: flat(MOCK_SEA.swellDirDeg),
+        wind_wave_height: flat(0.4), sea_surface_temperature: flat(MOCK_SEA.sstC),
+        sea_level_height_msl: time.map((s) => MOCK_TIDE.ampM * Math.cos(2 * Math.PI * (s * 1000 - MOCK_TIDE.tHighMs) / MOCK_TIDE.periodMs)),
+    };
+    for (const k of drop) delete hourly[k];
+    return { latitude: site.lat, longitude: site.lon - 0.08, hourly };
+}
+
+export async function installClimalytixMocks(page, { marine = 'none', dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', convection = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', modelZ = null, onTile, onRequest } = {}) {
     const nwpOpt = nwp;   // a string, or a function read per request (an archive that comes up mid-session)
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
@@ -391,6 +416,13 @@ export async function installClimalytixMocks(page, { dem = 'up', demHeight, wind
                 onDem?.({ z, x, y });
                 if (dem === 'down') return route.fulfill({ status: 502, json: { error: 'upstream_unavailable' } });
                 return route.fulfill({ status: 200, body: demTilePng(z, x, y, demHeight), headers: { 'Content-Type': 'image/png' } });
+            }
+            if (p === '/api/climalytix/marine') {
+                const q = parseMarineQuery(Object.fromEntries(url.searchParams));
+                if (marine === 'down') return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });
+                if (marine === 'none') return route.fulfill({ json: degradedMarine(q, 'no_marine_data_here', now) });
+                // Built by the REAL route normaliser from a synthetic upstream, so the mock cannot drift from the contract.
+                return route.fulfill({ json: normalizeMarine(marineUpstreamFixture(now, q, marine === 'nolevel' ? { drop: ['sea_level_height_msl'] } : {}), q, now) });
             }
             if (p === '/api/air-quality/stations') {
                 if (monitors === 'down') return route.fulfill({ status: 503, json: { error: 'upstream_unavailable', message: 'AirNow HTTP 503' } });
