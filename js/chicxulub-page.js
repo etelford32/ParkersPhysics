@@ -359,24 +359,70 @@ function renderClimate() {
 // three.js is imported dynamically so a browser without WebGL still gets the
 // rest of the page; the stage draws scene-model.js and nothing else.
 const TL = SM.timeline(FWD, { fromAzimuthDeg: O.TRAJECTORY.fromAzimuthDeg.value });
-const W = { t: -SM.APPROACH_S, playing: false, stage: null, last: 0, loopS: 34 };
+const W = { t: -SM.APPROACH_S, playing: false, stage: null, last: 0, loopS: 70, follow: true, view: 'approach' };
+const EVENTS = SM.timelineEvents(TL);
+const kmRound = (km) => (km >= 1000 ? `${(Math.round(km / 100) * 100).toLocaleString('en-US')} km` : `${Math.round(km / 10) * 10} km`);
+function buildClock() {
+    // marks: one button per event, on the slider's own axis; alternate rows so labels do not collide
+    const lastX = [-1, -1, -1];
+    $('chx-clock-marks').innerHTML = EVENTS.map((e) => {
+        let row = lastX.findIndex((x) => e.slider - x > 0.1); if (row < 0) row = 2; lastX[row] = e.slider;
+        const minor = ['bowl', 'blast', 'coldest'].includes(e.id) ? 1 : 0;
+        return `<button type="button" data-ev="${e.id}" data-t="${e.t}" data-row="${row}" data-minor="${minor}" style="left:${(e.slider * 100).toFixed(2)}%">${esc(e.label)}</button>`;
+    }).join('');
+    $('chx-clock-marks').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (W.playing) setPlaying(false); setStageTime(Number(b.dataset.t)); });
+    // the strip: sunlight and temperature on the slider's axis (two small rows, one x axis, no second y scale)
+    const Wd = 1000, hL = 26, hT = 30, gap = 6, H = hL + gap + hT, n = 400, c = SM.climateTrack();
+    let dL = '', dT = '';
+    for (let k = 0; k <= n; k++) {
+        const s = k / n, sky = SM.skyAt(SM.sliderToTime(s)), x = (s * Wd).toFixed(1);
+        dL += `${k ? 'L' : 'M'}${x} ${(hL * (1 - sky.light)).toFixed(1)}`;
+        dT += `${k ? 'L' : 'M'}${x} ${(hL + gap + hT * Math.min(1, -sky.tempK / (c.targetCoolingK * 1.1))).toFixed(1)}`;
+    }
+    const x0 = SM.timeToSlider(0) * Wd;
+    $('chx-clock-strip').innerHTML = `<svg viewBox="0 0 ${Wd} ${H}" preserveAspectRatio="none" role="img" aria-label="Sunlight and temperature along the timeline">
+      <rect x="${SM.timeToSlider(c.darkStartS) * Wd}" y="0" width="${(SM.timeToSlider(c.darkEndS) - SM.timeToSlider(c.darkStartS)) * Wd}" height="${hL}" fill="rgba(255,255,255,.06)"/>
+      <line x1="0" x2="${Wd}" y1="${hL}" y2="${hL}" stroke="${GRID}" vector-effect="non-scaling-stroke"/><line x1="0" x2="${Wd}" y1="${hL + gap}" y2="${hL + gap}" stroke="${GRID}" vector-effect="non-scaling-stroke"/>
+      <line x1="${x0}" x2="${x0}" y1="0" y2="${H}" stroke="${GRID}" vector-effect="non-scaling-stroke"/>
+      <path d="${dL}" fill="none" stroke="${INK}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+      <path d="${dT}" fill="none" stroke="${BLUE}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+      <line id="chx-clock-head" x1="0" x2="0" y1="0" y2="${H}" stroke="${ORANGE}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
 function renderStageText() {
-    const ph = SM.phaseAt(TL, W.t), st = SM.impactorState(TL, W.t), cu = SM.curtainState(TL, W.t);
+    const ph = SM.phaseAt(TL, W.t), st = SM.impactorState(TL, W.t), fr = SM.frontsAt(W.t), sky = SM.skyAt(W.t), local = W.t <= SM.END_S;
     $('chx-stage-clock').textContent = SM.formatClock(W.t);
     $('chx-stage-phase').querySelector('b').textContent = ph.title;
     $('chx-stage-phase').querySelector('span').textContent = ph.text;
     $('chx-stage-note').textContent = W.stage?.state.exaggeration > 1 ? `ground relief drawn ×${W.stage.state.exaggeration}` : 'true scale · 1 unit = 1 km';
-    const land = SM.landingRadiusKm(W.t);
-    $('chx-stage-kv').innerHTML = [
+    const s = SM.timeToSlider(W.t);
+    $('chx-clock-head')?.setAttribute('x1', s * 1000); $('chx-clock-head')?.setAttribute('x2', s * 1000);
+    for (const b of $('chx-clock-marks').children) b.dataset.past = Number(b.dataset.t) <= W.t ? '1' : '0';
+    const front = (f) => (W.t <= 0 ? '—' : f.done ? 'right round the planet' : kmRound(f.km));
+    const rows = [
         ['Asteroid', W.t <= 0 ? `${fx(st.altitudeKm, 0)} km up · ${fx(Math.hypot(st.east, st.north), 0)} km away along the ground` : st.remaining > 0 ? `${Math.round((1 - st.remaining) * 100)} % consumed` : 'gone — vapour and melt'],
         ['Hole', W.t <= 0 ? '—' : `${fx(2 * SM.craterRadiusKm(TL, W.t), 0)} km across · centre ${fx(SM.surfaceHeightKm(TL, 0, W.t), 1)} km`],
-        ['Debris landing', land > 0 ? `out to ${fx(land, 0)} km${cu.visible ? '' : ' (beyond this view)'}` : '—'],
-    ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+        ['Reached so far', W.t <= 0 ? '—' : `shaking ${front(fr.seismic)} · debris ${front(fr.debris)} · blast ${front(fr.blast)} · tsunami ${front(fr.tsunami)}`],
+    ];
+    if (!local) rows.push(['Sky', `${sky.light < 0.001 ? 'less than 0.1' : sky.light < 0.1 ? (sky.light * 100).toFixed(1) : Math.round(sky.light * 100)} % of normal sunlight · ${sky.tempK > -0.05 ? 'no cooling yet' : `${Math.abs(sky.tempK).toFixed(1)} °C colder`}`]);
+    $('chx-stage-kv').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+function setView(v, { instant = false } = {}) {
+    W.view = v;
+    for (const x of $('chx-view').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x.dataset.v === v));
+    W.stage?.fly(v, { instant });
+}
+function setFollow(on) { W.follow = on; $('chx-follow').setAttribute('aria-pressed', String(on)); if (on) followStory({ instant: false }); }
+/** With "Camera follows" on, the story picks the scale: approach → crater → planet. One-shot flights only. */
+function followStory({ instant = false } = {}) {
+    if (!W.follow || !W.stage) return;
+    const want = SM.chapterAt(W.t);
+    if (want !== W.view) setView(want, { instant });
 }
 function setStageTime(t, { fromSlider = false } = {}) {
-    W.t = Math.max(-SM.APPROACH_S, Math.min(SM.END_S, t));
+    W.t = Math.max(-SM.APPROACH_S, Math.min(SM.LONG_END_S, t));
     if (!fromSlider) $('chx-time').value = SM.timeToSlider(W.t);
     W.stage?.setTime(W.t);
+    followStory();
     renderStageText();
 }
 function setPlaying(on) {
@@ -388,7 +434,7 @@ function playTick(now) {
     if (!W.playing) return;
     const dt = W.last ? Math.min(0.1, (now - W.last) / 1000) : 0; W.last = now;
     const s = Number($('chx-time').value) + dt / W.loopS;      // the slider's own (stretched) clock
-    if (s >= 1) { setStageTime(SM.END_S); setPlaying(false); return; }
+    if (s >= 1) { setStageTime(SM.LONG_END_S); setPlaying(false); return; }
     $('chx-time').value = s; setStageTime(SM.sliderToTime(s), { fromSlider: true });
     requestAnimationFrame(playTick);
 }
@@ -397,12 +443,14 @@ $('chx-play').addEventListener('click', () => {
     if (!W.playing && Number($('chx-time').value) >= 0.999) setStageTime(-SM.APPROACH_S);
     setPlaying(!W.playing);
 });
-segmented('chx-view', (v) => W.stage?.fly(v));
+$('chx-follow').addEventListener('click', () => setFollow(!W.follow));
+$('chx-view').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; setFollow(false); setView(b.dataset.v); });
 segmented('chx-exag', (v) => { W.stage?.setExaggeration(Number(v)); renderStageText(); });
 async function bootStage() {
     try {
         const { createStage } = await import('./chicxulub/stage.js');
-        W.stage = createStage($('chx-stage'), TL);
+        // a drag, wheel or pinch on the stage hands the camera to the reader
+        W.stage = createStage($('chx-stage'), TL, { latDeg: LAT, onUserMove: () => { if (W.follow) setFollow(false); } });
         W.stage.setTime(W.t);
     } catch (err) {
         console.warn('[chicxulub] 3-D stage unavailable:', err?.message ?? err);
@@ -576,7 +624,8 @@ T.v = Math.round(base.speedKms.med * 2) / 2; $('chx-v').value = T.v;
     T.hr = HOURS.bestHour; $('chx-hr').value = T.hr;
 }
 renderTrajectory();
-window.__chicxulub = { O, M, R, SM, base, FWD, TL, state: { S, T, W }, HOURS, setStageTime, stage: null, stageReady: false };
+window.__chicxulub = { O, M, R, SM, base, FWD, TL, state: { S, T, W }, HOURS, setStageTime, setFollow, EVENTS, stage: null, stageReady: false };
+buildClock();
 setStageTime(-SM.APPROACH_S);
 bootStage();
 window.__chicxulub.C = C; window.__chicxulub.FIT = FIT; window.__chicxulub.LAB = LAB;

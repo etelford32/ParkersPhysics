@@ -32,6 +32,8 @@ export const A_EARTH = 4 * Math.PI * R_EARTH * R_EARTH;
 export const V_ESC = Math.sqrt(2 * MU_EARTH / R_EARTH);     // 11 186 m/s
 export const J_PER_MT = 4.184e15;
 export const SIGMA_SB = 5.670374e-8;
+export const SEISMIC_SPEED = 5000;             // m/s — first strong ground motion, the timeline's one value
+export const SOUND_SPEED = 330;                // m/s — the air blast
 const RAD = Math.PI / 180;
 
 export const SCALING = Object.freeze({
@@ -152,7 +154,7 @@ export function thermalExposure(energyJ, rM) {
 export function airBlast(energyJ, rM) {
     const kt = energyJ / (J_PER_MT / 1000);
     const r1 = rM / Math.cbrt(kt);
-    const px = 75_000, rx = 290, P0 = 101_325, c0 = 330;
+    const px = 75_000, rx = 290, P0 = 101_325, c0 = SOUND_SPEED;
     const p = px * rx / (4 * r1) * (1 + 3 * (rx / r1) ** 1.3);
     const wind = 5 * p / (7 * P0) * c0 / Math.sqrt(1 + 6 * p / (7 * P0));
     return { overpressurePa: p, windMs: wind, arrivalS: rM / c0 };
@@ -210,7 +212,7 @@ export function effectsAt(fwd, rKm) {
         rKm,
         insideCrater: r < fwd.finalKm * 500,
         thermalJm2: thermalExposure(E, r),
-        seismic: { arrivalS: r / 5000, magnitude: fwd.seismicM },
+        seismic: { arrivalS: r / SEISMIC_SPEED, magnitude: fwd.seismicM },
         ejecta: { thicknessM: thick, arrivalS: flight?.timeS ?? null, launchKms: flight ? flight.speed / 1000 : null,
                   apogeeKm: flight ? flight.apogeeM / 1000 : null },
         blast,

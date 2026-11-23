@@ -131,8 +131,10 @@ test('3-D stage: play runs the clock forward and the slider takes it back', asyn
     await page.locator('#chx-play').click();
     await expect(page.locator('#chx-play')).toHaveText('Play');
     await page.locator('#chx-time').fill('1');
-    expect(await page.evaluate(() => window.__chicxulub.state.W.t)).toBeCloseTo(900, 6);
-    await expect(page.locator('#chx-stage-phase b')).toHaveText('The crater');
+    const end = await page.evaluate(() => ({ t: window.__chicxulub.state.W.t, end: window.__chicxulub.SM.LONG_END_S }));
+    expect(end.t / end.end).toBeCloseTo(1, 6);
+    await expect(page.locator('#chx-stage-phase b')).toHaveText('The long winter');
+    await expect(page.locator('#chx-stage-clock')).toHaveText('T+30.0 years');
     await expect(page.locator('#chx-stage-kv')).toContainText('gone');
 });
 
@@ -166,6 +168,67 @@ test('constraint lab: scorecard, held-out rows, and sliders that break rows', as
     expect(lit).toBeGreaterThan(0.01);
     await page.locator('#chx-px').selectOption('speedKms');
     expect(await page.locator('#chx-py').inputValue()).not.toBe('speedKms');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+});
+
+test('one clock: marks jump the time, the camera follows the story, and the planet shows fronts and darkness', async ({ page }) => {
+    test.setTimeout(120000);
+    const errors = await boot(page);
+    await page.waitForFunction(() => window.__chicxulub.stageReady, null, { timeout: 60000 });
+    const settle = () => page.waitForFunction(() => !window.__chicxulub.stage.state.flying, null, { timeout: 30000 });
+    const snap = () => page.evaluate(() => { const c = window.__chicxulub; c.stage.renderNow(); return { W: { t: c.state.W.t, follow: c.state.W.follow, view: c.state.W.view }, p: c.stage.probe(), st: c.stage.state, fr: c.SM.frontsAt(c.state.W.t), slider: Number(document.getElementById('chx-time').value) }; });
+    await expect(page.locator('#chx-clock-marks button')).toHaveCount(9);
+    // a mark sets the clock to the kernel's own event time and the slider to its position
+    await page.locator('#chx-clock-marks button[data-ev="crater"]').click();
+    await settle();
+    let s = await snap();
+    const ev = await page.evaluate(() => window.__chicxulub.EVENTS.find((e) => e.id === 'crater'));
+    expect(s.W.t).toBeCloseTo(ev.t, 6); expect(s.slider).toBeCloseTo(ev.slider, 3);
+    expect(s.W.view).toBe('crater');                                  // followed: approach → crater
+    await expect(page.locator('#chx-view button[data-v="crater"]')).toHaveAttribute('aria-pressed', 'true');
+    // hours later: the camera pulls back to the planet and the fronts are where the kernel says
+    await page.evaluate(() => window.__chicxulub.setStageTime(30000));
+    await settle();
+    s = await snap();
+    expect(s.W.view).toBe('planet'); expect(s.p.camera[1]).toBeGreaterThan(5000);
+    expect(s.p.up).toEqual([0, 1, 0]);
+    expect(s.p.fronts.seismic.visible).toBe(false);                   // already right round the planet
+    expect(s.p.fronts.tsunami.visible).toBe(true); expect(s.p.fronts.blast.visible).toBe(true);
+    const R = 6371, ang = (f) => Math.acos((f.y + R) / Math.hypot(f.x, f.y + R, f.z)) * R;
+    expect(ang(s.p.fronts.tsunami) / s.fr.tsunami.km).toBeCloseTo(1, 2);
+    expect(ang(s.p.fronts.blast) / s.fr.blast.km).toBeCloseTo(1, 2);
+    await expect(page.locator('#chx-stage-kv')).toContainText('shaking right round the planet');
+    const bright = s.p.globe.tint;
+    // the dark years: the planet is drawn dimmer (never black) and the readout carries the number
+    await page.locator('#chx-clock-marks button[data-ev="dark"]').click();
+    await page.evaluate(() => window.__chicxulub.setStageTime(window.__chicxulub.state.W.t * 3));
+    s = await snap();
+    expect(s.st.light).toBeLessThan(0.01);
+    expect(s.p.globe.tint).toBeLessThan(0.6 * bright); expect(s.p.globe.tint).toBeGreaterThan(0.4);
+    await expect(page.locator('#chx-stage-phase b')).toHaveText('Darkness');
+    await expect(page.locator('#chx-stage-kv')).toContainText('of normal sunlight');
+    // the frame is lit, not black, in the dark years
+    const lum = await page.evaluate(() => { window.__chicxulub.stage.renderNow(); const gl = window.__chicxulub.stage.renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * 4); gl.readPixels(0, Math.floor(h * 0.45), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); let m = 0; for (let i = 0; i < w; i++) m = Math.max(m, px[4 * i] + px[4 * i + 1] + px[4 * i + 2]); return m / 3; });
+    expect(lum).toBeGreaterThan(18);
+    // choosing a view by hand hands the camera to the reader: it no longer follows
+    await page.locator('#chx-view button[data-v="region"]').click();
+    await settle();
+    await page.evaluate(() => window.__chicxulub.setStageTime(-5));
+    s = await snap();
+    expect(s.W.follow).toBe(false); expect(s.W.view).toBe('region');
+    await expect(page.locator('#chx-follow')).toHaveAttribute('aria-pressed', 'false');
+    // and turning it back on flies to the chapter the clock is in
+    await page.locator('#chx-follow').click();
+    await settle();
+    expect((await snap()).W.view).toBe('approach');
+    // a drag on the stage also releases it
+    const box = await page.locator('#chx-stage').boundingBox();
+    await page.locator('#chx-stage').scrollIntoViewIfNeeded();
+    const bb = await page.locator('#chx-stage').boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 40, bb.y + bb.height / 2 + 10, { steps: 4 }); await page.mouse.up();
+    expect((await snap()).W.follow).toBe(false);
+    expect(box.width).toBeGreaterThan(200);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);
 });

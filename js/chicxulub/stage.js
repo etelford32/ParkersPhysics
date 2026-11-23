@@ -47,7 +47,15 @@ function glowTexture() {
     return new THREE.CanvasTexture(c);
 }
 
-export function createStage(canvas, tl) {
+const R_KM = 6371, GLOBE_SINK_KM = 2;            // the globe sits just under the local ground disc
+const FRONTS = [                                // validated dark slots + a neutral; each ring is also labelled
+    { key: 'seismic', label: 'ground shaking', color: '#199e70', az: 205 },
+    { key: 'debris', label: 'falling debris', color: '#d95926', az: 250 },
+    { key: 'blast', label: 'air blast', color: '#f3f5ff', az: 160 },
+    { key: 'tsunami', label: 'tsunami', color: '#3987e5', az: 115 },
+];
+
+export function createStage(canvas, tl, { latDeg = 21.3, onUserMove = null } = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -56,9 +64,10 @@ export function createStage(canvas, tl) {
     scene.background = new THREE.Color('#04070f');
     scene.fog = new THREE.Fog('#04070f', 900, 2600);
     const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 6000);
+    const SKY = new THREE.Color('#04070f');
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true; controls.dampingFactor = 0.08;
-    controls.minDistance = 12; controls.maxDistance = 1800; controls.maxPolarAngle = Math.PI * 0.497;
+    controls.minDistance = 12; controls.maxDistance = 42000; controls.maxPolarAngle = Math.PI * 0.497;
 
     scene.add(new THREE.HemisphereLight('#9fb6d8', '#141a26', 0.9));
     const sun = new THREE.DirectionalLight('#fff3df', 2.2); sun.position.set(-500, 420, 380); scene.add(sun);
@@ -84,6 +93,30 @@ export function createStage(canvas, tl) {
     gGeo.setIndex(idx);
     const ground = new THREE.Mesh(gGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide }));
     scene.add(ground);
+
+    // ── the planet: a plain sphere with a graticule, true radius, the crater on top ──
+    // Plain on purpose: the continents of 66 million years ago are not in this model.
+    const centre = new THREE.Vector3(0, -R_KM, 0);
+    const globeMat = new THREE.MeshStandardMaterial({ color: GROUND, roughness: 0.95, metalness: 0 });
+    const globe = new THREE.Mesh(new THREE.SphereGeometry(R_KM - GLOBE_SINK_KM, 96, 64), globeMat);
+    globe.position.copy(centre); scene.add(globe);
+    const phi = latDeg * Math.PI / 180;
+    const pole = new THREE.Vector3(0, Math.sin(phi), -Math.cos(phi));           // north is −z, up is +y
+    const eqX = new THREE.Vector3(1, 0, 0), eqY = new THREE.Vector3().crossVectors(pole, eqX);
+    const onGlobe = (lat, lon, lift = 4) => new THREE.Vector3().addScaledVector(pole, Math.sin(lat)).addScaledVector(eqX, Math.cos(lat) * Math.cos(lon)).addScaledVector(eqY, Math.cos(lat) * Math.sin(lon)).multiplyScalar(R_KM + lift).add(centre);
+    const gratPts = [];
+    for (let la = -60; la <= 60; la += 30) for (let k = 0; k < 180; k++) gratPts.push(onGlobe(la * Math.PI / 180, k * 2 * Math.PI / 180), onGlobe(la * Math.PI / 180, (k + 1) * 2 * Math.PI / 180));
+    for (let lo = 0; lo < 360; lo += 30) for (let k = -88; k < 88; k += 2) gratPts.push(onGlobe(k * Math.PI / 180, lo * Math.PI / 180), onGlobe((k + 2) * Math.PI / 180, lo * Math.PI / 180));
+    const graticule = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(gratPts), new THREE.LineBasicMaterial({ color: GROUND_LINE, transparent: true, opacity: 0.32 }));
+    scene.add(graticule);
+    // the four fronts: small circles about the impact point
+    const frontObjs = FRONTS.map((f) => {
+        const line = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(257 * 3), 3)), new THREE.LineBasicMaterial({ color: f.color, transparent: true, opacity: 0.95 }));
+        line.frustumCulled = false; scene.add(line);
+        const tag = label(f.label, { color: f.color }); tag.userData.px = 15; scene.add(tag);
+        return { ...f, line, tag };
+    });
+    const ringPoint = (deltaRad, azDeg, lift) => { const a = azDeg * Math.PI / 180, r = R_KM + lift; return new THREE.Vector3(r * Math.sin(deltaRad) * Math.sin(a), r * Math.cos(deltaRad) - R_KM, -r * Math.sin(deltaRad) * Math.cos(a)); };
 
     // range rings every 100 km + compass
     const rings = new THREE.Group(); scene.add(rings);
@@ -141,7 +174,8 @@ export function createStage(canvas, tl) {
     scene.traverse((o) => { if (o.isSprite && o.userData.px) labels.push(o); });
 
     // ── state ────────────────────────────────────────────────────────────────
-    const S = { t: -SM.APPROACH_S, exaggeration: 1, dirty: true, preset: 'approach', visible: true, frames: 0 };
+    const S = { t: -SM.APPROACH_S, exaggeration: 1, dirty: true, preset: 'approach', visible: true, frames: 0, light: 1 };
+    const dim = new THREE.Color();
     const c3 = new THREE.Color();
     function updateGround() {
         const p = gGeo.attributes.position, cA = gGeo.attributes.color;
@@ -197,6 +231,22 @@ export function createStage(canvas, tl) {
             curtain.material.opacity = cu.opacity;
             curtain.material.emissiveIntensity = 0.5 * SM.meltGlow(tl, t * 3);
         }
+        // the planet: fronts and the sky
+        const fr = SM.frontsAt(t);
+        for (const f of frontObjs) {
+            const st2 = fr[f.key], delta = st2.km / R_KM, show = t > 0 && st2.km > 30 && !st2.done;
+            f.line.visible = show; f.tag.visible = show;
+            if (!show) continue;
+            const p = f.line.geometry.attributes.position;
+            for (let k = 0; k <= 256; k++) { const v = ringPoint(delta, k * 360 / 256, 9); p.setXYZ(k, v.x, v.y, v.z); }
+            p.needsUpdate = true;
+            f.tag.position.copy(ringPoint(delta, f.az, 60));
+        }
+        // darkness dims the ground; never to black, so the scene stays readable (the readout carries the number)
+        const shade = SM.skyShade(t);
+        S.light = shade.light;
+        sun.intensity = 2.2 * shade.dim; globeMat.color.copy(dim.copy(GROUND).multiplyScalar(shade.dim));
+        globeMat.emissive.setRGB(0.02 * shade.cold, 0.05 * shade.cold, 0.09 * shade.cold);      // a cold cast as the oceans give up heat
         S.dirty = true;
     }
 
@@ -208,6 +258,7 @@ export function createStage(canvas, tl) {
         size: { pos: [-70 + R * 4.6, R * 1.5, 70 + R * 4.6], target: [-70 + R * 0.35, R * 0.95, 70 - R * 0.35] },
         crater: { pos: [-60, 150, 250], target: [0, -6, 0] },
         region: { pos: [-140, 560, 760], target: [0, 0, 20] },
+        planet: { pos: [-9000, 11000, 21000], target: [0, -3200, 0] },
     };
     let tween = null;
     function fly(name, { instant = false } = {}) {
@@ -218,7 +269,7 @@ export function createStage(canvas, tl) {
         tween = { from: { pos: camera.position.clone(), target: controls.target.clone() }, to, t0: performance.now(), ms: 900 };
         S.dirty = true;
     }
-    controls.addEventListener('start', () => { tween = null; });
+    controls.addEventListener('start', () => { tween = null; onUserMove?.(); });
     controls.addEventListener('change', () => { S.dirty = true; });
 
     function resize() {
@@ -241,6 +292,12 @@ export function createStage(canvas, tl) {
         }
         if (controls.update()) S.dirty = true;
         if (!S.dirty || !S.visible) return;
+        // the scene spans 20 km to 40 000 km: near, far and the fog follow the camera's range
+        const dCam = camera.position.distanceTo(controls.target);
+        camera.near = Math.max(0.5, dCam / 500); camera.far = Math.max(6000, dCam * 2.2 + 16000); camera.updateProjectionMatrix();
+        scene.fog.near = 900 + Math.max(0, dCam - 700) * 8; scene.fog.far = scene.fog.near + 1700 + dCam * 6;
+        graticule.material.opacity = Math.min(0.32, Math.max(0, (dCam - 500) / 4000));
+        rings.visible = dCam < 4000;
         // labels hold a constant size on screen
         const hPx = canvas.clientHeight || 1, k = 2 * Math.tan(camera.fov * Math.PI / 360) / hPx;
         for (const l of labels) { const d = tmp.setFromMatrixPosition(l.matrixWorld).distanceTo(camera.position), s = l.userData.px * k * d; l.scale.set(s * l.userData.aspect, s, 1); }
@@ -253,10 +310,10 @@ export function createStage(canvas, tl) {
     requestAnimationFrame(frame);
 
     return {
-        setTime(t) { S.t = Math.max(-SM.APPROACH_S, Math.min(SM.END_S, t)); apply(); },
+        setTime(t) { S.t = Math.max(-SM.APPROACH_S, Math.min(SM.LONG_END_S, t)); apply(); },
         setExaggeration(x) { S.exaggeration = x; apply(); },
         fly,
-        get state() { return { t: S.t, exaggeration: S.exaggeration, preset: S.preset, frames: S.frames, flying: !!tween }; },
+        get state() { return { t: S.t, exaggeration: S.exaggeration, preset: S.preset, frames: S.frames, flying: !!tween, light: S.light }; },
         /** test hook: world positions and sizes of what is drawn (no physics). */
         probe() {
             const p = gGeo.attributes.position.array;
@@ -264,6 +321,8 @@ export function createStage(canvas, tl) {
                 rock: { visible: rock.visible, x: rock.position.x, y: rock.position.y, z: rock.position.z, radius: rock.scale.x },
                 centreY: p[1], fireball: { visible: fire.visible, radius: fire.scale.x }, curtain: { visible: curtain.visible },
                 camera: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(),
+                fronts: Object.fromEntries(frontObjs.map((f) => { const a = f.line.geometry.attributes.position; return [f.key, { visible: f.line.visible, x: a.getX(0), y: a.getY(0), z: a.getZ(0) }]; })),
+                globe: { radius: globe.geometry.parameters.radius, y: globe.position.y, tint: globeMat.color.r / GROUND.r }, sun: sun.intensity,
             };
         },
         renderNow() { scene.updateMatrixWorld(true); renderer.render(scene, camera); },

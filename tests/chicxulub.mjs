@@ -320,13 +320,43 @@ section('9. the 3-D scene kernel');
     const fb = SM.fireballState(tl, 400);
     ok(near(fb.radiusKm, tl.fireballKm, 1e-3) && SM.fireballState(tl, 5).radiusKm < tl.fireballKm * 0.5 && fb.opacity < 0.1, 'fireball grows to its radius and fades');
 
-    // the clock
-    let worst = 0; for (let s = 0; s <= 1.0001; s += 0.01) worst = Math.max(worst, Math.abs(SM.timeToSlider(SM.sliderToTime(s)) - Math.min(1, s)));
+    // the clock: one slider from the approach to thirty years
+    let worst = 0; for (let s = 0; s <= 1.0001; s += 0.005) worst = Math.max(worst, Math.abs(SM.timeToSlider(SM.sliderToTime(s)) - Math.min(1, s)));
     ok(worst < 1e-9, 'slider ↔ time round trip');
-    ok(SM.sliderToTime(0) === -SM.APPROACH_S && near(SM.sliderToTime(1), SM.END_S, 1e-9) && Math.abs(SM.sliderToTime(SM.timeToSlider(0))) < 1e-9, 'slider spans approach → 15 min, with contact inside it');
-    const ids = [-15, -3, tl.contactS / 2, 30, 200, 800].map((t) => SM.phaseAt(tl, t).id);
+    ok(SM.sliderToTime(0) === -SM.APPROACH_S && rel(SM.sliderToTime(1), SM.LONG_END_S) < 1e-9 && Math.abs(SM.sliderToTime(SM.timeToSlider(0))) < 1e-9, 'slider spans approach → 30 years, with contact inside it');
+    let incr = true; for (let s = 0.005; s <= 1; s += 0.005) if (!(SM.sliderToTime(s) > SM.sliderToTime(s - 0.005))) incr = false;
+    ok(incr, 'time increases along the whole slider');
+    const share = (a, b) => SM.timeToSlider(b) - SM.timeToSlider(a);
+    ok(share(0, 900) > 0.15 && share(900, 2 * 86400) > 0.15 && share(2 * 86400, SM.LONG_END_S) > 0.2, `seconds, hours and years each get room (${[share(0, 900), share(900, 172800), share(172800, SM.LONG_END_S)].map((x) => (x * 100).toFixed(0) + ' %').join(' / ')})`);
+    ok(SM.chapterAt(-3) === 'approach' && SM.chapterAt(60) === 'crater' && SM.chapterAt(SM.END_S) === 'crater' && SM.chapterAt(3600) === 'planet', 'chapters: approach → crater → planet');
+    const cl = SM.climateTrack();
+    const ids = [-15, -3, tl.contactS / 2, 30, 200, 800, 3600, 20 * 3600, 10 * 86400, SM.YEAR_S, 5 * SM.YEAR_S].map((t) => SM.phaseAt(tl, t).id);
     ok(ids.join() === SM.PHASES.join(), `phases in order: ${ids.join(' → ')}`);
-    ok(SM.formatClock(-12.34) === 'T−12 s' && SM.formatClock(3.21) === 'T+3.2 s' && SM.formatClock(230) === 'T+3 min 50 s', 'clock text');
+    ok(SM.formatClock(-12.34) === 'T−12 s' && SM.formatClock(3.21) === 'T+3.2 s' && SM.formatClock(230) === 'T+3 min 50 s' && SM.formatClock(30000) === 'T+8 h 20 min' && SM.formatClock(5e6) === 'T+58 days' && SM.formatClock(1.2e8) === 'T+3.8 years', 'clock text from seconds to years');
+
+    // the planet: four fronts at the timeline's own speeds, stopping at the antipode
+    const f0 = SM.frontsAt(0), f1 = SM.frontsAt(1000);
+    ok(Object.values(f0).every((x) => x.km === 0 && !x.done), 'no front before contact');
+    ok(near(f1.seismic.km, M.SEISMIC_SPEED, 1e-9) && near(f1.blast.km, M.SOUND_SPEED, 1e-9), 'shaking and blast travel at impact-model\'s speeds');
+    ok(near(f1.debris.km, SM.landingRadiusKm(1000), 1e-12) && f1.seismic.km > f1.debris.km && f1.debris.km > f1.blast.km && f1.blast.km > f1.tsunami.km, 'order at 1000 s: shaking, debris, blast, tsunami');
+    for (const km of [500, 3000, 12000]) ok(rel(SM.frontsAt(M.tsunamiAt(km * 1000).arrivalS).tsunami.km, km) < 1e-6 && rel(SM.frontsAt(M.effectsAt(fwd, km).seismic.arrivalS).seismic.km, km) < 1e-9, `fronts invert Step 3's arrival times at ${km} km`);
+    let fmono = true, pf = SM.frontsAt(1); for (let t = 2; t < 4e5; t *= 1.07) { const f = SM.frontsAt(t); for (const k of Object.keys(f)) if (f[k].km < pf[k].km - 1e-9 || f[k].km > SM.HALF_CIRCUMFERENCE_KM) fmono = false; pf = f; }
+    ok(fmono, 'no front goes backwards or past the antipode');
+    ok(near(SM.HALF_CIRCUMFERENCE_KM, 20015, 1) && SM.frontsAt(4e5).tsunami.done && SM.frontsAt(4e5).blast.done, 'everything has crossed the planet within five days');
+    ok(rel(SM.frontsAt(SM.frontArrivalS('blast')).blast.km, SM.HALF_CIRCUMFERENCE_KM) < 1e-6 && near(SM.frontArrivalS('blast') / 3600, 16.85, 0.05), 'the blast reaches the far side in 16.8 h');
+    ok(rel(SM.landingRadiusKm(SM.frontArrivalS('debris', SM.DEBRIS_MOST_KM)), SM.DEBRIS_MOST_KM) < 1e-3, 'debris mark is the exact flight time to 90 % of the way');
+
+    // the sky: anchored on the published darkness, cooling to the published depth
+    ok(SM.skyAt(-5).light === 1 && SM.skyAt(-5).tempK === 0 && SM.skyAt(3600).light > 0.97, 'clear before impact and still clear an hour after');
+    ok(cl.darkStartS > 5 * 86400 && cl.darkStartS < 60 * 86400 && near(cl.darkEndS / SM.YEAR_S, 2, 0.05), `dark from day ${(cl.darkStartS / 86400).toFixed(0)} to year ${(cl.darkEndS / SM.YEAR_S).toFixed(1)}`);
+    ok(SM.skyAt((cl.darkStartS + cl.darkEndS) / 2).light < M.DARK_THRESHOLD && SM.skyAt(cl.darkEndS * 1.6).light > 0.5, 'below the photosynthesis threshold inside that window, bright after it');
+    ok(near(cl.coldestK, cl.targetCoolingK, 0.05) && near(SM.skyAt(cl.coldestS).tempK, -cl.coldestK, 0.05) && cl.coldestS > cl.darkEndS, `coldest (−${cl.coldestK.toFixed(1)} K) after the light returns`);
+    ok(SM.skyAt(SM.LONG_END_S).tempK < -1, `the one-reservoir box is still ${(-SM.skyAt(SM.LONG_END_S).tempK).toFixed(1)} K cold at 30 yr — recovery is NOT claimed (pinned as measured)`);
+    ok(!SM.PHASES.includes('recovery'), 'no recovery phase is offered');
+    const sh = SM.skyShade(cl.darkStartS * 3);
+    ok(sh.dim >= 0.45 && sh.dim < 0.5 && SM.skyShade(-1).dim === 1 && near(SM.skyShade(cl.coldestS).cold, 1, 0.01), 'display shade: dim never below 0.45, cold tracks the cooling');
+    const evs = SM.timelineEvents(tl);
+    ok(evs.length === 9 && evs.every((e, i) => i === 0 || (e.t >= evs[i - 1].t && e.slider >= evs[i - 1].slider)) && evs[0].id === 'contact' && evs.every((e) => near(SM.sliderToTime(e.slider), e.t, 1e-6 * Math.max(1, e.t))), 'nine marks, in order, each at its own slider position');
 
     // the renderer holds no physics: no scaling-law call, no typed crater number
     const src = fs.readFileSync(new URL('../js/chicxulub/stage.js', import.meta.url), 'utf8');

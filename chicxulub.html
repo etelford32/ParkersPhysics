@@ -108,7 +108,19 @@ table.chx-t tr.grp td { color:#7fb0ff; font-size:.64rem; letter-spacing:.12em; t
 #chx-stage-fail[hidden] { display:none; }
 .chx-play { background:#1c3a6b; color:#fff; border:1px solid rgba(160,190,255,.35); border-radius:8px; font:inherit; font-size:.78rem; padding:6px 14px; min-height:34px; min-width:74px; cursor:pointer; }
 .chx-play:focus-visible { outline:2px solid #7fb0ff; outline-offset:1px; }
-#chx-time { flex:1 1 220px; min-width:160px; width:auto; }
+#chx-clock { margin-top:10px; --thumb:16px; }
+#chx-time { display:block; width:100%; margin:0; accent-color:#3987e5; height:24px; }
+#chx-clock-strip { padding:0 calc(var(--thumb) / 2); }
+#chx-clock-strip svg { display:block; width:100%; height:auto; overflow:visible; }
+#chx-clock-marks { position:relative; height:66px; margin:0 calc(var(--thumb) / 2); }
+#chx-clock-marks button { position:absolute; top:0; transform:translateX(-50%); background:none; border:0; color:#aab3cb; font:inherit; font-size:.66rem; line-height:1.2; padding:14px 3px 2px; cursor:pointer; white-space:nowrap; min-height:24px; }
+#chx-clock-marks button::before { content:''; position:absolute; left:50%; top:0; width:1px; height:11px; background:#8a93ad; }
+#chx-clock-marks button[data-row="1"] { padding-top:30px; } #chx-clock-marks button[data-row="1"]::before { height:27px; }
+#chx-clock-marks button[data-row="2"] { padding-top:46px; } #chx-clock-marks button[data-row="2"]::before { height:43px; }
+#chx-clock-marks button:hover, #chx-clock-marks button:focus-visible { color:#f3f5ff; outline:none; text-decoration:underline; }
+#chx-clock-marks button[data-past="1"] { color:#f3f5ff; }
+#chx-follow[aria-pressed=false] { background:none; color:#aab3cb; }
+@media (max-width: 700px) { #chx-clock-marks button[data-minor="1"] { display:none; } }
 
 /* constraint lab */
 .chx-lab { display:grid; grid-template-columns:minmax(0, 1.05fr) minmax(0, 1fr); gap:18px; margin-top:10px; }
@@ -153,16 +165,17 @@ table.chx-t td.el { text-align:right; font-variant-numeric:tabular-nums; }
 
   <section class="chx-panel chx-span" id="chx-watch">
     <div class="chx-step">Watch it · true scale</div>
-    <h2>The last twenty seconds, and the first fifteen minutes
-      <small>The reconstructed asteroid, its path from the north-east, and the crater it leaves — one scene unit is one kilometre. Drag to look around.</small></h2>
+    <h2>From twenty seconds before to thirty years after
+      <small>One clock for everything: the asteroid's last seconds, the crater forming, the waves crossing the planet, and the dark years. One scene unit is one kilometre. Drag to look around.</small></h2>
     <div class="chx-ctl">
       <button type="button" class="chx-play" id="chx-play" aria-pressed="false">Play</button>
-      <input type="range" id="chx-time" min="0" max="1" step="0.001" value="0" aria-label="Time relative to impact">
+      <button type="button" class="chx-play" id="chx-follow" aria-pressed="true" title="Let the camera move to the right scale as time passes">Camera follows</button>
       <span class="chx-seg" id="chx-view" role="group" aria-label="Camera view">
         <button type="button" data-v="approach" aria-pressed="true">Approach</button>
         <button type="button" data-v="size" aria-pressed="false">How big</button>
         <button type="button" data-v="crater" aria-pressed="false">Crater</button>
         <button type="button" data-v="region" aria-pressed="false">Region</button>
+        <button type="button" data-v="planet" aria-pressed="false">Planet</button>
       </span>
       <span class="chx-seg" id="chx-exag" role="group" aria-label="Vertical scale of the ground">
         <button type="button" data-v="1" aria-pressed="true">Relief ×1</button>
@@ -176,7 +189,18 @@ table.chx-t td.el { text-align:right; font-variant-numeric:tabular-nums; }
       <div id="chx-stage-phase" aria-live="polite"><b></b><span></span></div>
       <div id="chx-stage-fail" hidden>This browser could not start WebGL, so the 3-D view is not shown. Everything below works without it.</div>
     </div>
+    <div id="chx-clock">
+      <div id="chx-clock-strip"></div>
+      <input type="range" id="chx-time" min="0" max="1" step="0.0005" value="0" aria-label="Time relative to impact">
+      <div id="chx-clock-marks"></div>
+    </div>
     <dl class="chx-kv" id="chx-stage-kv"></dl>
+    <p class="chx-fine"><b>The clock</b> is linear for the approach and stretches after impact, so seconds, hours and decades each
+      get room; the strip above the slider shows sunlight (white) and global temperature (blue) on that same stretched axis. The four
+      rings on the planet are how far the shaking, the falling debris, the air blast and the tsunami have reached, at the speeds used in
+      Step 3 — they stop being drawn at the far side of the planet. The darkness lasts as long as the published climate model found, and
+      the temperature is the simple model from Step 4: it gets the depth of the cold right by construction and its recovery is too slow,
+      so the clock stops at 30 years. The planet darkens with the sky but is never drawn black.</p>
     <p class="chx-fine"><b>What is real here:</b> the body's size, speed, angle and bearing, the two crater sizes and depths, the time it
       takes to cross the air and to bury itself, where thrown-out rock is landing, and the peak ring's measured radius.
       <b>What is a sketch:</b> how the hole gets from one shape to the next — the growth of the bowl, the rebound of its floor, the
