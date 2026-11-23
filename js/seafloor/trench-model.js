@@ -58,8 +58,9 @@
  * Aleutian 26 vs 12.5 / 18–25.3), and our zero crossing x₀ and rise height agree with Zhang's X0 and Wb
  * — except the Aleutian rise, which reads about twice the published height (recorded, unexplained).
  * The two studies differ from each other by up to 2×, which is the real width of what is known.
- * The UNBENT thickness (Zhang's TeM, 23–64 km) is NOT measured here: that needs a two-thickness plate
- * with a break near the outer rise, which is the next model, not a re-tuning of this one.
+ * The UNBENT thickness (Zhang's TeM, 23–64 km) is NOT measured by this fit: the two-thickness plate with a
+ * break near the outer rise is a separate model, `broken-plate.js`, run on the points this fit kept — and this
+ * fit is nested in it (its uniform case), so neither was re-tuned to make the other agree.
  *
  * LIMITS, each said on the page: T_e is the EFFECTIVE thickness of the bent plate (a real plate
  * yields and faults as it bends); E, ν and the densities are the constants the published studies use

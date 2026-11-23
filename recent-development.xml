@@ -11,12 +11,22 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Sun, 22 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Mon, 23 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Sea Floor: a plate that weakens as it bends</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-two-plates</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-two-plates</guid>
+      <pubDate>Mon, 23 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;The trench model now includes the one both published studies use: a plate that is thinner near the trench than beyond it. The page fits it at every cross-section, says where it is needed, and checks each answer against Zhang and others (2018).&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The new plate is solved exactly. With its two thicknesses equal it becomes the earlier single-thickness plate, so the two are compared on the same sea floor.&lt;/li&gt;&lt;li&gt;A second thickness counts only when it beats one by more than chance. It does at 28 of the 72 cross-sections, and at Tonga it halves the misfit (152 m to 60 m).&lt;/li&gt;&lt;li&gt;Both thicknesses are pinned down at 8 sections. Beyond the break the data often give only a lower limit, and the page says &amp;quot;at least&amp;quot;.&lt;/li&gt;&lt;li&gt;Middle America is the one trench with three sections that agree well enough to quote: about 16 km near the trench, with a break about 30 km out.&lt;/li&gt;&lt;li&gt;At 4 of the 8 sections, Zhang and others&amp;#39; published thicknesses and break distance fall within ours (Tonga twice, Izu–Bonin, Middle America). At the other 4 they do not, and the page says so.&lt;/li&gt;&lt;li&gt;The bending chart draws the two-thickness plate beside the single-thickness one and marks where the plate breaks.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=tonga&quot;&gt;Open Sea Floor: Tonga Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>Sea Floor: the plates behind the trenches</title>
@@ -506,16 +516,6 @@
       <category>New layer / feature</category>
       <category>Earth &amp; Orbit</category>
       <description>&lt;p&gt;Scrubbing time now shows archived satellite cloud frames for that moment, a wind-advected nowcast just ahead, and model-only clouds further out.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/earth.html&quot;&gt;Open EarthView&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage 30-day temperature outlook</title>
-      <link>https://parkersphysics.com/recent-development.html#temp-outlook</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#temp-outlook</guid>
-      <pubDate>Mon, 21 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Earth &amp; Orbit</category>
-      <description>&lt;p&gt;A daily-candle temperature chart and a 30-day calendar for your location, relaxing from the forecast toward the local normal.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
   </channel>

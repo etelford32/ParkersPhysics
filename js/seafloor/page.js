@@ -8,7 +8,8 @@
  */
 import { SEAFLOOR_SITES } from './sites.js';
 import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs, loadWideGrid } from './load.js';
-import { publishedFor, compareWithPublished } from './trench-literature.js';
+import { publishedFor, compareWithPublished, compareTwoThickness } from './trench-literature.js';
+import { brokenStation, summarizeTwoThickness, twoThicknessSections, brokenHeight } from './broken-plate.js';
 import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, flexureReference, quotedThickness, FAMILY_STYLE } from './trench-model.js';
 import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint, customSite, castsNear, cameraReport, ambientColor, worldTexture } from './page-model.js';
 import { BEAMS } from './sounder.js';
@@ -19,7 +20,7 @@ import { DIVE_MAX_LAT } from './free-dive.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const NS = 'http://www.w3.org/2000/svg';
-const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, trenchKey: '', station: 0, wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
+const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, trenchKey: '', station: 0, two: null, twoKey: '', wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
 window.__seaFloor = S;
 
 // ── tiny SVG helpers ─────────────────────────────────────────────────────────
@@ -367,11 +368,29 @@ function computeTrench() {
     if (key !== S.trenchKey) S.station = 0;
     S.trenchKey = key;
     S.trench = ok ? trenchModel({ plates: S.plates, slabs: S.slabs, grid: c.grid, detail: S.detail, wide }) : null;
+    scheduleTwoThickness();
     // the wide window is fetched only for a site that has one, only once the plate model says a plate bends here
     if (id && c.meta && c.meta.wide && !S.wides.has(id) && S.trench && S.trench.profile) {
         S.wides.set(id, 'loading');
         loadWideGrid(c.meta).then((g) => S.wides.set(id, g || 'down'), () => S.wides.set(id, 'down')).then(() => { if (!S.custom && S.id === id && S.detail) { computeTrench(); renderPlates(); } });
     }
+}
+// THE TWO-THICKNESS PLATE (broken-plate.js) costs ~0.3 s a section, so it runs one section per task after the
+// one-thickness answer is already on the page, and re-renders as each lands; a new point abandons the old run.
+function scheduleTwoThickness() {
+    const key = S.trenchKey, secs = twoThicknessSections(S.trench);
+    if (key === S.twoKey) return;
+    S.twoKey = key; S.two = secs.length ? { pending: secs.length, stations: [] } : null;
+    const done = [];
+    const step = (i) => {
+        if (S.twoKey !== key) return;
+        if (i >= secs.length) { S.two = summarizeTwoThickness(done, !S.trench.along); renderPlates(); return; }
+        const sec = secs[i];
+        done.push({ offsetKm: sec.offsetKm, fit: sec.profile && sec.flexure ? brokenStation(sec.profile, sec.flexure) : null });
+        S.two = { pending: secs.length - done.length, stations: done.slice() };
+        setTimeout(() => step(i + 1), 0);
+    };
+    if (secs.length) setTimeout(() => step(0), 30);
 }
 const compass = (deg) => ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 const WHY = {
@@ -394,6 +413,9 @@ const REASON = {
     'slope-implausible': 'the fit needs a steeper regional slope than a cooling plate has',
     'too-much-masked': 'more than a fifth of the profile would have to be left out as seamounts',
     'not-stable-with-reach': 'the answer changes when the farthest quarter of the profile is left out',
+    'one-thickness-is-enough': 'a single thickness fits as well',
+    'unbent-at-search-floor': 'the unbent plate runs to the thinnest value searched',
+    'break-at-search-bound': 'the break sits at the edge of the range searched',
 };
 function renderPlates() {
     const facts = $('sf-plates-facts'), t = S.trench;
@@ -432,6 +454,25 @@ function renderPlates() {
         rows.push(['Published, near the trench', `${parts.join(' · ')}${lit.inside === true ? ' <small>ours falls within the published range</small>' : lit.inside === false ? ' <small>ours falls outside the published range</small>' : ''}`]);
         if (lit.unbentKm) rows.push(['Published, before it bends', `${lit.unbentKm.min === lit.unbentKm.max ? lit.unbentKm.min : `${lit.unbentKm.min}–${lit.unbentKm.max}`} km <small>Zhang et al. 2018; the plate weakens as it bends</small>`]);
     }
+    // ── the plate with two thicknesses: what the published studies fit, measured here ──
+    const two = S.two && S.two.stations ? S.two : null, here = two ? two.stations.find((o) => o.offsetKm === (st ? st.offsetKm : 0)) : null, bf = here && here.fit;
+    const iv = (a) => a ? (a[3] ? `${Math.round(a[0])} km or more` : `${Math.round(a[0])}–${Math.round(a[1])} km`) : '—';
+    if (s.family === 'subduction' && t.profile) {
+        if (two && two.pending) rows.push(['Weaker near the trench?', `<small>fitting a plate with two thicknesses… ${two.stations.length} of ${two.stations.length + two.pending} sections</small>`]);
+        else if (two && two.fitted) {
+            const head = `a second thickness fits significantly better at <b>${two.needed} of ${two.fitted}</b> ${two.fitted === 1 ? 'section' : 'cross-sections'}; both thicknesses are pinned down at ${two.accepted}`;
+            rows.push(['Weaker near the trench?', two.quotable
+                ? `${head}. <b>${Math.round(two.temKm)} km</b> near the trench <small>(${Math.round(two.temMin)}–${Math.round(two.temMax)} km), for the first ${Math.round(two.xrKm)} km (${Math.round(two.xrMin)}–${Math.round(two.xrMax)}); before it bends ${two.teMKm ? `<b>${Math.round(two.teMKm)} km</b>` : `at least ${Math.round(two.teMLowerMin)}–${Math.round(two.teMLowerMax)} km, by section`}</small>`
+                : `${head} <small>— three are needed to quote the site</small>`]);
+        }
+        if (bf && bf.accepted) {
+            rows.push([st && st.offsetKm ? 'Two thicknesses, this section' : 'Two thicknesses', `<b>${Math.round(bf.temKm)} km</b> for the first ${bf.xrKm} km <small>(${iv(bf.intervals.tem)}; break ${iv(bf.intervals.xr)})</small>, then <b>${bf.teMStatus === 'measured' ? Math.round(bf.teMKm) + ' km' : 'at least ' + Math.round(bf.intervals.teM[0]) + ' km'}</b> <small>${bf.teMStatus === 'measured' ? '(' + iv(bf.intervals.teM) + ')' : 'the data do not close the upper end'}; misfit ${Math.round(bf.uniform.rms)} → ${Math.round(bf.rms)} m</small>`]);
+            const c2 = compareTwoThickness(bf, publishedFor(S.detail.point.lat, S.detail.point.lon, S.custom ? null : S.id));
+            if (c2) { const r = (v) => v.min === v.max ? `${Math.round(v.min)}` : `${Math.round(v.min)}–${Math.round(v.max)}`, mk = (b) => b ? 'inside ours' : '<b>outside ours</b>';
+                rows.push(['Published, two thicknesses', `${r(c2.tem)} km then ${r(c2.teM)} km, break at ${r(c2.xr)} km <small>Zhang et al. 2018 · ${mk(c2.temInside)}, ${mk(c2.teMInside)}, ${mk(c2.xrInside)}</small>`]); }
+        } else if (bf && bf.needed) rows.push([st && st.offsetKm ? 'Two thicknesses, this section' : 'Two thicknesses', `fits better (misfit ${Math.round(bf.uniform.rms)} → ${Math.round(bf.rms)} m) but not quoted <small>${bf.reasons.filter((r) => r !== 'unbent-not-bounded').map((r) => REASON[r] || r).join('; ')}</small>`]);
+        else if (bf) rows.push([st && st.offsetKm ? 'Two thicknesses, this section' : 'Two thicknesses', '<small>one thickness explains this section as well as two</small>']);
+    }
     if (f && f.quality === 'good') {
         rows.push([st && st.offsetKm ? 'Outer rise, this section' : 'Outer rise', `<b>${Math.round(f.wb)} m</b> high, ${Math.round(f.xb)} km seaward of the trench <small>modelled fit</small>`]);
         rows.push(['Regional slope', `${Math.abs(f.slope) < 0.05 ? 'level' : `${Math.abs(f.slope).toFixed(1)} m per km, ${f.slope > 0 ? 'deepening' : 'shoaling'} seaward`} <small>fitted with the rise</small>`]);
@@ -443,13 +484,13 @@ function renderPlates() {
             return `<button type="button" data-station="${o.offsetKm}" class="${g ? 'ok' : ''}" aria-pressed="${o === st}" title="${g ? 'passes every test' : 'rejected'}"><i></i>${o.offsetKm === 0 ? 'here' : (o.offsetKm > 0 ? '+' : '−') + Math.abs(o.offsetKm) + ' km'}${g ? ` · ${Math.round(o.flexure.elastic.teKm)} km` : ''}</button>`; }).join('');
         for (const b of bar.querySelectorAll('button')) b.addEventListener('click', () => { S.station = +b.dataset.station; renderPlates(); });
     }
-    renderFlex(view); renderDeep(t);
+    renderFlex(view, bf); renderDeep(t);
     const notes = [];
     if (s.orogen) notes.push('Bird flags this stretch as lying in a zone of diffuse deformation, where rigid-plate rates are least reliable.');
     if (s.near && s.obliquityDeg > 70 && s.family !== 'sliding') notes.push('The plates here move almost parallel to the boundary: it is mostly sliding, not closing.');
     $('sf-plates-note').innerHTML = notes.join(' ');
 }
-function renderFlex(t) {
+function renderFlex(t, bf = null) {
     const host = $('sf-flex-chart'), f = t.flexure;
     if (!t.profile) { host.innerHTML = `<div class="sf-empty">${WHY[t.why] || 'No bending-plate model here.'}</div>`; return; }
     const pts = t.profile.filter((p) => p.depth != null && p.x >= -30);
@@ -468,6 +509,12 @@ function renderFlex(t) {
         const curve = []; for (let v = 0; v <= xMax; v += 2) curve.push(`${x(v).toFixed(1)},${y(flexureReference(v, f) - flexureHeight(v, f)).toFixed(1)}`);
         svg.appendChild(el('path', { d: 'M' + curve.join('L'), fill: 'none', stroke: 'var(--sf-s2)', 'stroke-width': 2, 'stroke-dasharray': good ? '' : '5 4', 'stroke-opacity': good ? 1 : 0.6 }));
     }
+    if (bf && (bf.accepted || bf.needed)) {
+        const c2 = []; for (let v = 0; v <= Math.min(xMax, bf.reachKm); v += 2) c2.push(`${x(v).toFixed(1)},${y(bf.dRef + bf.slope * v - brokenHeight(bf, v)).toFixed(1)}`);
+        svg.appendChild(el('path', { d: 'M' + c2.join('L'), fill: 'none', stroke: 'var(--sf-s3)', 'stroke-width': 2, 'stroke-dasharray': bf.accepted ? '' : '5 4', 'stroke-opacity': bf.accepted ? 1 : 0.6, class: 'sf-two' }));
+        svg.appendChild(el('line', { x1: x(bf.xrKm), x2: x(bf.xrKm), y1: m.t, y2: H - m.b, stroke: 'var(--sf-s3)', 'stroke-opacity': .5, 'stroke-dasharray': '1 3' }));
+        svg.appendChild(el('text', { x: x(bf.xrKm) + 4, y: H - m.b - 6 }, 'break'));
+    }
     for (const r of (f ? f.masked : [])) svg.appendChild(el('rect', { x: x(r.x0 - 1), y: m.t, width: Math.max(2, x(r.x1 + 1) - x(r.x0 - 1)), height: H - m.t - m.b, fill: '#8f98ad', 'fill-opacity': .16, class: 'sf-masked' }));
     let d = '', pen = false; for (const p of t.profile) { if (p.depth == null || p.x < xMin) { pen = false; continue; } d += `${pen ? 'L' : 'M'}${x(p.x).toFixed(1)},${y(p.depth).toFixed(1)}`; pen = true; }
     svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--sf-s1)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
@@ -479,7 +526,8 @@ function renderFlex(t) {
     const base0 = !f ? esc(WHY[t.why] || '') : good
         ? `The curve fits to <b>${Math.round(f.rms)} m</b>; a straight slope fits to ${Math.round(f.lineRms)} m and a flat floor to ${Math.round(f.flatRms)} m.${f.maskedKm ? ` ${Math.round(f.maskedKm)} km left out as seamounts.` : ''}`
         : `<b>${t.station && t.station.offsetKm ? 'This cross-section is rejected' : 'No stiffness is quoted here'}:</b> ${f.reasons.map((r) => REASON[r] || r).join('; ')}. <small>The dashed curve is the rejected fit.</small>`;
-    const base = base0 + tail;
+    const two = bf && (bf.accepted || bf.needed) ? ` <span>A plate ${Math.round(bf.temKm)} km thick near the trench and ${bf.teMStatus === 'lower-bound' ? 'at least ' + Math.round(bf.intervals.teM[0]) : Math.round(bf.teMKm)} km beyond ${bf.xrKm} km fits to <b>${Math.round(bf.rms)} m</b>${bf.accepted ? '' : ' (not quoted)'}.</span>` : '';
+    const base = base0 + two + tail;
     $('sf-flex-read').innerHTML = base;
     hit.addEventListener('pointermove', (e) => { const r = svg.getBoundingClientRect(), xv = ((e.clientX - r.left) / r.width * W - m.l) / (W - m.l - m.r) * (xMax - xMin) + xMin; let b = pts[0]; for (const p of pts) if (Math.abs(p.x - xv) < Math.abs(b.x - xv)) b = p;
         cross.setAttribute('x1', x(b.x)); cross.setAttribute('x2', x(b.x)); cross.setAttribute('visibility', 'visible');
@@ -487,7 +535,7 @@ function renderFlex(t) {
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); $('sf-flex-read').innerHTML = base; });
     host.appendChild(svg);
     const ln = (c, dash, label) => `<span><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="${c}" stroke-width="2" ${dash ? `stroke-dasharray="${dash}"` : ''}/></svg>${label}</span>`;
-    $('sf-flex-keys').innerHTML = ln('var(--sf-s1)', '', 'Sea floor, median of nine sections') + (f ? ln('var(--sf-s2)', good ? '' : '5 4', good ? 'Elastic-plate model' : 'Elastic-plate fit (rejected)') + ln('#8f98ad', '2 4', 'Undisturbed sea floor in the fit') + (f.masked.length ? '<span><svg width="14" height="10"><rect width="14" height="10" fill="#8f98ad" fill-opacity=".3"/></svg>Left out as seamounts</span>' : '') : '');
+    $('sf-flex-keys').innerHTML = ln('var(--sf-s1)', '', 'Sea floor, median of nine sections') + (f ? ln('var(--sf-s2)', good ? '' : '5 4', good ? 'Elastic-plate model' : 'Elastic-plate fit (rejected)') + ln('#8f98ad', '2 4', 'Undisturbed sea floor in the fit') + (bf && (bf.accepted || bf.needed) ? ln('var(--sf-s3)', bf.accepted ? '' : '5 4', `Two thicknesses${bf.accepted ? '' : ' (not quoted)'}`) : '') + (f.masked.length ? '<span><svg width="14" height="10"><rect width="14" height="10" fill="#8f98ad" fill-opacity=".3"/></svg>Left out as seamounts</span>' : '') : '');
 }
 function renderDeep(t) {
     const host = $('sf-deep-chart'), sl = t.slab;

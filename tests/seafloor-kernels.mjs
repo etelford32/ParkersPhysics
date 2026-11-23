@@ -24,6 +24,7 @@ import * as FD from '../js/seafloor/free-dive.js';
 import { terrariumEncode, tileLatLon, TILE_PX } from '../js/climalytix/terrain.js';
 import * as TM from '../js/seafloor/trench-model.js';
 import * as LIT from '../js/seafloor/trench-literature.js';
+import * as BP from '../js/seafloor/broken-plate.js';
 import { decodePlates } from '../js/earth-interior/plates.js';
 import { decodeSlabs } from '../js/earth-interior/slabs.js';
 
@@ -471,6 +472,51 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
     ok(/closing$/.test(TM.motionLabel(ts).text) && /sliding$/.test(TM.motionLabel(rom.setting).text), 'motion labels');
     ok(model('tonga', { slabs: null }).slab === null && model('tonga', { slabs: null }).flexure !== null, 'no slab model ⇒ no slab, and the bending fit still stands');
     const segs = TM.boundarySegments(plates); ok(segs.length === plates.steps.length && segs.every((g) => TM.FAMILY_STYLE[g.family]), `${segs.length} boundary steps, each in a drawn family`);
+    // ── the two-thickness plate (broken-plate.js): exact solution, planted recovery, real stations ──
+    { const K = TM.ELASTIC, drho = (K.rhoMantle - K.rhoWater) * K.g;
+      // the uniform case IS the closed form e^(−u)(c₁ cos u + c₂ sin u): moment w_uu(0)=1 ⇒ c₂ = −½, c₁ = ½; shear w_uuu(0)=1 ⇒ c₂ = 0, c₁ = ½
+      for (const te of [5, 20, 60]) { const sol = BP.brokenSolution(te, te, 70), a = BP.plateOf(te).alphaKm; let e = 0;
+          for (let x = 0; x <= 600; x += 3) { const u = x / a, [g1, g2] = BP.brokenResponse(sol, x); e = Math.max(e, Math.abs(g1 - Math.exp(-u) * 0.5 * (Math.cos(u) - Math.sin(u))), Math.abs(g2 - Math.exp(-u) * 0.5 * Math.cos(u))); }
+          ok(e < 1e-12, `uniform ${te} km plate: the broken solution IS the closed form (${e.toExponential(1)})`); }
+      near(BP.plateOf(20).alphaKm, TM.elasticFromRise(0, Math.PI / 4 * BP.plateOf(20).alphaKm).alphaKm, 1e-9, 'one rigidity law: plateOf ≡ elasticFromRise inverted');
+      near(TM.elasticFromRise(0, Math.PI / 4 * BP.plateOf(20).alphaKm).teKm, 20, 1e-9, 'and it returns the same thickness');
+      // the six conditions and the plate equation, checked from the analytic derivatives (not from the solve)
+      for (const [m1, M1, r] of [[8, 40, 50], [15, 60, 120], [5, 9, 20]]) { const sol = BP.brokenSolution(m1, M1, r), D1 = BP.plateOf(m1).D, D2 = BP.plateOf(M1).D;
+          for (let j = 0; j < 2; j++) { const d = (x, k) => BP.brokenDerivative(sol, x, k)[j];
+              near(d(0, 2) * sol.a1 ** 2, j === 0 ? 1 : 0, 1e-10, 'axis moment condition'); near(d(0, 3) * sol.a1 ** 3, j === 1 ? 1 : 0, 1e-10, 'axis shear condition');
+              const L = r - 1e-9, R = r + 1e-9, sc = [1, 1 / sol.a1, 1 / sol.a1 ** 2, 1 / sol.a1 ** 3];
+              near(d(L, 0), d(R, 0), 1e-9 * sc[0], 'w continuous at the break'); near(d(L, 1), d(R, 1), 1e-9 * sc[1], 'slope continuous at the break');
+              near(D1 * d(L, 2), D2 * d(R, 2), 1e-8 * D1 * sc[2], 'moment continuous'); near(D1 * d(L, 3), D2 * d(R, 3), 1e-8 * D1 * sc[3], 'shear continuous');
+              for (const x of [0.4 * r, 0.9 * r, r + 30, r + 200]) { const D = x <= r ? D1 : D2, lhs = D * d(x, 4) * 1e-12 + drho * d(x, 0);   // 4th derivative per km⁴ → per m⁴
+                  ok(Math.abs(lhs) <= 1e-9 * drho * Math.max(Math.abs(d(x, 0)), 1e-6 * Math.abs(d(0, 0))), `the plate equation D·w⁗ + Δρ·g·w = 0 holds at ${x} km`); } } }
+      // planted plates on a 2 km lattice with seeded, correlated 'bathymetric' noise
+      const noise = (seed, nn, amp) => { let q = seed >>> 0; const r = () => ((q = (1664525 * q + 1013904223) >>> 0) / 2 ** 32) - 0.5, w = Array.from({ length: nn + 5 }, r); return Array.from({ length: nn }, (_, i) => amp * (w[i] + w[i + 1] + w[i + 2] + w[i + 3] + w[i + 4]) / 1.29); };
+      const planted = (tem, teM, xr) => { const sol = BP.brokenSolution(tem, teM, xr), [m0, v0] = BP.brokenResponse(sol, 0), b2 = 4000 / (1.5 * v0), b1 = 0.5 * b2 * v0 / m0, nz = noise(7, 261, 30);
+          return Array.from({ length: 261 }, (_, i) => ({ x: 2 * i, depth: 5500 + 0.3 * 2 * i - BP.brokenHeight({ sol, b1, b2 }, 2 * i) + nz[i] })); };
+      const has = (iv, v) => iv && v >= iv[0] / BP.GRID.teRatio && v <= iv[1] * BP.GRID.teRatio;   // to within one step of the thickness ladder
+      for (const [m1, M1, r] of [[12, 40, 60], [8, 30, 40]]) { const f = BP.fitBrokenPlate(planted(m1, M1, r)), one = TM.fitFlexure(planted(m1, M1, r), { mask: false });
+          ok(f.needed && f.reasons.length === 0 && has(f.intervals.tem, m1) && has(f.intervals.teM, M1) && f.xrKm === r, `planted ${m1}/${M1} km, break ${r} km: recovered ${f.temKm.toFixed(1)} [${f.intervals.tem.slice(0, 2).map((v) => v.toFixed(0))}] / ${f.teMKm.toFixed(1)} [${f.intervals.teM.slice(0, 2).map((v) => v.toFixed(0))}], break ${f.xrKm}, Δχ² ${f.dChi2.toFixed(0)}`);
+          ok(one.elastic.teKm < M1 / 2, `and one thickness reads that plate as ${one.elastic.teKm.toFixed(1)} km — nearer the weak plate than the strong one`); }
+      { const f = BP.fitBrokenPlate(planted(20, 20, 60)); ok(!f.needed && f.reasons.includes('one-thickness-is-enough') && has(f.intervals.teM, 20) && Math.abs(f.uniform.teKm - 20) < 0.1 * 20, `NEGATIVE CONTROL: a planted uniform 20 km plate needs no second thickness (Δχ² ${f.dChi2.toFixed(1)})`); }
+      { const p = planted(12, 40, 60), lat = BP.fitBrokenPlate(p), off = BP.fitBrokenPlate(p.map((q) => ({ ...q, x: q.x + 1e-4 })));
+        near(lat.ss, off.ss, 1e-3 * lat.ss, 'the lattice tables give the same fit as direct evaluation'); }
+      // REAL stations (MEASURED 2026-11-23): on the same grid the uniform plate reproduces the one-thickness fit,
+      // a second thickness is significantly better at 28 of 72 sections, both thicknesses are pinned at 8.
+      // 'Same' is to within the coarser of the two grids (T_e ∝ (x_b − x₀)^(4/3) on the one-thickness fit's 2 km step).
+      let fitted = 0, needed = 0, accepted = 0, same = 0, oneGood = 0; const quoted = [], acc = [];
+      for (const id of SEAFLOOR_SITES.filter((q) => q.kind === 'trench').map((q) => q.id)) { const t = model(id); if (!t.profile) continue; const two = BP.twoThickness(t);
+          fitted += two.fitted; needed += two.needed; accepted += two.accepted; if (two.quotable) quoted.push(id);
+          for (const sec of t.along.stations) { const st = two.stations.find((o) => o.offsetKm === sec.offsetKm);
+              if (st.fit && sec.flexure && sec.flexure.quality === 'good') { oneGood++; if (Math.abs(st.fit.uniform.rms - sec.flexure.rms) <= 0.02 * sec.flexure.rms && Math.abs(st.fit.uniform.teKm / sec.flexure.elastic.teKm - 1) <= Math.max(BP.GRID.teRatio - 1, (4 / 3) * 2 / (sec.flexure.xb - sec.flexure.x0)) + 0.01) same++; }
+              if (st.fit && st.fit.accepted) acc.push({ id, off: sec.offsetKm, fit: st.fit, c: LIT.compareTwoThickness(st.fit, LIT.publishedFor(sec.lat, sec.lon, id)) }); } }
+      ok(same === oneGood && oneGood >= 20, `the uniform plate on the two-thickness grid IS the one-thickness fit at all ${oneGood} passing sections (misfit within 2 %, thickness within the coarser grid step)`);
+      ok(fitted === 72 && needed === 28 && accepted === 8, `two thicknesses: needed at ${needed} of ${fitted} sections, both pinned at ${accepted} (measured 28 / 72 / 8)`);
+      ok(quoted.join() === 'middle-america', `only Middle America has three accepted sections (${quoted.join(', ')})`);
+      const agree = acc.filter((a) => a.c && a.c.temInside && a.c.teMInside && a.c.xrInside).map((a) => `${a.id}${a.off}`);
+      ok(acc.every((a) => a.c) && agree.join() === 'tonga-80,tonga0,izu-bonin160,middle-america80', `against Zhang et al. 2018 the published T_em, T_eM and break all fall inside ours at ${agree.length} of ${acc.length} accepted sections (${agree.join(', ')}); Kuril, Java and two Middle America sections disagree — recorded`);
+      const bp = rd('js/seafloor/broken-plate.js').toString();
+      ok(!/^import[^\n]*trench-literature/m.test(bp), 'the two-thickness model never reads the literature either');
+      for (const fnc of ['brokenSolution(', 'plateOf(', 'fitBrokenPlate(']) ok(!rd('js/seafloor/page.js').toString().includes(fnc), `page.js never calls ${fnc}`); }
     // the renderers compute none of it
     for (const file of ['js/seafloor/page.js', 'js/seafloor/stage.js', 'js/seafloor/globe.js']) { const src = rd(file).toString();
         for (const fnc of ['flexureShape(', 'elasticFromRise(', 'fitFlexure(', 'velocityIn(', 'slabValueAt(', 'nearestStep(']) ok(!src.includes(fnc), `${file} never calls ${fnc}`); }

@@ -116,3 +116,17 @@ export function compareWithPublished(tm, quoted, published) {
         unbentKm: z ? z.teMKm : null, ageMa: g ? g.ageMa : (z ? z.ageMa.min : null), ageSource: g ? 'garcia' : (z ? 'zhang' : null),
     };
 }
+
+/**
+ * A two-thickness fit (broken-plate.js `brokenStation`) against Zhang et al. 2018's two-thickness rows for the
+ * same trench: is each published value INSIDE our interval for it? T_eM is compared with our interval as far as
+ * it reaches (an open upper end accepts any larger value). Null when there is no published row or no accepted fit.
+ */
+export function compareTwoThickness(fit, published) {
+    const z = published && published.zhang;
+    if (!fit || !fit.accepted || !z) return null;
+    const I = fit.intervals, inside = (iv, r, open) => !!iv && r.max >= iv[0] * (1 - BRACKET_TOLERANCE) && (open && iv[3] ? true : r.min <= iv[1] * (1 + BRACKET_TOLERANCE));
+    const span = (k) => ({ min: Math.min(...z.rows.map((r) => r[k])), max: Math.max(...z.rows.map((r) => r[k])) });
+    const tem = span('temKm'), teM = span('teMKm'), xr = span('xrKm');
+    return { tem, teM, xr, temInside: inside(I.tem, tem, false), teMInside: inside(I.teM, teM, true), xrInside: inside(I.xr, xr, false) };
+}

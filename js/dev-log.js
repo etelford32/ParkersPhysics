@@ -130,6 +130,20 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'sea-floor-two-plates', date: '2026-11-23', pr: null,
+      title: 'Sea Floor: a plate that weakens as it bends', kind: 'simulation',
+      section: 'earth-orbit', icon: 'fluid',
+      summary: 'The trench model now includes the one both published studies use: a plate that is thinner near the trench than beyond it. '
+             + 'The page fits it at every cross-section, says where it is needed, and checks each answer against Zhang and others (2018).',
+      highlights: [
+          'The new plate is solved exactly. With its two thicknesses equal it becomes the earlier single-thickness plate, so the two are compared on the same sea floor.',
+          'A second thickness counts only when it beats one by more than chance. It does at 28 of the 72 cross-sections, and at Tonga it halves the misfit (152 m to 60 m).',
+          'Both thicknesses are pinned down at 8 sections. Beyond the break the data often give only a lower limit, and the page says "at least".',
+          'Middle America is the one trench with three sections that agree well enough to quote: about 16 km near the trench, with a break about 30 km out.',
+          'At 4 of the 8 sections, Zhang and others\' published thicknesses and break distance fall within ours (Tonga twice, Izu–Bonin, Middle America). At the other 4 they do not, and the page says so.',
+          'The bending chart draws the two-thickness plate beside the single-thickness one and marks where the plate breaks.',
+      ],
+      links: [{ href: 'sea-floor.html?site=tonga', label: 'Sea Floor: Tonga Trench' }] },
     { id: 'sea-floor-plates', date: '2026-11-22', pr: null,
       title: 'Sea Floor: the plates behind the trenches', kind: 'simulation',
       section: 'earth-orbit', icon: 'fluid',
