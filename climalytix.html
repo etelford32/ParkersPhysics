@@ -228,7 +228,7 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
 }
 
 /* site bar */
-#cx-site { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; }
+#cx-site { position:relative; z-index:30; grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; }
 #cx-brand { display:flex; flex-direction:column; gap:2px; min-width:160px; }
 #cx-brand b { font-size:1.05rem; letter-spacing:.02em;
     background:linear-gradient(100deg, #e8f1f8 20%, var(--cx-accent) 95%);
@@ -240,15 +240,166 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
 #cx-site-badge { font-size:.6rem; font-weight:800; letter-spacing:.12em; padding:2px 8px; border-radius:6px; }
 #cx-site-badge[data-kind="home"] { background:var(--cx-home); color:#04211a; }
 #cx-site-badge[data-kind="visit"] { border:1px solid var(--cx-caution); color:var(--cx-caution); }
-#cx-search-form { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; align-items:center; }
-#cx-search { background:#050a14; border:1px solid var(--cx-line); color:var(--cx-ink);
-    border-radius:8px; padding:7px 10px; min-width:min(260px, 70vw); font-size:.82rem; }
+#cx-search-form { display:flex; gap:8px; flex:1 1 420px; min-width:0; flex-wrap:wrap; align-items:center; }
+#cx-search-box { position:relative; flex:1 1 260px; min-width:0; }
+#cx-search-icon { position:absolute; left:12px; top:50%; width:18px; height:18px; transform:translateY(-50%);
+    fill:none; stroke:var(--cx-muted); stroke-width:2; stroke-linecap:round; pointer-events:none; }
+#cx-search { width:100%; box-sizing:border-box; background:#050a14; border:1px solid rgba(0,198,255,.35); color:var(--cx-ink);
+    border-radius:10px; padding:11px 40px 11px 38px; font-size:1rem; min-height:44px; }
+#cx-search::placeholder { color:var(--cx-muted); text-overflow:ellipsis; }
+#cx-search { text-overflow:ellipsis; }
+#cx-search:focus { outline:none; border-color:var(--cx-accent); box-shadow:0 0 0 3px rgba(0,198,255,.18); }
+#cx-search::-webkit-search-cancel-button { display:none; }
+#cx-search-key { position:absolute; right:10px; top:50%; transform:translateY(-50%); font:600 .7rem ui-monospace, Menlo, Consolas, monospace;
+    color:var(--cx-muted); border:1px solid var(--cx-line); border-radius:5px; padding:1px 6px; pointer-events:none; }
+#cx-search:focus ~ #cx-search-key { display:none; }
+@media (hover:none) { #cx-search-key { display:none; } }
+#cx-suggest { position:absolute; z-index:40; left:0; right:0; top:calc(100% + 6px); margin:0; padding:5px; list-style:none;
+    background:#07101e; border:1px solid rgba(0,198,255,.35); border-radius:10px; box-shadow:0 14px 38px rgba(0,0,0,.55);
+    max-height:min(60vh, 420px); overflow-y:auto; }
+#cx-suggest[hidden] { display:none; }
+#cx-suggest li { display:grid; grid-template-columns:22px minmax(0, 1fr) auto; gap:2px 8px; align-items:center;
+    padding:8px 9px; border-radius:7px; cursor:pointer; min-height:28px; }
+#cx-suggest li[aria-selected="true"], #cx-suggest li:hover { background:rgba(0,198,255,.14); }
+#cx-suggest .cx-sg-glyph { color:var(--cx-muted); text-align:center; font-size:.82rem; }
+#cx-suggest li[data-kind="home"] .cx-sg-glyph { color:var(--cx-home); }
+#cx-suggest li[data-kind="saved"] .cx-sg-glyph { color:var(--cx-caution); }
+#cx-suggest .cx-sg-name { font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#cx-suggest .cx-sg-name small { color:var(--cx-muted); font-size:.76rem; margin-left:6px; }
+#cx-suggest .cx-sg-kind { font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; color:var(--cx-faint); }
+#cx-suggest .cx-sg-head { display:block; padding:6px 9px 3px; cursor:default; min-height:0; font-size:.62rem; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--cx-faint); }
+#cx-suggest .cx-sg-head:hover { background:none; }
+#cx-search-msg { font-size:.76rem; color:var(--cx-caution); flex:1 1 100%; }
+#cx-search-msg[data-kind="info"] { color:var(--cx-muted); }
+#cx-search-msg:empty { display:none; }
+.cx-btn-primary { background:rgba(0,198,255,.24); border-color:var(--cx-accent); font-weight:700; min-height:44px; padding:6px 16px; }
+#cx-search-form .cx-btn { min-height:44px; }
+#cx-where { flex:1 1 100%; }
+#cx-save-btn[aria-pressed="true"] { color:var(--cx-caution); border-color:var(--cx-caution); background:rgba(255,190,80,.1); }
+#cx-places { flex:1 1 100%; display:flex; flex-wrap:wrap; gap:6px 8px; align-items:center; }
+#cx-places[hidden], #cx-places-gate[hidden] { display:none; }
+#cx-places .cx-pl-h { font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--cx-faint); margin-right:2px; }
+#cx-places .cx-pl-h:not(:first-child) { margin-left:10px; }
+.cx-place { display:inline-flex; align-items:stretch; border:1px solid var(--cx-line); border-radius:999px; overflow:hidden; background:rgba(255,255,255,.03); }
+.cx-place[data-here="1"] { border-color:var(--cx-accent); }
+.cx-place button { background:none; border:0; color:var(--cx-ink); font-size:.78rem; cursor:pointer; padding:5px 4px 5px 11px; min-height:30px;
+    max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cx-place[data-kind="saved"] .cx-pl-go::before { content:"★ "; color:var(--cx-caution); }
+.cx-place .cx-pl-x { color:var(--cx-muted); padding:5px 10px 5px 5px; font-size:.86rem; }
+.cx-place button:hover { background:rgba(0,198,255,.14); }
+.cx-place .cx-pl-x:hover { color:var(--cx-ink); }
+#cx-places-clear { background:none; border:0; color:var(--cx-muted); font-size:.72rem; cursor:pointer; text-decoration:underline; padding:4px; }
+#cx-site-name { font-size:1.4rem; letter-spacing:-.01em; }
+#cx-site-time { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:.78rem; color:var(--cx-muted);
+    border:1px solid var(--cx-line); border-radius:999px; padding:1px 9px; }
+#cx-site-time[hidden] { display:none; }
+#cx-suggest mark { background:none; color:var(--cx-accent); font-weight:700; }
+#cx-suggest .cx-sg-everywhere { text-transform:none; letter-spacing:0; font-size:.76rem; color:var(--cx-muted); white-space:normal; }
+#cx-suggest kbd, #cx-suggest .cx-sg-foot kbd { font:600 .66rem ui-monospace, Menlo, Consolas, monospace; color:var(--cx-ink);
+    border:1px solid var(--cx-line); border-radius:4px; padding:0 5px; margin:0 2px; text-transform:none; }
+#cx-suggest .cx-sg-foot { display:block; min-height:0; padding:7px 9px 4px; margin-top:4px; border-top:1px solid var(--cx-line); border-radius:0;
+    cursor:default; font-size:.66rem; color:var(--cx-faint); }
+#cx-suggest .cx-sg-foot:hover { background:none; }
+@media (hover:none) { #cx-suggest .cx-sg-foot { display:none; } }
+.cx-place-ghost { background:none; border:1px dashed rgba(250,178,25,.55); color:var(--cx-caution); border-radius:999px;
+    font-size:.76rem; padding:5px 12px; min-height:30px; cursor:pointer; }
+.cx-place-ghost:hover { background:rgba(250,178,25,.1); }
+
+.cx-btn-quiet { background:none; border-color:var(--cx-line); color:var(--cx-muted); }
+.cx-btn-quiet:hover { color:var(--cx-ink); }
+#cx-sethome-btn[data-armed] { color:#04211a; background:var(--cx-home); border-color:var(--cx-home); font-weight:700; }
+.cx-place .cx-pl-edit { color:var(--cx-muted); padding:5px 2px 5px 4px; font-size:.78rem; }
+.cx-place .cx-pl-edit:hover { color:var(--cx-ink); }
+.cx-place .cx-pl-name { background:#050a14; border:0; color:var(--cx-ink); font-size:.78rem; padding:5px 11px; min-height:30px; width:150px; outline:none; }
+.cx-place:has(.cx-pl-name) { border-color:var(--cx-accent); }
+#cx-glance { flex:1 1 100%; border-top:1px solid var(--cx-line); padding-top:8px; }
+#cx-glance[hidden] { display:none; }
+#cx-glance summary { cursor:pointer; font-size:.8rem; font-weight:700; color:var(--cx-ink); }
+.cx-gl-n { font-weight:400; color:var(--cx-muted); margin-left:4px; }
+.cx-gl-n::before { content:"· "; }
+.cx-gl-scroll { overflow-x:auto; margin-top:8px; }
+#cx-glance table { border-collapse:collapse; width:100%; min-width:460px; font-size:.8rem; font-variant-numeric:tabular-nums; }
+#cx-glance th, #cx-glance td { text-align:left; padding:6px 10px 6px 0; border-top:1px solid var(--cx-line); white-space:nowrap; }
+#cx-glance thead th { border-top:0; font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--cx-faint); font-weight:600; }
+#cx-glance tbody th { font-weight:400; }
+#cx-glance tr[data-here="1"] th .cx-gl-go { color:var(--cx-accent); font-weight:700; }
+.cx-gl-go { background:none; border:0; color:var(--cx-ink); font:inherit; cursor:pointer; padding:0; text-align:left; }
+.cx-gl-go:hover { text-decoration:underline; }
+.cx-gl-t { font-weight:700; }
+.cx-gl-none { color:var(--cx-caution); white-space:normal !important; }
+.cx-gl-wait { color:var(--cx-faint); }
+#cx-glance-note { margin:8px 0 0; font-size:.68rem; color:var(--cx-faint); }
+#cx-map-pick { position:absolute; left:0; top:0; z-index:6; display:flex; align-items:center; gap:8px; padding:7px 8px 7px 12px; border-radius:10px;
+    background:rgba(6,12,22,.94); border:1px solid rgba(0,198,255,.45); box-shadow:0 10px 28px rgba(0,0,0,.5);
+    font-family:ui-monospace, Menlo, Consolas, monospace; font-size:.74rem; color:var(--cx-ink); white-space:nowrap; }
+#cx-map-pick[hidden] { display:none; }
+#cx-map-pick:not([hidden]) + #cx-map-tip { display:none; }   /* the offer replaces the hover readout */
+#cx-map-pick .cx-btn { font-family:inherit; min-height:34px; padding:4px 12px; }
+
+/* Coast card */
+#cx-coast { grid-column:1 / -1; }
+#cx-coast[hidden] { display:none; }
+#cx-coast h2 .cx-role { margin-left:8px; vertical-align:middle; }
+.cx-co-lead { margin:0 0 6px; font-size:.9rem; line-height:1.5; }
+.cx-co-note { margin:6px 0; font-size:.7rem; color:var(--cx-faint); line-height:1.5; max-width:920px; }
+.cx-co-warn { margin:8px 0; font-size:.8rem; color:var(--cx-caution); }
+.cx-co-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin:12px 0; }
+.cx-co-tile { border:1px solid var(--cx-line); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; background:rgba(255,255,255,.02); }
+.cx-co-tile span { font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--cx-faint); }
+.cx-co-tile b { font-size:1.35rem; font-variant-numeric:tabular-nums; }
+.cx-co-tile small { font-size:.72rem; color:var(--cx-muted); }
+.cx-co-list { margin:8px 0 12px; padding-left:18px; font-size:.84rem; line-height:1.6; color:var(--cx-muted); max-width:920px; }
+.cx-co-list b { color:var(--cx-ink); }
+.cx-co-tide-wrap { border-top:1px solid var(--cx-line); padding-top:10px; margin-top:6px; }
+.cx-co-tide { width:100%; max-width:760px; height:auto; display:block; }
+.cx-co-line { fill:none; stroke:var(--cx-accent); stroke-width:2; stroke-linejoin:round; }
+.cx-co-zero { stroke:var(--cx-line); stroke-dasharray:3 4; }
+.cx-co-now { stroke:var(--cx-caution); stroke-width:1.5; }
+.cx-co-ex circle { fill:var(--cx-ink); }
+.cx-co-ex text { fill:var(--cx-muted); font-size:10px; text-anchor:middle; font-family:ui-monospace, Menlo, Consolas, monospace; }
+
+/* The pitch: one line while there is little to lose, a card once the reader has built something. */
+#cx-places-gate { flex:1 1 100%; margin:0; font-size:.78rem; color:var(--cx-muted); }
+#cx-places-gate a { color:var(--cx-accent); }
+#cx-places-gate[data-tone="warn"] { color:var(--cx-caution); }
+.cx-pitch-link { background:none; border:0; padding:0; color:var(--cx-caution); font:inherit; font-weight:700; cursor:pointer;
+    text-decoration:underline; text-underline-offset:2px; }
+.cx-pitch-alt { color:var(--cx-faint); }
+#cx-places-gate[data-kind="card"] { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:12px 16px; align-items:center;
+    padding:14px 16px; border-radius:12px; color:var(--cx-ink);
+    border:1px solid rgba(250,178,25,.45);
+    background:linear-gradient(100deg, rgba(250,178,25,.13), rgba(0,198,255,.07) 70%); }
+#cx-places-gate[data-kind="card"][data-tone="good"] { border-color:rgba(95,255,208,.45);
+    background:linear-gradient(100deg, rgba(95,255,208,.12), rgba(0,198,255,.06) 70%); }
+#cx-places-gate[data-kind="card"][hidden] { display:none; }
+.cx-pitch-mark { width:38px; height:38px; border-radius:50%; display:grid; place-items:center; font-size:1.1rem;
+    color:#201400; background:var(--cx-caution); }
+[data-tone="good"] > .cx-pitch-mark, [data-tone="info"] > .cx-pitch-mark { background:var(--cx-home); color:#04211a; }
+.cx-pitch-text { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.cx-pitch-text strong { font-size:1rem; }
+.cx-pitch-text > span { font-size:.82rem; color:var(--cx-muted); line-height:1.45; }
+.cx-pitch-acts { display:flex; flex-direction:column; gap:6px; align-items:stretch; text-align:center; }
+.cx-pitch-cta { background:var(--cx-caution); color:#201400; border:0; border-radius:10px; font-weight:800; font-size:.86rem;
+    padding:0 18px; min-height:44px; cursor:pointer; white-space:nowrap; }
+.cx-pitch-cta:hover { filter:brightness(1.08); }
+.cx-pitch-cta:focus-visible, .cx-pitch-no:focus-visible, .cx-place-ghost:focus-visible, .cx-pitch-link:focus-visible { outline:2px solid var(--cx-accent); outline-offset:2px; }
+.cx-pitch-no { background:none; border:1px solid var(--cx-line); color:var(--cx-muted); border-radius:10px; font-size:.78rem; min-height:34px; padding:0 14px; cursor:pointer; }
+.cx-pitch-no:hover { color:var(--cx-ink); }
+.cx-pitch-acts .cx-pitch-alt { font-size:.7rem; }
+@media (max-width: 768px) {
+    #cx-places-gate[data-kind="card"] { grid-template-columns:auto minmax(0, 1fr); }
+    .cx-pitch-acts { grid-column:1 / -1; }
+}
+@media (max-width: 768px) {
+    #cx-search-form { flex-basis:100%; }
+    #cx-search-box { flex-basis:100%; }
+    #cx-search-form .cx-btn { flex:1 1 0; }
+}
 .cx-btn { background:rgba(0,198,255,.08); border:1px solid rgba(0,198,255,.35); color:var(--cx-ink);
     border-radius:8px; padding:6px 11px; font-size:.78rem; cursor:pointer; min-height:34px; }
 .cx-btn:hover { background:rgba(0,198,255,.16); }
 .cx-btn[aria-pressed="true"] { background:rgba(0,198,255,.28); border-color:var(--cx-accent); }
-#cx-search-msg { font-size:.72rem; color:var(--cx-caution); width:100%; text-align:right; }
-#cx-search-msg:empty { display:none; }
 
 /* catalogue */
 #cx-catalog { align-self:start; }
@@ -339,17 +490,41 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
 
   <section id="cx-site" class="cx-card" aria-label="Site">
     <div id="cx-brand"><b>CLIMALYTIX</b><span>One site · every dataset · one clock</span></div>
+    <form id="cx-search-form" role="search" autocomplete="off">
+      <div id="cx-search-box">
+        <svg id="cx-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>
+        <input id="cx-search" type="search" role="combobox" aria-expanded="false" aria-controls="cx-suggest" aria-autocomplete="list"
+               placeholder="Search any place — city, zip code, address or coordinates" aria-label="Search for a place to analyse"
+               autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+        <kbd id="cx-search-key" aria-hidden="true" title="Press / to search">/</kbd>
+        <ul id="cx-suggest" role="listbox" aria-label="Places" hidden></ul>
+      </div>
+      <button type="submit" class="cx-btn cx-btn-primary">Analyse</button>
+      <button type="button" id="cx-locate" class="cx-btn" title="Analyse where you are now (asks your browser for your position)">◎ <span>My location</span></button>
+      <span id="cx-search-msg" role="status"></span>
+    </form>
     <div id="cx-where">
       <span id="cx-site-badge" hidden></span>
       <span id="cx-site-name">Locating…</span>
       <span id="cx-site-coords"></span>
+      <span id="cx-site-time" hidden></span>
+      <button type="button" id="cx-save-btn" class="cx-btn" aria-pressed="false" hidden>☆ Save place</button>
       <button type="button" id="cx-home-btn" class="cx-btn" hidden>Return home</button>
+      <button type="button" id="cx-sethome-btn" class="cx-btn cx-btn-quiet" hidden>⌂ Make home</button>
+      <button type="button" id="cx-share-btn" class="cx-btn cx-btn-quiet" title="Copy a link that opens Climalytix at this place" hidden>Copy link</button>
     </div>
-    <form id="cx-search-form" role="search">
-      <input id="cx-search" type="search" placeholder="City, zip code or address…" aria-label="Analyse another site" autocomplete="off">
-      <button type="submit" class="cx-btn">Analyse</button>
-      <span id="cx-search-msg" role="status"></span>
-    </form>
+    <div id="cx-places" aria-label="Your places" hidden></div>
+    <div id="cx-places-gate" hidden></div>
+    <details id="cx-glance" hidden>
+      <summary>Your places right now <span id="cx-glance-n" class="cx-gl-n"></span></summary>
+      <div class="cx-gl-scroll">
+        <table>
+          <thead><tr><th scope="col">Place</th><th scope="col">Now</th><th scope="col">Next 24 h</th><th scope="col">Wind</th><th scope="col">Precip</th></tr></thead>
+          <tbody id="cx-glance-body"></tbody>
+        </table>
+      </div>
+      <p id="cx-glance-note"></p>
+    </details>
   </section>
 
   <section id="cx-map" class="cx-card" aria-label="Location map">
@@ -491,6 +666,11 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
       <canvas id="cx-map-flow" aria-hidden="true"></canvas>
       <div id="cx-map-notice" role="status" hidden><span></span><button type="button" class="cx-btn cx-retry" hidden>Retry</button></div>
       <div id="cx-map-key" hidden><div class="cx-mk-title"></div><div class="cx-mk-body"></div></div>
+      <div id="cx-map-pick" role="dialog" aria-label="Analyse this point" hidden>
+        <span data-pick-where></span>
+        <button type="button" class="cx-btn cx-btn-primary" data-pick="go">Analyse here</button>
+        <button type="button" class="cx-btn" data-pick="no" aria-label="Dismiss">×</button>
+      </div>
       <div id="cx-map-tip" hidden></div>
       <div id="cx-map-scale"><i></i><span></span></div>
       <div id="cx-map-ctl" aria-label="Map controls">
@@ -514,6 +694,11 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
     <h2>Datasets</h2>
     <div id="cx-catalog-list"></div>
   </aside>
+
+  <section id="cx-coast" class="cx-card" aria-label="Coast" hidden>
+    <h2>Coast <span class="cx-role" data-role="bootstrap" title="Sea state from a bootstrap source until the Climalytix data engine serves it">Bootstrap</span></h2>
+    <div id="cx-coast-body"></div>
+  </section>
 
   <section id="cx-explore" class="cx-card" aria-label="Explore">
     <h2>Explore</h2>

@@ -113,8 +113,18 @@ function composeDoc(page) {
  * @param {(doc:object) => void} o.applyDoc   land a newer remote doc locally (no reload here — the page re-applies)
  * @param {string} [o.saveEvent] window event that queues a push
  * @param {number} [o.version]
+ * @param {boolean} [o.requireTier=true]  false = ACCOUNT data, synced for every
+ *        signed-in user (the Home-location precedent: not plan-gated). The
+ *        Basic+ line (decision #2) is about personalisation bundles; only the
+ *        Climalytix places document (js/climalytix/places-store.js) opts out.
+ * @param {(remoteDoc:object|null) => boolean} [o.reconcile]  MERGE instead of
+ *        last-write-wins: called on every pull with the remote doc (null when
+ *        there is no row yet); it lands whatever it wants locally and returns
+ *        true when the result must be pushed back. `applyDoc` is not used then.
+ * @param {(sync:object) => void} [o.onState]  called after each pull / push settles
  */
-export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = 'default', version = 1 } = {}) {
+export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = 'default', version = 1,
+    requireTier = true, reconcile = null, onState = null } = {}) {
     if (typeof window === 'undefined' || !page) return null;
     const sync = { state: 'off', lastError: null, push, pull };
     try {
@@ -122,7 +132,7 @@ export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = '
         const acct = readJson('pp_auth') ||
             (() => { try { return JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch { return null; } })();
         if (!acct?.signedIn) { sync.state = 'off:signed-out'; return sync; }
-        if (!tierAllowsSync(acct.plan, acct.role)) { sync.state = 'off:tier'; return sync; }
+        if (requireTier && !tierAllowsSync(acct.plan, acct.role)) { sync.state = 'off:tier'; return sync; }
         const token = sessionToken();
         if (!token) { sync.state = 'off:no-session'; return sync; }
         sync.userId = acct.id;
@@ -149,6 +159,10 @@ export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = '
             const rows = await res.json();
             const row = Array.isArray(rows) ? rows[0] : null;
             sync.state = 'synced';
+            if (reconcile) {
+                if (reconcile(row?.doc ?? null)) await push();
+                return;
+            }
             if (!row) return;
             if (pickNewer(readJson(metaKey(page)), row) !== 'remote') return;
             applyDoc(row.doc || null);
@@ -156,6 +170,8 @@ export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = '
         } catch (e) {
             sync.state = 'error';
             sync.lastError = String(e?.message ?? e);
+        } finally {
+            try { onState?.(sync); } catch {}
         }
     }
 
@@ -175,6 +191,8 @@ export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = '
         } catch (e) {
             sync.state = 'error';
             sync.lastError = String(e?.message ?? e);
+        } finally {
+            try { onState?.(sync); } catch {}
         }
     }
 }
@@ -188,7 +206,7 @@ export function initDashboardSync({ page = 'space-weather', name = 'default' } =
         const acct = readJson('pp_auth') ||
             (() => { try { return JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch { return null; } })();
         if (!acct?.signedIn) { sync.state = 'off:signed-out'; return sync; }
-        if (!tierAllowsSync(acct.plan, acct.role)) { sync.state = 'off:tier'; return sync; }
+        if (requireTier && !tierAllowsSync(acct.plan, acct.role)) { sync.state = 'off:tier'; return sync; }
         const token = sessionToken();
         if (!token) { sync.state = 'off:no-session'; return sync; }
         sync.userId = acct.id;
