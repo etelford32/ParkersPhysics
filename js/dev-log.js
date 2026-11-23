@@ -130,6 +130,21 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'climalytix-places-coast', date: '2026-11-23', pr: 1088,
+      title: 'Climalytix: search any place, keep your places, and read its coast', kind: 'layer',
+      section: 'research', icon: 'horizon',
+      summary: 'Climalytix now starts from a search box that takes a place name or coordinates, remembers where you '
+             + 'have looked, and keeps saved places in a free account. For a site near the sea a new Coast card '
+             + 'describes the shoreline, the waves and how they break, the tide and the sea temperature.',
+      highlights: [
+          'Search suggests your Home, saved places, recent places and major cities as you type; a name is looked up only when you press Analyse, and other matches are offered if the first is not the one you meant.',
+          'Signed out, your history lasts for the tab. Sign up (free) and the places you already collected come with you, on every device.',
+          'Click the map to move the analysis there — it asks first. Saved places can be renamed, shared as a link, or made your Home.',
+          '"Your places right now" lists temperature and wind at Home and each saved place from our own forecast archive; if the archive is down it says so and shows no number.',
+          'Coast: where the nearest water is and which way the shore faces come from elevation data; wave shoaling is linear wave theory; breaker type and run-up are quoted as a range because no data set here knows a beach\'s slope.',
+          'The sea state is a wave-model cell offshore and the tide is a sea-level model, not a gauge — both are labelled. It is not a swim-safety forecast.',
+      ],
+      links: [{ href: 'climalytix.html' }] },
     { id: 'bz-column', date: '2026-11-20', pr: 1085,
       title: 'Bz Column: the Sun\'s north–south field followed from L1 to the ground', kind: 'simulation',
       section: 'space-weather', icon: 'magnet',

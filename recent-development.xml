@@ -11,12 +11,22 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Fri, 20 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Mon, 23 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Climalytix: search any place, keep your places, and read its coast</title>
+      <link>https://parkersphysics.com/recent-development.html#climalytix-places-coast</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#climalytix-places-coast</guid>
+      <pubDate>Mon, 23 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New layer / feature</category>
+      <category>Research</category>
+      <description>&lt;p&gt;Climalytix now starts from a search box that takes a place name or coordinates, remembers where you have looked, and keeps saved places in a free account. For a site near the sea a new Coast card describes the shoreline, the waves and how they break, the tide and the sea temperature.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Search suggests your Home, saved places, recent places and major cities as you type; a name is looked up only when you press Analyse, and other matches are offered if the first is not the one you meant.&lt;/li&gt;&lt;li&gt;Signed out, your history lasts for the tab. Sign up (free) and the places you already collected come with you, on every device.&lt;/li&gt;&lt;li&gt;Click the map to move the analysis there — it asks first. Saved places can be renamed, shared as a link, or made your Home.&lt;/li&gt;&lt;li&gt;&amp;quot;Your places right now&amp;quot; lists temperature and wind at Home and each saved place from our own forecast archive; if the archive is down it says so and shows no number.&lt;/li&gt;&lt;li&gt;Coast: where the nearest water is and which way the shore faces come from elevation data; wave shoaling is linear wave theory; breaker type and run-up are quoted as a range because no data set here knows a beach&amp;#39;s slope.&lt;/li&gt;&lt;li&gt;The sea state is a wave-model cell offshore and the tide is a sea-level model, not a gauge — both are labelled. It is not a swim-safety forecast.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/climalytix.html&quot;&gt;Open Climalytix&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>Bz Column: the Sun&#39;s north–south field followed from L1 to the ground</title>
