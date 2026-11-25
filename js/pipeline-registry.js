@@ -353,6 +353,16 @@ export const PIPELINES = [
       warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
       notes: 'Per-site, 12 h edge cache. BOOTSTRAP source (non-commercial free tier) until the CLIMALYTIX_PLAN.md §17 data engine serves sites. Upstream failure is 200 + freshness:expired + reasons, never a 5xx.' },
 
+    { id: 'climalytix-marine', label: 'Climalytix marine (waves, sea temperature, sea level)',
+      endpoint: '/api/climalytix/marine',
+      // Requires ?lat&lon — a bare probe 400s by design. Santa Cruz, CA: a site with sea beside it.
+      probePath: '/api/climalytix/marine?lat=36.95&lon=-122.05',
+      probeTimeoutMs: 20_000,
+      category: 'weather', upstream: 'Open-Meteo Marine (wave + sea-level models) — bootstrap',
+      cadence_s: 1800, prewarm: null,
+      warnAgeS:  6 * 3600, critAgeS: 24 * 3600,
+      notes: 'Per-site, 30 min edge cache. BOOTSTRAP source (non-commercial free tier). Model output for the nearest sea cell — not a beach measurement, not a tide gauge. Upstream variable names are unverified: the body self-reports field_map / missing and a refused request is retried core-only. No sea here / upstream failure is 200 + freshness:expired + reasons, never a 5xx.' },
+
     { id: 'climalytix-nwp', label: 'Climalytix GFS archive (our data engine)',
       endpoint: '/api/climalytix/nwp',
       // Requires ?lat&lon. Two R2 range reads per site; the body's
