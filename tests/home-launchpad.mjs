@@ -186,36 +186,45 @@ section('index.html mounts the launchpad and no longer boots the live hero; live
 // ── 7. the title experiment ─────────────────────────────────────────────────
 // experiments.js imports browser-only modules, so its registry is read as text.
 const T = await import(path.join(ROOT, 'js/home-title-variants.js'));
-section('home_title: registry ≡ copy module, control ≡ the static markup', () => {
+section('home_title_v2: registry ≡ copy module, control ≡ the static markup', () => {
     const exp = readFileSync(path.join(ROOT, 'js/experiments.js'), 'utf8');
-    const block = exp.match(/\n    home_title: \{\s*status: '(\w+)',\s*variants: \[([\s\S]*?)\]/);
-    if (!block) return fail('js/experiments.js has no home_title experiment');
-    if (block[1] !== 'running') fail(`home_title is ${block[1]} — index.html still assigns it`);
+    if (T.TITLE_EXPERIMENT !== 'home_title_v2') fail(`copy module names ${T.TITLE_EXPERIMENT}, the gate expects home_title_v2`);
+    const block = exp.match(/\n    home_title_v2: \{\s*status: '(\w+)',\s*variants: \[([\s\S]*?)\]/);
+    if (!block) return fail('js/experiments.js has no home_title_v2 experiment');
+    if (block[1] !== 'running') fail(`home_title_v2 is ${block[1]} — index.html still assigns it`);
+    // The retired v1 copy must never be assigned again (its exposures were for other lines).
+    const v1 = exp.match(/\n    home_title: \{\s*status: '(\w+)'/);
+    if (!v1 || v1[1] !== 'paused') fail('home_title (v1) must stay in the registry, PAUSED, for admin history');
     const ids = [...block[2].matchAll(/id: '([\w-]+)'/g)].map((m) => m[1]);
     if (ids[0] !== 'control') fail('the first variant must be control (paused experiments serve the first)');
     if (ids.join() !== Object.keys(T.TITLE_VARIANTS).join()) fail(`registry variants [${ids}] ≠ copy module [${Object.keys(T.TITLE_VARIANTS)}]`);
-    if (!/\n    home_title: \[/.test(exp)) fail('home_title has no EXPERIMENT_GOALS entry (admin charts nothing)');
+    if (!/\n    home_title_v2: \[/.test(exp)) fail('home_title_v2 has no EXPERIMENT_GOALS entry (admin charts nothing)');
     const strip = (x) => x.replace(/<[^>]+>/g, '');
     const h1 = html.match(/<h1 class="hero-h1" data-lp-title>([\s\S]*?)<\/h1>/);
     const sub = html.match(/<p class="hero-sub" data-lp-sub>([\s\S]*?)<\/p>/);
-    const c = T.titleFor('control', 64);
+    const c = T.titleFor('control', NaN);     // the static markup cannot know the count
     if (!h1 || decode(strip(h1[1])) !== `${c.a} ${c.b}`) fail('static <h1> is not the control variant');
     if (!sub || decode(sub[1]) !== c.sub) fail('static sub line is not the control variant');
-    if (`${c.a} ${c.b}` !== 'Watch space weather happen. Live.') fail('control must stay the 2026-07 experiment winner');
+    for (const v of Object.values(T.TITLE_VARIANTS)) {
+        if (/space weather happen|cosmic web|working universe/i.test(v.a + v.b)) fail('a retired v1 headline came back');
+    }
     for (const [id, v] of Object.entries(T.TITLE_VARIANTS)) {
         if (!v.a || !v.b || !v.sub) fail(`${id}: a / b / sub are all required`);
         if (/\bAI\b|AI-powered/i.test(v.a + v.b + v.sub)) fail(`${id}: no AI-powered framing (CLAUDE.md §7)`);
         if (v.b.length > 22) fail(`${id}: the accent line is the punch — keep it short`);
     }
     if (T.titleFor('nope', 64).a !== c.a) fail('an unknown variant must fall back to control');
-    if (!T.titleFor('scale', 64).sub.includes('64 physics')) fail('{n} is not replaced by the count');
-    if (/\{n\}/.test(T.titleFor('scale', NaN).sub)) fail('{n} survives a missing count');
+    for (const id of Object.keys(T.TITLE_VARIANTS)) {
+        if (!T.TITLE_VARIANTS[id].sub.includes('{n}')) fail(`${id}: the sub must carry the live count {n}`);
+        if (!T.titleFor(id, 64).sub.includes('64 ')) fail(`${id}: {n} is not replaced by the count`);
+        if (/\{n\}/.test(T.titleFor(id, NaN).sub)) fail(`${id}: {n} survives a missing count`);
+    }
     if (!/experiments\.assign\(TITLE_EXPERIMENT\)/.test(html)) fail('index.html does not assign the title experiment');
     if (!/lp-title-pending/.test(html)) fail('index.html lost the title-pending guard (challenger arms would flash control)');
 });
 
 // ── 8. the stats strip and the sign-up button ───────────────────────────────
-section('stats are derived; the Google sign-up sits above the dashboard CTA', () => {
+section('stats are derived; the Google sign-up sits above the try-it-free CTA', () => {
     const st = M.launchpadStats();
     if (st.simulations !== SIMULATIONS.length || st.sections !== SITE_SECTIONS.length) fail('stats do not read the catalogue');
     const newest = [...DEV_LOG].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
@@ -226,9 +235,16 @@ section('stats are derived; the Google sign-up sits above the dashboard CTA', ()
     if (win.recent !== brute.length) fail(`recent ${win.recent} ≠ brute-force ${brute.length}`);
     if (win.recentNew !== brute.filter((e) => e.kind === 'simulation').length) fail('recentNew miscounts');
     if (M.launchpadStats({ nowMs: t + 400 * 86400000 }).recent !== 0) fail('a stale log must count 0 recent, not its whole history');
-    const g = html.indexOf('id="lp-signup-google"'), d = html.indexOf('data-funnel-cta="hero_magnetosphere"');
+    const g = html.indexOf('id="lp-signup-google"'), d = html.indexOf('data-funnel-cta="launchpad_try_mars"');
     if (g < 0) fail('no Google sign-up button');
-    if (d < 0) fail('the dashboard CTA lost its funnel id');
+    if (d < 0) fail('the try-it-free CTA lost its funnel id');
+    // ONE ASK: the second button must open a simulation a visitor can use
+    // WITHOUT an account — never a sign-in-gated page.
+    const href = (html.slice(html.lastIndexOf('<a ', d), d).match(/href="([^"]+)"/) || [])[1];
+    const sim = SIMULATIONS.find((x) => x.href === href);
+    if (!sim || sim.tier !== 'public') fail(`the second hero button opens ${href} — it must be a PUBLIC simulation`);
+    if (/data-funnel-cta="hero_magnetosphere"/.test(html)) fail('the sign-in-gated dashboard CTA came back');
+    if (!/id="rail-signup-google"/.test(html) || /data-rail-alerts/.test(html)) fail('the scroll rail must ask for the same Google sign-up, not a second (alerts) ask');
     if (g > d) fail('the sign-up button must come BEFORE (above) the dashboard CTA');
     if (!/id="lp-signup-google" data-funnel-cta="launchpad_signup_google"/.test(html)) fail('sign-up funnel id');
     if (!/href="signup\.html" data-funnel-cta="launchpad_signup_email"/.test(html)) fail('no email alternative beside the Google button');

@@ -827,17 +827,17 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
                     tests/home-launchpad.mjs pins it to FIXTURE_IDS, the
                     catalogue titles/hrefs and the model's copy.
        • THE LOG  — newest entries → recent-development.html, + the hubs.
-     The H1 is the 2026-07 home_headline experiment WINNER — do not reword it
-     without a new experiment. The dashboard CTA keeps its funnel id
-     (hero_magnetosphere) so the before/after series stays continuous. -->
+     The H1 is the home_title_v2 experiment's control (js/home-title-variants.js)
+     — reword it only through a new experiment. The ask group is ONE ask
+     (Google sign-up) plus one free simulation; see the note on it below. -->
 <section id="hero" class="lp" aria-label="Newest simulations and the real-time worlds">
   <div class="lp-inner">
     <div class="lp-head" data-signup-scope>
       <div class="lp-head-copy">
         <div class="hero-badge" role="status">Live NASA &amp; NOAA data · updated every 60 seconds</div>
-        <h1 class="hero-h1" data-lp-title><span class="lp-t1" data-lp-t1>Watch space weather happen.</span> <span class="lp-t2" data-lp-t2>Live.</span></h1>
+        <h1 class="hero-h1" data-lp-title><span class="lp-t1" data-lp-t1>Explore the universe</span> <span class="lp-t2" data-lp-t2>as it is right now.</span></h1>
         <script>
-        /* Hold the title transparent until the home_title variant is applied
+        /* Hold the title transparent until the home_title_v2 variant is applied
            (the module below), so a challenger arm never flashes the control
            copy. 900 ms backstop: a module that never arrives shows control. */
         (function () {
@@ -846,23 +846,28 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
           setTimeout(function () { h.classList.remove('lp-title-pending'); }, 900);
         })();
         </script>
-        <p class="hero-sub" data-lp-sub>Fly down to Mars, follow a solar storm to Earth, scrub tomorrow’s weather on a live globe — <em>real NASA and NOAA data, free to explore</em>.</p>
+        <p class="hero-sub" data-lp-sub>Fly over Mars, watch today’s Sun erupt, follow a solar storm out to Earth — <em>dozens of simulations running on live NASA and NOAA data</em>. Free, in your browser.</p>
         <dl class="lp-stats" data-lp-stats hidden></dl>
       </div>
       <!-- THE ASK (2026-11-22, owner request): one-tap sign-up ABOVE the
-           dashboard. The Google button creates the account through the same
+           second button. ONE ASK (2026-11-25, owner-agreed): the second
+           button no longer sends a first-time visitor to the sign-in-gated
+           dashboard (space-weather.html) — it opens a free simulation
+           (Real-Time Mars, public tier) so "try before you sign up" is one
+           click. New funnel id launchpad_try_mars; hero_magnetosphere is
+           retired with the link it measured. The scroll rail asks for the
+           SAME Google sign-up (rail_signup_google) instead of aurora email. The Google button creates the account through the same
            OAuth call signup.html makes (js/home-google-signup.js — read its
            header for why this is not js/oauth-buttons.js, and for the ONE ASK
            history it deliberately overrides). Hidden when signed in, with
-           everything marked data-signup-only. The dashboard CTA keeps its
-           funnel id (hero_magnetosphere) so the series stays continuous. -->
+           everything marked data-signup-only. -->
       <div class="hero-cta lp-cta" role="group" aria-label="Primary actions">
         <button type="button" class="lp-google" id="lp-signup-google" data-funnel-cta="launchpad_signup_google">
           <svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.616z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/><path d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
           <span data-label>Sign up with Google</span>
           <small>Free account · one tap · no password</small>
         </button>
-        <a href="space-weather.html" class="btn-secondary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard <span aria-hidden="true">→</span></a>
+        <a href="mars.html" class="btn-secondary" data-funnel-cta="launchpad_try_mars" aria-label="Fly to Mars now, no account needed">Fly to Mars now — no account needed <span aria-hidden="true">→</span></a>
         <p class="hero-cta-note"><span data-signup-only>No credit card. Saves your location, alerts and layouts. <a href="signup.html" data-funnel-cta="launchpad_signup_email">Use email instead</a></span></p>
       </div>
     </div>
@@ -934,7 +939,7 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
   </div>
 </section>
 <script type="module">
-  // The title first: the home_title experiment (js/experiments.js) picks the
+  // The title first: the home_title_v2 experiment (js/experiments.js) picks the
   // headline + sub; control is the static markup. Then the launchpad itself —
   // the permanent tiles and every link above already work without it.
   import { experiments } from './js/experiments.js';
@@ -945,11 +950,11 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
     const variant = experiments.assign(TITLE_EXPERIMENT);
     const t = titleFor(variant, SIM_COUNT);
     root.dataset.titleVariant = variant;
-    if (variant !== 'control') {
-      root.querySelector('[data-lp-t1]').textContent = t.a;
-      root.querySelector('[data-lp-t2]').textContent = t.b;
-      root.querySelector('[data-lp-sub]').innerHTML = t.sub;     // our own constant copy
-    }
+    // Every arm is applied — control too, because its sub carries the live
+    // simulation count ({n}), which the static markup cannot know.
+    root.querySelector('[data-lp-t1]').textContent = t.a;
+    root.querySelector('[data-lp-t2]').textContent = t.b;
+    root.querySelector('[data-lp-sub]').innerHTML = t.sub;     // our own constant copy
   } catch (err) { console.warn('[home] title experiment failed; showing control:', err); }
   root.classList.remove('lp-title-pending');
 
@@ -1378,15 +1383,17 @@ window.addEventListener('message', (e) => {
 </main>
 
 <!-- ── CTA RAIL — follows the visitor once the hero scrolls away ───────────
-     Two doors, both already on the page: free alerts (scrolls to the S5
-     band and focuses its email field) and the free account. Hidden for
+     ONE ask (2026-11-25): the same one-tap Google sign-up as the hero
+     (js/home-google-signup.js, source 'home_rail'), with email as the
+     fallback link. It used to lead with aurora email alerts — a second,
+     competing ask; the S5 band below still offers those in place. Hidden for
      signed-in visitors (pp_auth mirror, same read as the console chip) and
      after a dismiss for the rest of the tab. Its links carry
      data-funnel-cta, so the delegated listener counts them. -->
-<div id="cta-rail" role="complementary" aria-label="Get alerts or create a free account" hidden>
-  <span class="rail-copy"><b>Never miss an aurora.</b> Free alerts for your sky.</span>
-  <a href="#aurora" class="btn-primary rail-btn" data-funnel-cta="rail_alerts" data-rail-alerts>Get free alerts</a>
-  <a href="signup.html?plan=free" class="rail-link" data-funnel-cta="rail_signup">or create a free account →</a>
+<div id="cta-rail" role="complementary" aria-label="Create a free account" hidden>
+  <span class="rail-copy"><b>Free account.</b> Saves your places, alerts and layouts.</span>
+  <button type="button" class="btn-primary rail-btn" id="rail-signup-google" data-funnel-cta="rail_signup_google"><span data-label>Sign up with Google</span></button>
+  <a href="signup.html?plan=free" class="rail-link" data-funnel-cta="rail_signup">or use email →</a>
   <button type="button" class="rail-x" aria-label="Dismiss" data-rail-dismiss>×</button>
 </div>
 <script>
@@ -1428,13 +1435,10 @@ window.addEventListener('message', (e) => {
     rail.classList.remove('on');
     setTimeout(() => { rail.hidden = true; }, 350);
   });
-  rail.querySelector('[data-rail-alerts]').addEventListener('click', () => {
-    // Land the visitor IN the field, not just near it.
-    setTimeout(() => {
-      const input = document.querySelector('#aurora [data-aurora-capture] input[type="email"]');
-      if (input) input.focus({ preventScroll: true });
-    }, 450);
-  });
+  const railBtn = document.getElementById('rail-signup-google');
+  import('./js/home-google-signup.js')
+    .then((m) => m.mountGoogleSignup(railBtn, { source: 'home_rail' }))
+    .catch(() => railBtn.addEventListener('click', () => { location.href = 'signup.html?from=home_rail'; }));
   // Signing in mid-session (nav re-renders on auth-changed) retires the rail.
   window.addEventListener('auth-changed', () => {
     try {

@@ -174,8 +174,11 @@ test.describe('auth funnel', () => {
         await page.route('**/api/subscribe/aurora', (route) =>
             route.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
         await page.goto('/index.html', { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('#hero [data-funnel-cta]')).toHaveCount(1);
-        await expect(page.locator('#hero [data-funnel-cta]')).toHaveAttribute('data-funnel-cta', 'hero_magnetosphere');
+        // 2026-11-25: the hero's ask group is the Google sign-up (+ its email
+        // link) and one free simulation — no sign-in-gated dashboard.
+        await expect(page.locator('#hero .lp-cta [data-funnel-cta="launchpad_signup_google"]')).toHaveCount(1);
+        await expect(page.locator('#hero .lp-cta [data-funnel-cta="launchpad_try_mars"]')).toHaveCount(1);
+        await expect(page.locator('#hero [data-funnel-cta="hero_magnetosphere"]')).toHaveCount(0);
         await expect(page.locator('form[data-source="home-hero"]')).toHaveCount(0);
         const form = page.locator('form[data-source="home"]');
         await form.scrollIntoViewIfNeeded();

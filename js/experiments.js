@@ -114,8 +114,9 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'carousel', w: 50 },
         ],
     },
-    // Homepage launchpad TITLE (index.html #hero h1 + sub). RUNNING since
-    // 2026-11-22, owner request: the first screen became a simulation
+    // Homepage launchpad TITLE (index.html #hero h1 + sub). PAUSED 2026-11-25 (ran 2026-11-22 →
+    // 2026-11-25, unconcluded — owner retired all three lines; see
+    // home_title_v2), owner request: the first screen became a simulation
     // launchpad but kept the 2026-07 winner "Watch space weather happen.
     // Live." — which is also the <title>, the footer tagline and the social
     // card, so the page's biggest line said nothing the tab did not. control
@@ -124,11 +125,26 @@ export const EXPERIMENTS = Object.freeze({
     // gates it). Primary goal = any launchpad CTA click. QA-force:
     // ?exp_home_title=scale|universe|control.
     home_title: {
-        status: 'running',
+        status: 'paused',
         variants: [
             { id: 'control',  w: 34 },   // "Watch space weather happen. Live."
             { id: 'scale',    w: 33 },   // "From Earth's core to the cosmic web. Running live."
             { id: 'universe', w: 33 },   // "Step inside the working universe. Every model live."
+        ],
+    },
+    // Homepage launchpad TITLE, v2 (index.html #hero h1 + sub). RUNNING since
+    // 2026-11-25: a new id so none of home_title's exposures (old copy) are
+    // charted against the new lines. control = the static markup ("Explore
+    // the universe as it is right now."); `verbs` leads with what you can do,
+    // `real` with the claim that it is live data. Copy in
+    // js/home-title-variants.js (ids gated both ways by
+    // tests/home-launchpad.mjs). QA-force: ?exp_home_title_v2=verbs|real|control.
+    home_title_v2: {
+        status: 'running',
+        variants: [
+            { id: 'control', w: 34 },   // "Explore the universe as it is right now."
+            { id: 'verbs',   w: 33 },   // "Fly to Mars. Chase a solar storm. Free, right now."
+            { id: 'real',    w: 33 },   // "The real Sun, Earth and Mars, running live."
         ],
     },
     // CONCLUDED 2026-07 — the redesign shipped in place as index.html and
@@ -198,6 +214,11 @@ export const EXPERIMENT_GOALS = Object.freeze({
         { stage: 'landing_cta_click',  label: 'Launchpad CTA click (primary)' },
         { stage: 'scroll_depth',       label: 'Scroll past first screen' },
         { stage: 'signup_succeeded',   label: 'Signup' },
+    ],
+    home_title_v2: [
+        { stage: 'landing_cta_click',  label: 'Launchpad CTA click (primary)' },
+        { stage: 'signup_succeeded',   label: 'Signup' },
+        { stage: 'scroll_depth',       label: 'Scroll past first screen' },
     ],
     home_bg_carousel: [
         { stage: 'landing_cta_click',  label: 'CTA click (primary)' },

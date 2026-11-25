@@ -19,7 +19,7 @@
  */
 import { test, expect } from '@playwright/test';
 
-const PAGE = '/index.html?debug=1&theme=dark&exp_home_title=control';
+const PAGE = '/index.html?debug=1&theme=dark&exp_home_title_v2=control';
 
 async function offline(page) {
     await page.route((u) => !/^(localhost|127\.0\.0\.1)$/.test(u.hostname), (r) => r.abort());
@@ -200,7 +200,7 @@ test.describe('homepage launchpad', () => {
             };
         });
         const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-        await boot(page, '/index.html?debug=1&theme=light&exp_home_title=control');
+        await boot(page, '/index.html?debug=1&theme=light&exp_home_title_v2=control');
         const light = await cells();
         expect(light.heroBg).toMatch(/rgb\(246, 249, 254\)/);
         expect(light.panel).toBe('rgb(255, 255, 255)');
@@ -212,20 +212,20 @@ test.describe('homepage launchpad', () => {
         expect(light.tileCopyBesidePicture).toBe(true);
         expect(light.scrim).toBe('none');
         // NEGATIVE CONTROL: dark mode keeps white type over the photograph.
-        await boot(page, '/index.html?debug=1&theme=dark&exp_home_title=control');
+        await boot(page, '/index.html?debug=1&theme=dark&exp_home_title_v2=control');
         const dark = await cells();
         for (const t of dark.slideText) expect(t).toBeGreaterThan(0.6);
         expect(dark.copyBelowPicture).toBe(false);
         expect(dark.scrim).not.toBe('none');
         // Phone, light: still no sideways scroll, tiles keep dark-on-light.
         await page.setViewportSize({ width: 390, height: 844 });
-        await boot(page, '/index.html?debug=1&theme=light&exp_home_title=control');
+        await boot(page, '/index.html?debug=1&theme=light&exp_home_title_v2=control');
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
         const ph = await cells();
         expect(ph.tileCopyBesidePicture).toBe(true);
     });
 
-    test('home_title: each arm shows its own copy, no arm flashes another, exposure is recorded once', async ({ page }) => {
+    test('home_title_v2: each arm shows its own copy, no arm flashes another, exposure is recorded once', async ({ page }) => {
         await offline(page);
         await page.setViewportSize({ width: 1440, height: 900 });
         const copy = await (async () => {
@@ -236,7 +236,7 @@ test.describe('homepage launchpad', () => {
                 return Object.fromEntries(Object.keys(m.TITLE_VARIANTS).map((id) => [id, m.titleFor(id, SIM_COUNT)]));
             });
         })();
-        expect(Object.keys(copy)).toEqual(['control', 'scale', 'universe']);
+        expect(Object.keys(copy)).toEqual(['control', 'verbs', 'real']);
         for (const id of Object.keys(copy)) {
             // Record every title the visitor could have SEEN (opacity > 0) from the first frame on.
             await page.addInitScript(() => {
@@ -248,7 +248,7 @@ test.describe('homepage launchpad', () => {
                 };
                 requestAnimationFrame(tick);
             });
-            await boot(page, `/index.html?debug=1&theme=dark&exp_home_title=${id}`);
+            await boot(page, `/index.html?debug=1&theme=dark&exp_home_title_v2=${id}`);
             await page.waitForTimeout(700);                         // past the opacity transition
             const got = await page.evaluate(() => ({
                 variant: document.getElementById('hero').dataset.titleVariant,
@@ -279,11 +279,11 @@ test.describe('homepage launchpad', () => {
         let release; const gate = new Promise((r) => { release = r; });
         await page.route('**/js/home-title-variants.js', async (route) => { await gate; await route.continue(); });
         // 'commit', not 'domcontentloaded': a held module import holds that event too.
-        await page.goto('/index.html?debug=1&theme=dark&exp_home_title=scale', { waitUntil: 'commit' });
+        await page.goto('/index.html?debug=1&theme=dark&exp_home_title_v2=verbs', { waitUntil: 'commit' });
         await page.waitForSelector('#hero.lp-title-pending .hero-h1', { state: 'attached' });
         expect(await page.evaluate(() => getComputedStyle(document.querySelector('.hero-h1')).opacity)).toBe('0');
         await page.waitForFunction(() => !document.getElementById('hero').classList.contains('lp-title-pending'), null, { timeout: 3000 });
-        expect(await page.evaluate(() => document.querySelector('[data-lp-t1]').textContent)).toBe(copy.control.a);   // backstop = control, visible
+        expect(await page.evaluate(() => document.querySelector('[data-lp-t1]').textContent)).toBe(copy.control.a);   // backstop = the static control line, visible
         release();
     });
 
@@ -299,7 +299,7 @@ test.describe('homepage launchpad', () => {
         await expect(btn).toContainText('Sign up with Google');
         const geo = await page.evaluate(() => {
             const g = document.getElementById('lp-signup-google').getBoundingClientRect();
-            const d = document.querySelector('[data-funnel-cta="hero_magnetosphere"]').getBoundingClientRect();
+            const d = document.querySelector('[data-funnel-cta="launchpad_try_mars"]').getBoundingClientRect();
             return { above: g.bottom <= d.top + 1, sameColumn: Math.abs(g.left - d.left) < 2 && Math.abs(g.width - d.width) < 2, gy: g.bottom, h: g.height };
         });
         expect(geo.above).toBe(true);
@@ -314,12 +314,12 @@ test.describe('homepage launchpad', () => {
         await expect(btn).toBeDisabled();
         await expect(btn).toContainText('Redirecting');
 
-        // Signed in: the button and its email alternative are gone; the dashboard CTA stays.
+        // Signed in: the button and its email alternative are gone; the try-it CTA stays.
         await page.addInitScript(() => { try { localStorage.setItem('pp_auth', JSON.stringify({ signedIn: true })); } catch {} });
         await boot(page);
         await expect(page.locator('#lp-signup-google')).toBeHidden();
         await expect(page.locator('[data-funnel-cta="launchpad_signup_email"]')).toBeHidden();
-        await expect(page.locator('[data-funnel-cta="hero_magnetosphere"]')).toBeVisible();
+        await expect(page.locator('[data-funnel-cta="launchpad_try_mars"]')).toBeVisible();
         await page.evaluate(() => localStorage.removeItem('pp_auth'));
     });
 
