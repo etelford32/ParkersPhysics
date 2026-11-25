@@ -105,6 +105,40 @@ moving back from Bird's present-day ones), Volcanoes (large igneous provinces).
   200 Ma, and that the drawn surface shrinks 1.00 → 0.63 → 0.37 of the
   sphere at 0 / 66 / 200 Ma as later crust drops out).
 
-Still open, in order: a second model or a palaeomagnetic frame (rule 2/3),
-deforming-mesh flags (rule 4), palaeo-shorelines (rule 1), events on the clock
-beyond Chicxulub.
+Still open, in order: deforming-mesh flags (rule 4), palaeo-shorelines
+(rule 1), events on the clock beyond Chicxulub, and a palaeomagnetic frame
+INDEPENDENT of the EarthByte lineage (rule 3, below).
+
+## 6. Built 2026-11-25 (later): the second model, in a palaeomagnetic frame
+
+- **Merdith et al. 2021** (ESR 214; SM2 v1.2.4; CC BY 4.0 by EarthByte's
+  Data_Collections licence) baked by `scripts/build-paleo-merdith.py` into
+  `data/paleo/merdith2021-*`. It covers rules 2 and 3 at once: it is a second
+  model AND it is in a spin-axis (palaeomagnetic) frame. It is NOT independent
+  (its last 250 Myr is Young et al. 2019, the same lineage), so the page calls
+  the difference the least the uncertainty can be.
+- **Oracle for both models**: `scripts/paleo_oracle.py --model merdith2021` runs
+  pyGPlates on the archive's full 1000 Ma file and GPML polygons. It found
+  three things, each now a rule with its own gate: (1) GPlates IGNORES one-row
+  sequences (Merdith's interleaved rows made 61); (2) a sequence trimmed at
+  250 Ma must keep the row strictly PAST 250, or it becomes one row and the
+  plate is refused there; (3) polygon edges are GREAT CIRCLES — the bake
+  simplifies on the sphere, the decoder densifies edges onto their arcs, and a
+  ring through a pole as one vertex is expanded along the pole line. At
+  crossover instants pyGPlates' tie rule is not reproduced (four rules were
+  tried); the gate proves its answer is always one the file allows and bounds
+  the difference (Müller 20 m, Merdith 620 m).
+- **The page**: "Compare a second model" (default on, fetched after the first
+  frame, `?second=0` opts out; a failure leaves the first model working and
+  says so). The globe draws Merdith's coastlines in pink, TURNED ABOUT THE SPIN
+  AXIS onto Müller's longitudes (`longitudeShift`, a circular mean over a
+  continental sample, tabulated every 2 Ma) because palaeomagnetism fixes no
+  longitude; the panel prints the second latitude, the latitude difference and
+  both distances (aligned / as each frame writes longitude); the chart draws
+  both tracks on one axis; a line under the globe gives the continents' median
+  and 90th-percentile latitude difference at the slider's age.
+- **Measured**: 3.7° (5.7°) at 66 Ma, 12.8° (21.7°) at 200 Ma. Chicxulub at
+  66 Ma: 21.9°N vs 25.0°N.
+- **Still open for rule 3**: an independent palaeomagnetic frame — Vaes et al.
+  2023's global APWP is on GitHub (bramvaes/GlobalAPWP) but outside this
+  session's GitHub access; Torsvik 2012's GAPWAP is the other candidate.

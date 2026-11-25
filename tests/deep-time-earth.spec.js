@@ -56,7 +56,7 @@ test('the Atlantic is ocean today and not there at 200 Ma (pixels)', async ({ pa
 
 test('a deep link selects Chicxulub at 66 Ma with the kernel\'s position', async ({ page }) => {
     test.setTimeout(150_000);
-    const errors = await boot(page, '?age=66.04&at=21.3333,-89.5');
+    const errors = await boot(page, '?age=66.04&at=21.3333,-89.5&second=0');     // the first model alone
     await expect(page.locator('#dte-when b')).toHaveText('66 million years ago');
     const body = page.locator('#dte-point-body');
     await expect(body).toContainText('Yucatan');
@@ -90,4 +90,47 @@ test('play runs forward in time and stops at today', async ({ page }) => {
     await expect(page.locator('#dte-play')).toHaveText('Pause');
     await expect(page.locator('#dte-when b')).toHaveText('Today', { timeout: 60_000 });
     await expect(page.locator('#dte-play')).toHaveText('Play');
+});
+
+test('the second model loads after the first frame, compares, and can be turned off', async ({ page }) => {
+    test.setTimeout(150_000);
+    const errors = await boot(page, '?age=66.04&at=21.3333,-89.5');
+    await page.waitForFunction(() => window.__deepTime.S.secondState === 'on', null, { timeout: 90_000 });
+    await expect(page.locator('#dte-spread')).toContainText('median');
+    await expect(page.locator('#dte-spread')).toContainText('no latitude is changed');
+    const body = page.locator('#dte-point-body');
+    await expect(body).toContainText('Second model');
+    await expect(body).toContainText('25.0°N');                       // Merdith's crater latitude at 66 Ma
+    await expect(body).toContainText('3.0° of latitude');
+    await expect(page.locator('#dte-chart svg path')).toHaveCount(2);   // both tracks on one axis
+    const g = await page.evaluate(() => ({ ghost: window.__deepTime.globe.drawn.ghostPlates, shift: window.__deepTime.globe.drawn.ghostShiftDeg, has: window.__deepTime.globe.hasSecondModel }));
+    expect(g.has).toBe(true);
+    expect(g.ghost).toBeGreaterThan(50);
+    expect(Math.abs(g.shift)).toBeGreaterThan(5);                      // the alignment is applied to the drawing
+    await page.locator('#dte-second').uncheck();
+    await expect(body).not.toContainText('Second model');
+    await expect(page.locator('#dte-chart svg path')).toHaveCount(1);
+    expect(await page.evaluate(() => window.__deepTime.globe.hasSecondModel)).toBe(false);
+    await expect(page.locator('#dte-spread')).toHaveText('');
+    expect(errors).toEqual([]);
+});
+
+test('?second=0 fetches nothing of the second model; a failed second model leaves the first working', async ({ page }) => {
+    test.setTimeout(150_000);
+    const asked = [];
+    page.on('request', (r) => { if (/merdith2021/.test(r.url())) asked.push(r.url()); });
+    await boot(page, '?second=0&age=66');
+    await page.waitForTimeout(1500);
+    expect(asked).toEqual([]);
+    await expect(page.locator('#dte-second')).not.toBeChecked();
+
+    const p2 = await page.context().newPage();
+    await p2.route(/merdith2021-plates\.json/, (r) => r.fulfill({ status: 503, body: 'down' }));
+    const errs = [];
+    p2.on('pageerror', (e) => errs.push(String(e)));
+    await p2.goto('/deep-time-earth.html?age=66&at=51.51,-0.13');
+    await p2.waitForFunction(() => window.__deepTime && window.__deepTime.S.secondState === 'failed', null, { timeout: 90_000 });
+    await expect(p2.locator('#dte-spread')).toContainText('could not be loaded');
+    await expect(p2.locator('#dte-point-body')).toContainText('England');     // the first model still answers
+    expect(errs).toEqual([]);
 });

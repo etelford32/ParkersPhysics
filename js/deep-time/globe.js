@@ -32,12 +32,18 @@ import * as M from './page-model.js';
 
 const DEG = Math.PI / 180;
 export const SUBDIV_DEG = 2.5;
-const R_SEA = 1.0, R_CONT = 1.0015, R_COAST = 1.003, R_TRACK = 1.005, R_GRID = 1.0008;
-const COL = { void: '#1b1f2b', unknown: '#3a4256', cont: '#c9b48a', coast: '#f2e6c8', grid: '#9fb3d9', track: '#ffd166' };
+const R_SEA = 1.0, R_CONT = 1.0015, R_COAST = 1.003, R_GHOST = 1.0036, R_TRACK = 1.005, R_GRID = 1.0008;
+const COL = { void: '#1b1f2b', unknown: '#3a4256', cont: '#c9b48a', coast: '#f2e6c8', ghost: '#ff6fd8', grid: '#9fb3d9', track: '#ffd166' };
 
 const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const hexToLinear = (h) => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };   // THREE.Color(hex) decodes sRGB → linear
 export const ecefToScene = (v) => [v[0], v[2], -v[1]];
+const quatMulWXYZ = (a, b) => [
+    a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+    a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+    a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+    a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+];
 export const sceneToEcef = (v) => [v[0], -v[2], v[1]];
 const llToScene = (lat, lon, r) => {
     const la = lat * DEG, lo = lon * DEG;
@@ -157,9 +163,10 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
 
     // coastlines: today's, carried back (line segments per plate)
     const coastMat = ageDiscard(new THREE.LineBasicMaterial({ color: COL.coast, transparent: true, opacity: 0.75 }), uAge);
-    {
+    /** Line segments per plate from a baked coastline file, densified to 1° in lon/lat. */
+    function buildCoast(coastData, material, radius, layer, onPlate) {
         const byPlate = new Map();
-        for (const [plate, fromAge, pts] of coast.lines) {
+        for (const [plate, fromAge, pts] of coastData.lines) {
             if (!byPlate.has(plate)) byPlate.set(plate, []);
             byPlate.get(plate).push({ fromAge, pts });
         }
@@ -169,9 +176,9 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
                 for (let i = 1; i < pts.length; i++) {
                     const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
                     const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 1.0));
-                    for (let s = 0; s < n; s++) {
-                        const a = s / n, b = (s + 1) / n;
-                        pos.push(...llToScene(y0 + (y1 - y0) * a, x0 + (x1 - x0) * a, R_COAST), ...llToScene(y0 + (y1 - y0) * b, x0 + (x1 - x0) * b, R_COAST));
+                    for (let k = 0; k < n; k++) {
+                        const u = k / n, v = (k + 1) / n;
+                        pos.push(...llToScene(y0 + (y1 - y0) * u, x0 + (x1 - x0) * u, radius), ...llToScene(y0 + (y1 - y0) * v, x0 + (x1 - x0) * v, radius));
                         span.push(fromAge, 0, fromAge, 0);
                     }
                 }
@@ -179,11 +186,31 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
             const g = new THREE.BufferGeometry();
             g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
             g.setAttribute('aSpan', new THREE.Float32BufferAttribute(span, 2));
-            const line = new THREE.LineSegments(g, coastMat);
-            line.userData = { plate, layer: 'coast' };
+            const line = new THREE.LineSegments(g, material);
+            line.userData = { plate, layer };
             scene.add(line);
-            group(plate).objects.push(line);
+            onPlate(plate, line);
         }
+    }
+    buildCoast(coast, coastMat, R_COAST, 'coast', (plate, line) => group(plate).objects.push(line));
+
+    // THE SECOND MODEL's coastlines (Merdith 2021), on ITS OWN plates and rotations — a ghost over the first
+    const ghostMat = ageDiscard(new THREE.LineBasicMaterial({ color: COL.ghost, transparent: true, opacity: 0.7 }), uAge);
+    let ghost = null;                       // { model, groups: Map(plate → [lines]), lonShift(age) → deg }
+    /**
+     * `lonShift(age)` (deg) turns the second model about the SPIN AXIS onto
+     * the first's longitudes — palaeomagnetism fixes no longitude, and the
+     * page model owns the shift (`longitudeShift`); latitudes are untouched.
+     */
+    function setSecondModel(model2, coast2, lonShift = () => 0) {
+        if (ghost) for (const lines of ghost.groups.values()) for (const l of lines) { scene.remove(l); l.geometry.dispose(); }
+        ghost = null;
+        if (model2 && coast2) {
+            const groups = new Map();
+            buildCoast(coast2, ghostMat, R_GHOST, 'ghost', (plate, line) => { if (!groups.has(plate)) groups.set(plate, []); groups.get(plate).push(line); });
+            ghost = { model: model2, groups, lonShift };
+        }
+        applyAge(age);
     }
 
     // graticule in the MANTLE frame (it does not move with the plates)
@@ -214,6 +241,19 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
             for (const o of g.objects) { o.visible = true; o.quaternion.copy(q3); }
             drawn.plates++;
         }
+        if (ghost) {
+            drawn.ghostPlates = 0;
+            const h = -ghost.lonShift(a) * DEG / 2, qz = [Math.cos(h), 0, 0, Math.sin(h)];      // about ECEF z
+            drawn.ghostShiftDeg = ghost.lonShift(a);
+            for (const [plate, lines] of ghost.groups) {
+                const t = ghost.model.total(plate, a);
+                if (!t) { for (const l of lines) l.visible = false; continue; }
+                const [w, x, y, z] = quatMulWXYZ(qz, t.q);
+                q3.set(x, z, -y, w);
+                for (const l of lines) { l.visible = true; l.quaternion.copy(q3); }
+                drawn.ghostPlates++;
+            }
+        }
         for (const s of seaColorArrays) {
             const { col, from } = s;
             let lastFrom = NaN, c = null;
@@ -238,6 +278,22 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
         g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
         trackLine = new THREE.Line(g, trackMat);
         scene.add(trackLine);
+        render();
+    }
+
+    // the second model's track of the same point (dashed would need LineDashed + computeLineDistances; a colour is enough)
+    const track2Mat = new THREE.LineBasicMaterial({ color: COL.ghost });
+    let track2Line = null;
+    function setTrack2(track) {
+        if (track2Line) { scene.remove(track2Line); track2Line.geometry.dispose(); track2Line = null; }
+        if (track && track.points.length >= 2) {
+            const pos = [];
+            for (const p of track.points) pos.push(...llToScene(p.lat, p.lon, R_TRACK + 0.001));
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            track2Line = new THREE.Line(g, track2Mat);
+            scene.add(track2Line);
+        }
         render();
     }
 
@@ -360,7 +416,7 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
     resize();
     applyAge(0);
     return {
-        setAge: applyAge, get age() { return age; }, coveredFraction, readPixel, setTrack, setCoastVisible, get coastOn() { return coastOn; }, project, pickAt, lookAt, render,
+        setAge: applyAge, get age() { return age; }, coveredFraction, readPixel, setTrack, setTrack2, setSecondModel, get hasSecondModel() { return !!ghost; }, setCoastVisible, get coastOn() { return coastOn; }, project, pickAt, lookAt, render,
         drawn, renderer, camera, controls,
         stats: { plates: plateGroups.size, meshes: pickMeshes.length, triangles: pickMeshes.reduce((s, m) => s + m.geometry.getAttribute('position').count / 3, 0) },
     };

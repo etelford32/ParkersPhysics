@@ -87,8 +87,13 @@ Each step names what it would change and how we would know it worked.
   they are TODAY's coastlines carried back. A K–Pg shoreline needs a
   palaeogeography dataset, which belongs to the deep-time Earth simulation
   (`DEEP_TIME_EARTH_PLAN.md`).
-- **Still assumed:** the mantle frame, not the spin axis (true polar wander
-  of a few degrees is missing), and today's obliquity.
+- **Still assumed:** the mantle frame, not the spin axis, and today's
+  obliquity. **Measured 2026-11-25:** the second model on the deep-time page
+  (Merdith et al. 2021, a palaeomagnetic frame) puts the crater at 25.0°N, 3.0°
+  north of the mantle frame's 21.9°N — the size of the latitude systematic the
+  trajectory carries. Not yet propagated into the trajectory (the hour-of-day
+  family and the main-belt share would move a little); the two models are not
+  independent, so 3° is a floor on the frame uncertainty, not its size.
 
 ### D. Climate that can recover — *first attempt measured out, 2026-11-23*
 

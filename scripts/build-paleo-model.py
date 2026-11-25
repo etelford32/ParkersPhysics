@@ -33,7 +33,7 @@ What is written (stdlib only, deterministic; --check rebuilds and compares):
       its plate id and the age range it exists for: FROMAGE is when that
       crust appears — oceanic crust younger than an age is not drawn at it)
       and the CONTINENTAL POLYGONS (the model's continental-crust outlines),
-      simplified to POLY_TOL_DEG and stored as DELTA-CODED integer
+      simplified ON THE SPHERE (great-circle chords) to POLY_TOL_DEG and stored as DELTA-CODED integer
       millidegrees ([lon0, lat0, dlon1, dlat1, ...]); names in a table.
       Read by js/paleo/plates.js, which reproduces pyGPlates' own
       PlatePartitioner on them (scripts/paleo_oracle.py, gated).
@@ -133,8 +133,15 @@ def num(s, default=None):
 
 
 def rotations(z):
-    seqs, index = [], {}
-    for line in z.read(ROT).decode('latin-1').splitlines():
+    return parse_rotations(z.read(ROT).decode('latin-1'))
+
+
+def parse_rotations(text, max_age=None):
+    """PLATES4 rotation rows → [moving, fixed, rows] sequences in file order.
+    With max_age, each sequence keeps its rows up to max_age plus the first
+    row past it (so interpolation still reaches max_age exactly)."""
+    seqs = []
+    for line in text.splitlines():
         s = line.split('!')[0].split()
         if len(s) < 6:
             continue
@@ -146,6 +153,17 @@ def rotations(z):
             seqs[-1][2].append([age, lat, lon, ang])
         else:
             seqs.append([moving, fixed, [[age, lat, lon, ang]]])
+    if max_age is not None:
+        out = []
+        for m, f, rows in seqs:
+            kept = []
+            for r in rows:
+                kept.append(r)
+                if r[0] > max_age:
+                    break
+            if kept[0][0] <= max_age:
+                out.append([m, f, kept])
+        seqs = out
     return seqs
 
 
@@ -208,8 +226,53 @@ def coastlines(z):
     return out, vin, vout
 
 
+def _unit(lon, lat):
+    la, lo = math.radians(lat), math.radians(lon)
+    return (math.cos(la) * math.cos(lo), math.cos(la) * math.sin(lo), math.sin(la))
+
+
+def _arc_dist_deg(p, a, b):
+    """Angular distance (deg) from unit vector p to the great-circle ARC a→b."""
+    n = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    nn = math.sqrt(sum(x * x for x in n))
+    ang = lambda u, v: math.degrees(math.atan2(math.sqrt(sum(x * x for x in (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]))), sum(x * y for x, y in zip(u, v))))
+    if nn < 1e-15:
+        return ang(p, a)
+    n = tuple(x / nn for x in n)
+    dot = lambda u, v: sum(x * y for x, y in zip(u, v))
+    cross = lambda u, v: (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+    if dot(cross(a, p), n) >= 0 and dot(cross(p, b), n) >= 0:          # projects inside the arc
+        return math.degrees(math.asin(min(1.0, abs(dot(p, n)))))
+    return min(ang(p, a), ang(p, b))
+
+
+def simplify_sphere(pts, tol):
+    """Douglas–Peucker with GREAT-CIRCLE chords and angular distance: a polygon
+    edge IS a great-circle arc (GPlates' definition), so a vertex may be dropped
+    only if the arc that replaces it stays within tol of it. Planar lon/lat DP
+    collapsed dense runs along a parallel into one long edge that, read as the
+    arc it is, bent 0.13° poleward at 65°S (measured against pyGPlates)."""
+    if len(pts) < 3:
+        return pts
+    u = [_unit(x, y) for x, y in pts]
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        best, bi = -1.0, -1
+        for i in range(a + 1, b):
+            d = _arc_dist_deg(u[i], u[a], u[b])
+            if d > best:
+                best, bi = d, i
+        if best > tol:
+            keep[bi] = True
+            stack += [(a, bi), (bi, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
 def delta_ring(ring, tol):
-    s = simplify(ring, tol)
+    s = simplify_sphere(ring, tol)
     out, px, py = [], 0, 0
     for x, y in s:
         ix, iy = round(x * 1000), round(y * 1000)

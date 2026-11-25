@@ -100,6 +100,8 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
 .dte-check { list-style:none; margin-top:8px; }
 .dte-check li { font-size:.78rem; color:#b9c2da; line-height:1.55; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.06); }
 .dte-check li b { color:#7fd6ae; font-variant-numeric:tabular-nums; }
+.dte-spread { font-size:.78rem; color:#cfd6ea; line-height:1.5; margin-top:8px; min-height:1.2em; }
+.dte-spread b { color:#ff9be6; font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>
@@ -130,6 +132,7 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
       <button type="button" class="dte-btn" id="dte-play" aria-pressed="false">Play</button>
       <label><input type="checkbox" id="dte-cities" checked> Cities</label>
       <label><input type="checkbox" id="dte-coast" checked> Today's coastlines</label>
+      <label title="Merdith et al. 2021: a second plate model, in a spin-axis (palaeomagnetic) frame"><input type="checkbox" id="dte-second" checked> Compare a second model</label>
       <span id="dte-age-out" aria-live="polite"></span>
     </div>
     <div id="dte-clock">
@@ -137,11 +140,13 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
       <input type="range" id="dte-age" min="0" max="250" step="0.5" value="0" aria-label="Age in millions of years">
       <div class="dte-stops" id="dte-stops"></div>
     </div>
+    <p class="dte-spread" id="dte-spread" aria-live="polite"></p>
     <div class="dte-legend">
       <span><i class="ramp"></i> Seafloor: young → old</span>
       <span><i style="background:#3a4256"></i> Crust of unknown age</span>
       <span><i style="background:#c9b48a"></i> Continental crust</span>
       <span><i class="line" style="background:#f2e6c8"></i> Today's coastlines</span>
+      <span><i class="line" style="background:#ff6fd8"></i> The second model's coastlines, aligned in longitude</span>
       <span><i style="background:#1b1f2b;border:1px solid #444"></i> Crust that has since been destroyed</span>
     </div>
   </section>
@@ -170,10 +175,17 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
     <p class="dte-body"><b>The plates move as rigid pieces.</b> The model also describes how rifts and mountain belts stretch and
       squeeze, but this page moves each piece rigidly. Expect small gaps and overlaps where the crust has deformed, such as the Andes,
       Tibet and the North Sea.</p>
-    <p class="dte-body"><b>The frame is the mantle's, not the spin axis.</b> The model fixes its reference to the deep mantle.
-      Over tens of millions of years the whole solid Earth also tilts relative to the spin axis (true polar wander, a few degrees
-      since the dinosaurs died out). That tilt is not in this frame, so a past latitude here can differ by a few degrees from the
-      latitude measured in ancient magnetised rocks.</p>
+    <p class="dte-body"><b>Two models, two frames.</b> The globe and the first answer are Müller et al. (2019), which fixes its
+      reference to the deep mantle. The second model, in pink, is Merdith, A. S., et al. (2021), <i>Extending full-plate tectonic
+      models into deep time</i>, Earth-Science Reviews 214 (version 1.2.4, from the same EarthByte server, under
+      <a href="https://creativecommons.org/licenses/by/4.0/" rel="license">CC BY 4.0</a>). It fixes its reference to the spin axis
+      as ancient magnetised rocks record it. Over tens of millions of years the whole solid Earth also tilts relative to the spin
+      axis (true polar wander), so the two frames give different latitudes even where the plates move the same way.</p>
+    <p class="dte-body"><b>What their difference means.</b> For the last 250 million years Merdith's model is compiled from an
+      earlier EarthByte model of the same family as Müller's, so the two are not independent. Where they disagree, the truth is at
+      least that uncertain. Where they agree, it may still be wrong in the same way in both. Palaeomagnetism measures latitude but not
+      longitude, so the latitude difference is the meaningful one. The distance apart also includes a longitude that each frame
+      fixes by its own convention.</p>
     <p class="dte-fine"><b>Seafloor age</b> comes from the age at which each strip of ocean floor first appears in the model (its
       isochron bins), so it is the age of that strip to within its bin, not a measured age grid. The geological periods on the slider
       are from the International Chronostratigraphic Chart, written from memory; they label the slider and are not used in any

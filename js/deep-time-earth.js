@@ -4,7 +4,13 @@
  * sentence from js/deep-time/page-model.js, and js/deep-time/globe.js draws.
  *
  * URL: ?age=<Ma>&at=<lat>,<lon> (present-day point to select) — the
- * Chicxulub page links here with the crater at 66.04 Ma.
+ * Chicxulub page links here with the crater at 66.04 Ma; ?second=0 starts
+ * without the second model.
+ *
+ * THE SECOND MODEL (Merdith et al. 2021, palaeomagnetic frame) is fetched
+ * AFTER the globe is drawn so it never delays the first frame; until it
+ * arrives every comparison row says it is loading, and if it fails the page
+ * says so and keeps working on the first model alone.
  */
 import * as PR from './paleo/rotations.js';
 import * as PL from './paleo/plates.js';
@@ -17,7 +23,8 @@ const CITY_NAMES = ['London', 'New York', 'Rio de Janeiro', 'Cape Town', 'Mumbai
 const PLAY_MA_PER_S = 10;
 
 const ageInput = $('dte-age'), playBtn = $('dte-play');
-const S = { age: 0, pick: null, track: null, playing: false, globe: null };
+const S = { age: 0, pick: null, track: null, track2: null, playing: false, globe: null, second: null, spread: null, secondState: 'off' };
+const COLORS = { first: '#ffd166', second: '#ff6fd8' };
 
 function fmtKm(km) { return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km).toLocaleString('en-US')} km`; }
 
@@ -42,8 +49,22 @@ function setAge(age) {
     $('dte-when').querySelector('span').textContent = p && S.age > 0.005 ? `${p.name} period` : '';
     $('dte-age-out').textContent = `${S.age.toFixed(S.age < 10 ? 2 : 1)} Ma`;
     if (S.globe) S.globe.setAge(S.age);
+    renderSpread();
     renderPoint();
 }
+
+// ── the second model: how far apart the two put the continents at this age ───
+function renderSpread() {
+    const el = $('dte-spread');
+    if (S.secondState === 'loading') { el.textContent = 'Loading the second model (Merdith et al. 2021)…'; return; }
+    if (S.secondState === 'failed') { el.textContent = 'The second model could not be loaded, so this page shows one model only.'; return; }
+    if (S.secondState !== 'on' || !S.spread) { el.textContent = ''; return; }
+    const r = M.spreadAt(S.spread, primary(), S.second, S.age);
+    el.innerHTML = S.age < 0.005 || r.medianDLat == null
+        ? 'Two models, Müller 2019 and Merdith 2021, agree on today by definition. Move the slider to see where they part.'
+        : `Two models disagree: they put today's continents a median <b>${r.medianDLat.toFixed(1)}°</b> apart in latitude at this age (90 % within ${r.p90DLat.toFixed(1)}°). That is the least the uncertainty can be. The pink outlines are turned ${Math.abs(r.lonShiftDeg ?? 0).toFixed(0)}° ${(r.lonShiftDeg ?? 0) >= 0 ? 'west' : 'east'} about the pole onto the first model's longitudes, which palaeomagnetism cannot fix; no latitude is changed.`;
+}
+const primary = () => ({ model: S.model, plates: S.plates });
 
 // ── play: forward in time, toward today ──────────────────────────────────────
 let raf = 0, last = 0;
@@ -69,7 +90,12 @@ playBtn.addEventListener('click', () => (S.playing ? stop() : play()));
 function selectPresent(lat, lon, label) {
     S.pick = { lat, lon, label, hit: PL.plateAt(S.plates, lat, lon) };
     S.track = M.trackSamples(S.model, S.plates, lat, lon, 1);
-    if (S.globe) S.globe.setTrack(S.track);
+    S.track2 = S.secondState === 'on' ? M.trackSamples(S.second.model, S.second.plates, lat, lon, 1) : null;
+    if (S.globe) {
+        S.globe.setTrack(S.track);
+        // drawn on the globe in the FIRST model's longitudes (the same alignment as the pink coastlines); the chart plots latitude only
+        S.globe.setTrack2(S.track2 && { ...S.track2, points: S.track2.points.map((p) => ({ ...p, lon: p.lon - M.shiftAt(S.shifts, p.age) })) });
+    }
     renderPoint();
 }
 
@@ -94,9 +120,17 @@ function renderPoint() {
     } else {
         rows.push([`At ${S.age.toFixed(1)} Ma`, r.reason === 'not-formed' ? `not there yet: this crust formed ${Math.round(r.fromAge)} million years ago` : 'beyond what the model covers for this plate']);
     }
+    if (S.secondState === 'on') {
+        const cmp = M.compareModels(primary(), S.second, S.pick.lat, S.pick.lon, S.age, M.shiftAt(S.shifts, S.age));
+        if (S.age < 0.005) rows.push(['Second model', 'agrees today (both start from the present)']);
+        else if (cmp.dLatDeg != null) {
+            rows.push([`<span style="color:${COLORS.second}">Second model</span>`, `${M.formatLat(cmp.b.then.lat)} · ${cmp.b.band}`]);
+            rows.push(['Difference', `${Math.abs(cmp.dLatDeg).toFixed(1)}° of latitude (${cmp.dLatDeg >= 0 ? 'further north' : 'further south'} in the second)${cmp.apartKmAligned != null ? `; ${fmtKm(cmp.apartKmAligned)} apart once their longitudes are aligned (${fmtKm(cmp.apartKm)} as each frame writes longitude)` : ''}`]);
+        } else rows.push(['Second model', cmp.b.ok ? '—' : cmp.b.reason === 'not-formed' ? 'its crust had not formed yet in that model' : cmp.b.reason === 'no-plate' ? 'no plate there in that model' : 'beyond what that model covers here']);
+    } else if (S.secondState === 'loading') rows.push(['Second model', 'loading…']);
     if (S.track) rows.push(['Followed back', `${Math.round(S.track.maxAge)} million years (${r.reach.limit === 'crust' ? 'when this crust formed' : r.reach.limit === 'plate' ? 'the plate’s oldest row in the model' : 'the model’s end'}) · path ${fmtKm(S.track.pathKm)}`]);
     body.innerHTML = `<p class="dte-hint">${name}, carried back on its plate.</p><dl class="dte-kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
-    const W = 340, H = 170, c = M.latitudeChart(S.track, W, H);
+    const W = 340, H = 170, c = M.latitudeChart(S.track, W, H, { second: S.track2 });
     if (!c) { chart.innerHTML = ''; return; }
     const now = S.track.points.reduce((b, p) => (Math.abs(p.age - S.age) < Math.abs(b.age - S.age) ? p : b));
     const showNow = S.age <= S.track.maxAge + 1e-9;
@@ -104,9 +138,10 @@ function renderPoint() {
       ${c.yTicks.map((t) => `<line x1="${c.pad.l}" x2="${W - c.pad.r}" y1="${t.y}" y2="${t.y}" stroke="rgba(255,255,255,${t.v === 0 ? 0.25 : 0.08})"/><text x="${c.pad.l - 4}" y="${t.y + 3}" fill="#8a93ad" font-size="9" text-anchor="end">${t.label}</text>`).join('')}
       ${c.xTicks.map((t) => `<text x="${t.x}" y="${H - 6}" fill="#8a93ad" font-size="9" text-anchor="middle">${t.label}</text>`).join('')}
       <text x="${W - c.pad.r}" y="${H - 6 - 10}" fill="#8a93ad" font-size="8" text-anchor="end">million years ago →</text>
-      <path d="${c.path}" fill="none" stroke="#ffd166" stroke-width="1.8"/>
-      ${showNow ? `<circle cx="${c.x(now.age)}" cy="${c.y(now.lat)}" r="3.5" fill="#ffd166" stroke="#03050c"/>` : ''}
-    </svg><p class="dte-fine">Latitude of this point back through time. Mantle frame, not the spin axis: a few degrees of polar wander are not in it.</p>`;
+      ${c.path2 ? `<path d="${c.path2}" fill="none" stroke="${COLORS.second}" stroke-width="1.6" stroke-dasharray="4 3"/>` : ''}
+      <path d="${c.path}" fill="none" stroke="${COLORS.first}" stroke-width="1.8"/>
+      ${showNow ? `<circle cx="${c.x(now.age)}" cy="${c.y(now.lat)}" r="3.5" fill="${COLORS.first}" stroke="#03050c"/>` : ''}
+    </svg><p class="dte-fine"><span style="color:${COLORS.first}">━</span> Müller et al. 2019, mantle frame${c.path2 ? ` · <span style="color:${COLORS.second}">┅</span> Merdith et al. 2021, spin-axis (palaeomagnetic) frame. The two share most of their data for this period, so the gap between the lines is the least the uncertainty can be, not its size.` : '. A mantle frame leaves out a few degrees of polar wander.'}</p>`;
 }
 
 // ── labels drawn over the canvas ─────────────────────────────────────────────
@@ -157,12 +192,11 @@ async function boot() {
     }
     S.model = PR.createModel(rot);
     S.plates = PL.decodePlates(plates);
-    const C = M.ORACLE_CHECK;
-    $('dte-check').innerHTML = [
-        `Every plate's rotation, at 16 ages from today to 250 million years ago: <b>${C.rotations.toLocaleString('en-US')}</b> plate-and-age pairs agree with pyGPlates ${C.pygplates} to within <b>${C.worstDeg.toExponential(1)}°</b> (about ${Math.round(C.worstDeg * 111195)} m), and both refuse the same <b>${C.refusals.toLocaleString('en-US')}</b> pairs the model does not cover.`,
-        `Which plate a point rides: <b>${C.partitionAgree.toLocaleString('en-US')} of ${C.points.toLocaleString('en-US')}</b> test points get the same plate as pyGPlates; the rest lie within a few kilometres of a plate boundary, where this page's simplified outlines differ slightly.`,
-        `Where the Chicxulub crater and its debris sites were 66 million years ago: agree to <b>${C.sitesDeg.toExponential(1)}°</b>.`,
-    ].map((t) => `<li>${t}</li>`).join('');
+    const C = M.ORACLE_CHECK, n = (v) => v.toLocaleString('en-US'), m = (deg) => Math.max(1, Math.round(deg * 111195));
+    $('dte-check').innerHTML = [['Müller et al. 2019', C.muller2019], ['Merdith et al. 2021', C.merdith2021]].map(([label, c]) =>
+        `<b>${label}:</b> every plate's rotation at 16 ages from today to 250 million years ago. <b>${n(c.off)}</b> plate-and-age pairs agree with pyGPlates ${C.pygplates} to better than a millimetre. At <b>${n(c.at)}</b> more, the age is exactly where a plate switches from one reference plate to another; there the file allows two answers, both programs give one of them, and they differ by at most <b>${m(c.atDeg)} m</b>. Both refuse the same <b>${n(c.refusedBoth)}</b> pairs the model does not cover. <b>${n(c.agree)} of ${n(c.points)}</b> test points get the same plate as pyGPlates; the rest lie within a few kilometres of a boundary, where this page's simplified outlines differ slightly.`)
+        .concat([`Where the Chicxulub crater and its debris sites were 66 million years ago (Müller 2019): agree to <b>${C.sitesDeg.toExponential(1)}°</b>.`])
+        .map((t) => `<li>${t}</li>`).join('');
 
     let createGlobe;
     try { ({ createGlobe } = await import('./deep-time/globe.js')); } catch (e) { $('dte-loading').hidden = true; $('dte-fail').hidden = false; return; }
@@ -216,6 +250,39 @@ async function boot() {
         const r = M.pointReport(S.model, S.plates, at[0], at[1], S.age);
         if (r.ok) S.globe.lookAt(r.then.lat, r.then.lon);
     }
-    window.__deepTime = { S, M, PR, PL, setAge, selectPresent, globe: S.globe };
+    window.__deepTime = { S, M, PR, PL, setAge, selectPresent, globe: S.globe, loadSecond };
+
+    const toggle = $('dte-second');
+    toggle.checked = q.get('second') !== '0';
+    toggle.addEventListener('change', () => (toggle.checked ? loadSecond() : unloadSecond()));
+    if (toggle.checked) requestAnimationFrame(() => setTimeout(loadSecond, 0));     // after the first frame
+}
+
+let secondData = null;
+async function loadSecond() {
+    if (S.secondState === 'on' || S.secondState === 'loading') return;
+    S.secondState = 'loading'; renderSpread(); renderPoint();
+    try {
+        if (!secondData) {
+            const get = (p) => fetch(p).then((r) => { if (!r.ok) throw new Error(`${p}: HTTP ${r.status}`); return r.json(); });
+            const [rot, plates, coast] = await Promise.all([...M.SECOND_MODEL.files, M.SECOND_MODEL.coastFile].map(get));
+            const second = { model: PR.createModel(rot), plates: PL.decodePlates(plates) };
+            const spread = M.spreadSample(primary(), second, 1500);
+            secondData = { second, coast, spread, shifts: M.lonShiftTable(spread, primary(), second, 2) };
+        }
+        if (!$('dte-second').checked) { S.secondState = 'off'; return; }
+        S.second = secondData.second; S.spread = secondData.spread; S.shifts = secondData.shifts; S.secondState = 'on';
+        S.globe.setSecondModel(S.second.model, secondData.coast, (a) => M.shiftAt(S.shifts, a));
+    } catch (e) {
+        console.warn('second model failed', e);
+        S.secondState = 'failed';
+    }
+    if (S.pick) selectPresent(S.pick.lat, S.pick.lon, S.pick.label);
+    renderSpread(); renderPoint();
+}
+function unloadSecond() {
+    S.secondState = 'off'; S.second = null; S.spread = null; S.shifts = null; S.track2 = null;
+    S.globe.setSecondModel(null, null); S.globe.setTrack2(null);
+    renderSpread(); renderPoint();
 }
 boot();

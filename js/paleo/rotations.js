@@ -90,11 +90,18 @@ export function angularDistance(lat1, lon1, lat2, lon2) {
  * Build a model from the baked JSON ({ sequences: [[moving, fixed, rows]] }).
  * Sequences of one moving plate are kept in FILE ORDER; where two cover the
  * same age (a crossover), the first wins — the gate measures how far the
- * second disagrees at every crossover.
+ * second disagrees at every crossover. One-row sequences are dropped, as
+ * GPlates drops them (`singleRowSequences` counts them).
  */
 export function createModel(baked) {
     const byPlate = new Map();
+    let singleRow = 0;
     for (const [moving, fixed, rows] of baked.sequences) {
+        // A ONE-ROW sequence is not a sequence: GPlates ignores it (it spans no
+        // interval). Merdith 2021 has interleaved rows that parse into such
+        // fragments (4011, 4301, 531 near 250 Ma); keeping them answered where
+        // pyGPlates refuses (gated against the Merdith oracle).
+        if (rows.length < 2) { singleRow++; continue; }
         const r = rows.map(([age, lat, lon, ang]) => ({ age, q: quatFromPole(lat, lon, ang), lat, lon, ang }));
         if (!byPlate.has(moving)) byPlate.set(moving, []);
         byPlate.get(moving).push({ moving, fixed, rows: r, from: r[0].age, to: r[r.length - 1].age });
@@ -111,13 +118,12 @@ export function createModel(baked) {
         for (const s of list) {
             if (age < s.from - 1e-9 || age > s.to + 1e-9) continue;
             const R = s.rows;
-            if (R.length === 1) { if (Math.abs(age - R[0].age) < 1e-9) out.push({ fixed: s.fixed, q: R[0].q, sequence: s }); continue; }
             for (let i = 0; i < R.length - 1; i++) {
                 const a = R[i], b = R[i + 1];
                 if (age >= a.age - 1e-9 && age <= b.age + 1e-9) {
                     const span = b.age - a.age;
                     const f = span > 0 ? Math.min(1, Math.max(0, (age - a.age) / span)) : 0;
-                    out.push({ fixed: s.fixed, q: f === 0 ? a.q : f === 1 ? b.q : slerp(a.q, b.q, f), sequence: s });
+                    out.push({ fixed: s.fixed, q: f === 0 ? a.q : f === 1 ? b.q : slerp(a.q, b.q, f), sequence: s, atEnd: Math.abs(age - s.to) < 1e-9 });
                     break;
                 }
             }
@@ -129,7 +135,7 @@ export function createModel(baked) {
 
     /**
      * Total rotation of `plate` relative to plate `anchor` (default 0) at
-     * `age`. At a crossover the FIRST sequence (file order) whose chain
+     * `age`. At a crossover the first CANDIDATE (see `candidates`) whose chain
      * reaches the anchor wins — a chain that dead-ends (its fixed plate has
      * no rotation at that age: plate 555 → 355 at 230 Ma) falls through to
      * the next, which is what pyGPlates returns there (gated).
@@ -197,7 +203,7 @@ export function createModel(baked) {
 
     const plates = () => [...byPlate.keys()];
     const oldest = (plate) => { const l = byPlate.get(plate); return l ? Math.max(...l.map((s) => s.to)) : null; };
-    return { relative, candidates, total, reconstruct, meanVelocity, crossovers, plates, oldest, meta: baked.meta };
+    return { relative, candidates, total, reconstruct, meanVelocity, crossovers, plates, oldest, singleRowSequences: singleRow, meta: baked.meta };
 }
 
 /**

@@ -8,7 +8,8 @@
 #   paleo-rotations.mjs  the plate-rotation kernel (js/paleo/) on the baked
 #                   Müller et al. 2019 model: identities, crossovers, and the
 #                   cross-checks against PB2002 and against pyGPlates (the
-#                   baked tests/fixtures/paleo/ oracle); the 66 Ma site table
+#                   baked tests/fixtures/paleo/ oracles, for BOTH models —
+#                   Müller 2019 and Merdith 2021); the 66 Ma site table
 #                   is regenerated and compared inside chicxulub.mjs §12.
 #   deep-time-earth.mjs  the deep-time-earth.html page model.
 #
@@ -31,6 +32,8 @@ on:
       - 'js/deep-time/**'
       - 'tests/deep-time-earth.mjs'
       - 'tests/fixtures/paleo/**'
+      - 'tests/helpers/paleo-oracle.mjs'
+      - 'scripts/build-paleo-merdith.py'
       - '.github/workflows/chicxulub-kernels.yml'
   push:
     branches: [main]
@@ -47,6 +50,8 @@ on:
       - 'js/deep-time/**'
       - 'tests/deep-time-earth.mjs'
       - 'tests/fixtures/paleo/**'
+      - 'tests/helpers/paleo-oracle.mjs'
+      - 'scripts/build-paleo-merdith.py'
       - '.github/workflows/chicxulub-kernels.yml'
   workflow_dispatch:
 

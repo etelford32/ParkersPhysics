@@ -14,7 +14,9 @@
  *   4. the REFERENCE IMPLEMENTATION — pyGPlates (EarthByte's own library) run
  *      on the same files by scripts/paleo_oracle.py: every plate's total
  *      rotation at 16 ages, its refusals, the plate partition of 4000 points
- *      (js/paleo/plates.js) and the Chicxulub sites at 66 Ma.
+ *      (js/paleo/plates.js) and the Chicxulub sites at 66 Ma — for BOTH baked
+ *      models (Müller et al. 2019, mantle frame; Merdith et al. 2021,
+ *      palaeomagnetic frame).
  */
 import fs from 'node:fs';
 import zlib from 'node:zlib';
@@ -22,6 +24,7 @@ import * as PR from '../js/paleo/rotations.js';
 import * as PB from '../js/earth-interior/plates.js';
 import * as PL from '../js/paleo/plates.js';
 import { PALEO_SITES } from '../js/chicxulub/paleo-sites.js';
+import { measureAgainstOracle } from './helpers/paleo-oracle.mjs';
 
 let checks = 0, failed = 0;
 const ok = (c, m) => { checks++; if (!c) failed++; console.log(`  ${c ? '✓' : '✗'} ${m}`); };
@@ -112,60 +115,88 @@ section('5. what Chicxulub gets');
     ok(d66 < 0.7 * dToday, `Beloc: ${d66.toFixed(0)} km from the crater at 66 Ma, ${dToday.toFixed(0)} km today — the Caribbean plate has carried it east`);
 }
 
-section('6. against the reference implementation: pyGPlates');
+/**
+ * The kernel against one pyGPlates oracle (the measurement is the shared
+ * tests/helpers/paleo-oracle.mjs, which the page's printed numbers are also
+ * checked against). ROTATIONS: away from a crossover the two agree to 1e-9°;
+ * AT one, pyGPlates' tie rule is not reproduced, so the gate proves the
+ * weaker, sufficient claim — pyGPlates' answer is one of the chains the FILE
+ * allows there — and bounds the difference by the measured worst.
+ */
+function oracleSection(title, { M, plates, O, rotFile, crossBoundDeg }) {
+    section(title);
+    ok(/^1\./.test(O.meta.pygplates) && O.meta.rotationFile === rotFile, `the oracle ran pyGPlates ${O.meta.pygplates} on ${rotFile}`);
+    const m = measureAgainstOracle(M, plates, O);
+    ok(m.off > 12000 && m.offDeg < 1e-8, `${m.off} plate/age rotations away from a crossover agree to ${m.offDeg.toExponential(1)}°`);
+    ok(m.at > 50 && m.atAllowed === m.at && m.atDeg <= crossBoundDeg, `${m.at} AT a crossover: pyGPlates' answer is one of the file's own chains every time (${m.atAllowed}/${m.at}); the tie rule differs by at most ${m.atDeg.toExponential(1)}° (≈ ${(m.atDeg * 111195).toFixed(0)} m)`);
+    ok(m.onlyUs === 0 && m.onlyThem === 0 && m.refusedBoth > 3000, `refusals identical: ${m.refusedBoth} plate/ages refused by both, none by only one`);
+    ok(m.agree / m.points > 0.995 && m.missFar === 0, `plate partition: ${m.agree}/${m.points} points (${(100 * m.agree / m.points).toFixed(2)} %) get pyGPlates' plate; all ${m.points - m.agree} misses lie within 2× the ${plates.meta.toleranceDeg}° simplification of a boundary`);
+    ok(m.sameAge / m.agree > 0.995 && m.ageFar === 0, `and the same piece of crust: its appearance age matches on ${m.sameAge}/${m.agree}; every other one is within 2× the simplification of a seam between two polygons of that plate`);
+    return m;
+}
+
+const ORACLE_MULLER = oracleSection('6. against the reference implementation: pyGPlates (Müller et al. 2019)', {
+    M, plates: PL.decodePlates(load('../data/paleo/muller2019-plates.json')), O: load('./fixtures/paleo/pygplates-oracle.json'),
+    rotFile: rot.meta.file, crossBoundDeg: 2e-4,
+});
 {
     const O = load('./fixtures/paleo/pygplates-oracle.json');
-    ok(/^1\./.test(O.meta.pygplates) && O.meta.rotationFile === rot.meta.file, `the oracle ran pyGPlates ${O.meta.pygplates} on the same rotation file`);
-    let n = 0, worst = 0, worstAt = null, onlyUs = 0, onlyThem = 0, both = 0;
-    for (const [plate, age, r] of O.rotations) {
-        const t = M.total(plate, age);
-        if (!r && !t) { both++; continue; }
-        if (!r) { onlyUs++; continue; }       // we answer where pyGPlates refuses
-        if (!t) { onlyThem++; continue; }     // we refuse where pyGPlates answers
-        const a = qAngle(t.q, PR.quatFromPole(r[0], r[1], r[2]));
-        n++; if (a > worst) { worst = a; worstAt = [plate, age]; }
-    }
-    ok(n > 12000 && worst < 5e-4, `${n} plate/age rotations agree to ${worst.toExponential(1)}° (≈ ${(worst * 111195).toFixed(0)} m; worst plate ${worstAt[0]} at ${worstAt[1]} Ma, a crossover age)`);
-    ok(onlyUs === 0 && onlyThem === 0 && both > 3000, `refusals identical: ${both} plate/ages refused by both, none by only one`);
-    // the crossover rule: plate 555 at 230 Ma has two sequences, and the first dead-ends (355 has no rotation)
+    const plates = PL.decodePlates(load('../data/paleo/muller2019-plates.json'));
     const c = M.candidates(555, 230);
     ok(c.length === 2 && c[0].fixed === 355 && !M.total(355, 230) && M.total(555, 230).chain[1] === 521,
         'negative control: first-sequence-wins WITHOUT fall-through refuses plate 555 at 230 Ma, which pyGPlates answers through 521');
-
-    const plates = PL.decodePlates(load('../data/paleo/muller2019-plates.json'));
-    const edge = (lat, lon, ps) => {
-        let best = 1e9; const k = Math.cos(lat * Math.PI / 180);
-        for (const p of ps) for (const r of p.rings) for (let i = 1; i < r.length; i++) {
-            const ax = (r[i - 1][0] - lon) * k, ay = r[i - 1][1] - lat, dx = (r[i][0] - r[i - 1][0]) * k, dy = r[i][1] - r[i - 1][1], L = dx * dx + dy * dy;
-            const t = L ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L)) : 0;
-            best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
-        }
-        return best;
-    };
-    let agree = 0, sameAge = 0, far = 0, ageFar = 0;
-    const miss = [];
-    for (const [lat, lon, id, from] of O.partition) {
-        const r = PL.plateAt(plates, lat, lon);
-        if ((r ? r.plate : null) === id) {
-            agree++;
-            if (r === null || r.fromAge === from) sameAge++;
-            else if (edge(lat, lon, plates.static.filter((p) => p.plate === id)) > 2 * plates.meta.toleranceDeg) ageFar++;
-        }
-        else { miss.push([lat, lon, id, r && r.plate]); if (edge(lat, lon, plates.static.filter((p) => p.plate === id || p.plate === r?.plate)) > 2 * plates.meta.toleranceDeg) far++; }
-    }
-    const share = agree / O.partition.length;
-    ok(share > 0.995 && far === 0, `plate partition: ${agree}/${O.partition.length} points (${(100 * share).toFixed(2)} %) get pyGPlates' plate; all ${miss.length} misses lie within 2× the ${plates.meta.toleranceDeg}° simplification of a boundary`);
-    ok(sameAge / agree > 0.995 && ageFar === 0, `and the same piece of crust: its appearance age matches on ${sameAge}/${agree}; every other one is within 2× the simplification of a seam between two polygons of that plate`);
-    // overlap order: Beloc is inside 2048 AND 973; pyGPlates takes 2048 — the highest id; the lowest-id rule would not
     const b = PL.plateAt(plates, sites.beloc.lat, sites.beloc.lon);
     ok(Object.values(O.sites).every((v, i) => v.partitionPlate === PL.plateAt(plates, Object.values(sites)[i].lat, Object.values(sites)[i].lon).plate)
         && b.hits.length === 2 && O.sites.beloc.partitionPlate === 2048 && b.hits[b.hits.length - 1].plate === 973,
         'every Chicxulub site gets pyGPlates\' plate; negative control: at Beloc (2048 over 973) the lowest-id rule would pick 973');
-
     let sw = 0;
     for (const [k, v] of Object.entries(O.sites)) sw = Math.max(sw, PR.angularDistance(v.lat, v.lon, PALEO_SITES[k].at66.latDeg, PALEO_SITES[k].at66.lonDeg));
     ok(sw < 2e-4, `the Chicxulub sites at 66.04 Ma match pyGPlates to ${sw.toExponential(1)}° (the site table rounds to 1e-4°)`);
+    ok(M.singleRowSequences === 0, 'Müller 2019 has no one-row sequences');
 }
+
+section('7. the second model: Merdith et al. 2021 (palaeomagnetic frame)');
+const rotM21 = load('../data/paleo/merdith2021-rotations.json');
+const M21 = PR.createModel(rotM21);
+const platesM21 = PL.decodePlates(load('../data/paleo/merdith2021-plates.json'));
+{
+    ok(rotM21.meta.licence === 'CC BY 4.0' && /^[0-9a-f]{64}$/.test(rotM21.meta.sha256) && /License\.txt$/.test(rotM21.meta.licenceStatement),
+        'licence (CC BY 4.0, from EarthByte\'s Data_Collections/License.txt) and the pinned archive hash travel with the data');
+    ok(/palaeomagnetic/.test(rotM21.meta.frame) && /not independent/.test(rotM21.meta.lineage), 'the bake says which frame it is in and that it is not independent of Müller 2019');
+    ok(rotM21.sequences.every(([, , r]) => r[0][0] <= 250 && (r.length < 2 || r[r.length - 2][0] <= 250)), 'trimmed to 250 Ma, keeping only the one row past it each sequence needs');
+    // the one-row rule: interleaved rows parse into fragments GPlates ignores
+    ok(M21.singleRowSequences > 0 && !M21.total(4011, 0) && !M21.total(531, 250),
+        `${M21.singleRowSequences} one-row fragments dropped, as GPlates drops them (keeping them answered plate 4011 at 0 Ma and 531 at 250 Ma, which pyGPlates refuses)`);
+}
+const ORACLE_MERDITH = oracleSection('7b. Merdith 2021 against pyGPlates (run on the archive\'s FULL 1000 Ma file and its GPML polygons)', {
+    M: M21, plates: platesM21, O: load('./fixtures/paleo/pygplates-oracle-merdith2021.json'),
+    rotFile: rotM21.meta.file, crossBoundDeg: 6e-3,
+});
+{
+    const O = load('./fixtures/paleo/pygplates-oracle-merdith2021.json');
+    let sw = 0;
+    for (const v of Object.values(O.sites)) {
+        const h = PL.plateAt(platesM21, v.presentLat, v.presentLon);
+        const q = M21.reconstruct(v.presentLat, v.presentLon, h.plate, 66.04);
+        sw = Math.max(sw, PR.angularDistance(q.lat, q.lon, v.lat, v.lon) + (h.plate === v.partitionPlate ? 0 : 99));
+    }
+    ok(sw < 1e-8, `the Chicxulub sites at 66.04 Ma in Merdith 2021: same plate as pyGPlates' partitioner and the same position to ${sw.toExponential(1)}°`);
+}
+{
+    // the two geometry rules, each with its negative control: a polygon edge is a GREAT-CIRCLE arc, and a ring
+    // that passes through a pole as one vertex encloses the cap. Without them pyGPlates' plate 8021 at 88.7°S
+    // falls in a gap (it sits 1.4° inside East Antarctica).
+    const O = load('./fixtures/paleo/pygplates-oracle-merdith2021.json');
+    const polar = O.partition.find(([lat, , id]) => lat < -88.5 && id === 8021);
+    const flat = PL.decodePlates(load('../data/paleo/merdith2021-plates.json'), { greatCircle: false });
+    ok(polar && PL.plateAt(platesM21, polar[0], polar[1])?.plate === 8021 && PL.plateAt(flat, polar[0], polar[1]) === null,
+        `a point at ${Math.abs(polar[0]).toFixed(1)}°S is on East Antarctica (8021) as pyGPlates says; read as straight lon/lat edges through a single pole vertex it falls in a gap (negative control)`);
+    const ring = [[180, -86.685], [0, -90], [-180, -86.044], [-100, -80], [180, -86.685]];
+    const ex = PL.expandPoles(ring);
+    ok(ex.length === 6 && ex[1][0] === 180 && ex[1][1] === -90 && ex[2][0] === -180 && ex[2][1] === -90 && PL.inRing(173.5, -88.7, ex) && !PL.inRing(173.5, -88.7, ring),
+        'a pole vertex becomes a run along the pole line (lon_prev → lon_next), which encloses the cap; the raw ring does not');
+}
+export const ORACLES = { muller2019: ORACLE_MULLER, merdith2021: ORACLE_MERDITH };
 
 console.log(`\n${checks - failed}/${checks} checks passed`);
 if (failed) process.exit(1);

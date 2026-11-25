@@ -46,7 +46,8 @@ in the global file.
   motion agrees with Bird's PB2002 present-day poles to within 15 % in speed and
   6° in direction. That checks the kernel's conventions; it does not check the
   model's 66 Ma reconstruction, which only the model's own data supports.
-- **Checked against the model's reference software** (2026-11-25):
+- **Checked against the model's reference software** (2026-11-25; numbers
+  updated the same day after the second model's check found two more rules):
   `scripts/paleo_oracle.py` runs pyGPlates 1.0.0 on the same archive and writes
   `tests/fixtures/paleo/pygplates-oracle.json`. Every plate's total rotation at
   16 ages (12 817 pairs) agrees to 1.8e-4° (≈ 20 m, worst at a crossover age),
@@ -56,3 +57,66 @@ in the global file.
   a crossover whose first chain dead-ends (plate 555 → 355 at 230 Ma) the next
   sequence is used, as pyGPlates does. Overlapping static polygons resolve
   highest plate id first — pyGPlates' default order (at Beloc: 2048, as before).
+  Away from crossover instants the rotations agree to 1e-9°; AT one (a hop
+  where two sequences of a plate both cover the age) the file allows two
+  answers and pyGPlates' tie rule is not reproduced (file order, "starts
+  there", fixed-plate id and a breadth-first tree were each tried and each
+  mismatched somewhere), so the gate proves pyGPlates' answer is one of the
+  file's own chains and bounds the difference: 105 cases, ≤ 1.8e-4° (≈ 20 m).
+- **Polygon geometry follows GPlates**: an edge is a GREAT-CIRCLE arc, so the
+  bake simplifies ON THE SPHERE (lon/lat Douglas–Peucker collapsed runs along a
+  parallel into chords that bent 0.13° at 65°S), `js/paleo/plates.js` densifies
+  each edge onto its arc, and a ring passing through a pole as ONE vertex is
+  expanded into a run along the pole line (Merdith's East Antarctica).
+
+## The second model: Merdith et al. 2021
+
+**Merdith, A. S., et al. (2021).** Extending full-plate tectonic models into deep
+time: linking the Neoproterozoic and the Phanerozoic. *Earth-Science Reviews*
+214, 103477. doi:10.1016/j.earscirev.2020.103477. Supplementary model SM2,
+v1.2.4 (the December 2023 corrections), from EarthByte's own server:
+
+    https://www.earthbyte.org/webdav/ftp/Data_Collections/Merdith_etal_2021_ESR/SM2-Merdith_et_al_1_Ga_reconstruction_v1.2.4.zip
+    sha256 ea247ec5f8975fb7e6034c8ec48704b11805fc6f520ee7526c5757b830386982
+
+**Licence: Creative Commons Attribution 4.0.** The archive carries no licence
+of its own; the statement is `License.txt` at the root of EarthByte's
+`Data_Collections` directory, which holds it
+(https://www.earthbyte.org/webdav/ftp/Data_Collections/License.txt, sha256
+93b0e3272777ad090ca5720c30619412559831dcd8fccbac496cf1bec625dc8f on
+2026-11-25). Credit Merdith et al. (2021) / EarthByte wherever it is shown.
+
+| File | From | What it is |
+|---|---|---|
+| `merdith2021-rotations.json` | `1000_0_rotfile_Merdith_et_al.rot` | rotation sequences, trimmed to 250 Ma (plus the one row past it a sequence needs) |
+| `merdith2021-plates.json` | `shapes_static_polygons_Merdith_et_al.gpml` + `shapes_continents.gpml` | the muller2019-plates.json format |
+| `merdith2021-coastlines.json` | `shapes_coastlines_Merdith_et_al_v2.gpmlz` | the model's own present-day coastlines |
+
+Rebuild: `python3 scripts/build-paleo-merdith.py [--zip PATH] [--check]`
+(stdlib; GPML positions are LAT LON; the baker refuses a ring crossing the
+antimeridian — none do).
+
+**What it is for, and its limits:**
+- It is in a **palaeomagnetic** frame (Africa on a global apparent-polar-wander
+  path after Tetley 2018; the archive's `APWP.txt`), where Müller 2019 is in a
+  mantle frame. Comparing the two shows how much the frame (true polar wander)
+  and the relative motions move a place.
+- It is **not independent** of Müller 2019: for 250–0 Ma it compiles Young et al.
+  (2019), of the same EarthByte lineage. Their difference is a LOWER bound on
+  the uncertainty, never an error bar, and the page says so.
+- Palaeomagnetism fixes **latitude, not longitude**. On the page the second
+  model's coastlines are turned about the spin axis by the circular-mean
+  longitude offset of the continents (`longitudeShift` in
+  js/deep-time/page-model.js), which changes no latitude; the distances it
+  reports say which convention they use.
+- The rotation file parses into **one-row fragments** where rows are
+  interleaved (plates 4011, 4301, 531 near 250 Ma); GPlates ignores a one-row
+  sequence and so does the kernel (61 in the full file, 9 after the trim).
+- Checked against **pyGPlates 1.0.0** on the archive's FULL 1000 Ma file and its
+  GPML polygons (`tests/fixtures/paleo/pygplates-oracle-merdith2021.json`):
+  14 190 rotations away from a crossover to 9.4e-10°; 221 at a crossover
+  within 5.6e-3° (≈ 620 m), each pyGPlates answer one of the file's chains;
+  3 941 identical refusals; 3 991 of 4 000 plate lookups.
+- **Measured**: at 66 Ma the two models put today's continents a median 3.7° of
+  latitude apart (90th percentile 5.7°); at 200 Ma 12.8° (21.7°). Chicxulub at
+  66 Ma: 21.9°N (Müller, mantle) vs 25.0°N (Merdith, palaeomagnetic).
