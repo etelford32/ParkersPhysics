@@ -84,7 +84,7 @@
  */
 
 import {
-    makeView, zoomAt, panBy, panStep, geoToPx, pxToGeo, tilePlan, scaleBar, scales, wrapNear, viewBounds,
+    makeView, zoomAt, panBy, panStep, geoToPx, pxToGeo, tilePlan, scaleBar, scales, wrapNear, viewBounds, wrap180,
     fieldTimeIndex, timeBlend, blendPlane, fieldSample, fieldRange, fieldExtremes, heatImage, ZOOM_STEP,
 } from './map-view.js';
 import { contourLines, isothermLevels, labelAnchor } from './contours.js';
@@ -1936,7 +1936,36 @@ export function mountMap(root, deps) {
     let pinch = null;
     const local = (ev) => { const r = canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
 
+    // A CLICK (not a drag) offers that ground as the site. It asks first — a
+    // stray click must not throw away the place being analysed — and waits out
+    // the double-click that zooms. A tap is a pointerup within 5 px / 600 ms of
+    // its pointerdown on event.timeStamp (the mars.html rule).
+    const pick = root.querySelector('#cx-map-pick');
+    let press = null, pickTimer = null;
+    const hidePick = () => { clearTimeout(pickTimer); if (pick) pick.hidden = true; };
+    const offerPick = (p) => {
+        if (!pick || !deps.onPick) return;
+        const g = pxToGeo(M.view, M.w, M.h, p.x, p.y);
+        if (!g || Math.abs(g.lat) > 89.5) return;
+        const lon = wrap180(g.lon);
+        pick.dataset.lat = String(g.lat);
+        pick.dataset.lon = String(lon);
+        pick.querySelector('[data-pick-where]').textContent = deps.formatCoords ? deps.formatCoords(g.lat, lon) : `${g.lat.toFixed(3)}, ${lon.toFixed(3)}`;
+        pick.hidden = false;
+        const bw = pick.offsetWidth, bh = pick.offsetHeight;
+        pick.style.transform = `translate(${Math.round(Math.min(Math.max(6, p.x - bw / 2), M.w - bw - 6))}px, ${Math.round(p.y > bh + 20 ? p.y - bh - 12 : p.y + 14)}px)`;
+    };
+    pick?.addEventListener('click', (ev) => {
+        const b = ev.target.closest('button');
+        if (!b) return;
+        const lat = Number(pick.dataset.lat), lon = Number(pick.dataset.lon);
+        hidePick();
+        if (b.dataset.pick === 'go' && Number.isFinite(lat) && Number.isFinite(lon)) deps.onPick(lat, lon);
+    });
+
     canvas.addEventListener('pointerdown', (ev) => {
+        hidePick();
+        press = pointers.size === 0 ? { ...local(ev), t: ev.timeStamp, id: ev.pointerId } : null;
         canvas.focus({ preventScroll: true });
         try { canvas.setPointerCapture(ev.pointerId); } catch { /* synthetic pointer */ }
         pointers.set(ev.pointerId, local(ev));
@@ -1965,6 +1994,14 @@ export function mountMap(root, deps) {
         }
     });
     const release = (ev) => {
+        if (press && press.id === ev.pointerId && ev.type === 'pointerup') {
+            const p = local(ev);
+            if (Math.hypot(p.x - press.x, p.y - press.y) <= 5 && ev.timeStamp - press.t <= 600) {
+                clearTimeout(pickTimer);
+                pickTimer = setTimeout(() => offerPick(p), 280);
+            }
+        }
+        press = null;
         pointers.delete(ev.pointerId);
         if (pointers.size < 2) pinch = null;
         if (!pointers.size) stage.classList.remove('is-dragging');
@@ -1979,6 +2016,7 @@ export function mountMap(root, deps) {
         setView(zoomAt(M.view, Math.exp(-ev.deltaY * k), p.x, p.y, M.w, M.h));
     }, { passive: false });
     canvas.addEventListener('dblclick', (ev) => {
+        hidePick();
         const p = local(ev);
         setView(zoomAt(M.view, ev.shiftKey ? 1 / ZOOM_STEP : ZOOM_STEP, p.x, p.y, M.w, M.h));
     });
@@ -2005,6 +2043,7 @@ export function mountMap(root, deps) {
     function setView(v) {
         const c0 = M.view && M.h ? flowCompression() : null;
         M.view = v; requestDraw(); updateFlow();
+        const pk = root.querySelector('#cx-map-pick'); if (pk) pk.hidden = true;   // the offer was for ground that has moved
         if (demWanted()) scheduleDem();
         if (flowCompression() !== c0) deps.onWind?.(windInfo());
     }

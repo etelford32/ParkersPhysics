@@ -1,0 +1,90 @@
+# plate-history-kernels — Plates Through Time (plate-tectonics.html): kernel, measurements, bake
+#
+#   plate-history-rotations.mjs    js/plate-history/rotations.js against pygplates 1.0 (fixture by
+#                                  scripts/plate_history_oracle.py): 816 total rotations, 300 velocities,
+#                                  whole continent features end to end; controls: nlerp, a broken circuit
+#                                  "skipped", a sequence cut at its 999 comment lines
+#   plate-history-diagnostics.mjs  what the kernel MEASURES vs oracles we did not write: Merdith et al.
+#                                  (2021) SM3 ridge/trench length and crust production/consumption, Bird
+#                                  (2003) PB2002 at 0 Ma, rotation seams, the supercontinent peaks; and
+#                                  data/plate-history/series.json is exactly the kernel's
+#   plate-history-geotime.mjs      the time-scale table is contiguous and names times correctly
+#   bake --check (second job)      scripts/build-plate-history.py reproduces data/plate-history/*.gz
+#                                  byte for byte from the sha256-pinned EarthByte zip (~6 min; runs
+#                                  only when the baker or the baked data change)
+#
+# Browser gate: tests/plate-tectonics.spec.js, with the Playwright suite.
+name: plate-history-kernels
+
+on:
+  push:
+    paths:
+      - 'js/plate-history/**'
+      - 'data/plate-history/**'
+      - 'scripts/build-plate-history*'
+      - 'scripts/plate_history_oracle.py'
+      - 'tests/plate-history-*.mjs'
+      - 'tests/fixtures/plate-history/**'
+      - '.github/workflows/plate-history-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/plate-history/**'
+      - 'data/plate-history/**'
+      - 'scripts/build-plate-history*'
+      - 'scripts/plate_history_oracle.py'
+      - 'tests/plate-history-*.mjs'
+      - 'tests/fixtures/plate-history/**'
+      - '.github/workflows/plate-history-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plate-history-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Rotation kernel + measurements (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: rotation kernel vs pygplates
+        run: node tests/plate-history-rotations.mjs
+      - name: measurements vs Merdith SM3, Bird PB2002; series is current
+        run: node tests/plate-history-diagnostics.mjs
+      - name: geologic time scale table
+        run: node tests/plate-history-geotime.mjs
+      - name: series.json is current
+        run: node scripts/build-plate-history-series.mjs --check
+
+  bake:
+    name: Bake reproduces from the pinned model (pygplates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: did the baker or the baked data change?
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || git diff --name-only HEAD~1 HEAD | grep -qE '^(scripts/build-plate-history\.py|data/plate-history/.*\.gz|data/plate-history/meta\.json)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.run == 'true'
+        with:
+          python-version: '3.12'
+      - name: bake --check
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          pip install pygplates==1.0.0 numpy
+          python3 scripts/build-plate-history.py --check
