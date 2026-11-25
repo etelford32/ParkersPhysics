@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep-Time Earth · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/deep-time-earth.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/deep-time-earth.html">
+<meta property="og:title" content="Deep-Time Earth — the plates over the last 250 million years">
+<meta property="og:description" content="Run the continents back 250 million years on a published plate model, checked against its own reference software. Click anywhere to see where it was.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Deep-Time Earth">
+<meta name="twitter:description" content="The plates over the last 250 million years, on the Müller et al. 2019 model.">
+<meta name="description" content="An interactive globe of the Earth's tectonic plates over the last 250 million years, driven by the Müller et al. 2019 plate model and checked against pyGPlates. Click any point to see where it was and how far it has travelled.">
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:#cfd6ea; font-family:'Segoe UI', system-ui, sans-serif; }
+#dte-app { display:grid; grid-template-columns:minmax(0, 1fr) minmax(300px, 380px); gap:14px; padding:14px; max-width:1500px; margin:0 auto; }
+@media (max-width: 1050px) { #dte-app { grid-template-columns:minmax(0, 1fr); } }
+@media (max-width: 768px) { #dte-app { padding:10px; gap:10px; } }
+.dte-panel { background:#0a0e1e; border:1px solid rgba(120,160,255,.14); border-radius:12px; padding:14px 16px; min-width:0; }
+.dte-span { grid-column:1 / -1; }
+.dte-panel h2 { font-size:.95rem; color:#f3f5ff; font-weight:700; margin-bottom:4px; }
+.dte-panel h2 small { display:block; font-size:.74rem; color:#8a93ad; font-weight:500; margin-top:2px; line-height:1.45; }
+.dte-fine { font-size:.72rem; color:#8a93ad; line-height:1.55; margin-top:8px; }
+.dte-fine b { color:#aab3cb; }
+.dte-body { font-size:.82rem; color:#b9c2da; line-height:1.6; margin-top:8px; }
+.dte-body b { color:#f3f5ff; }
+.dte-body a, .dte-fine a { color:#8fbaff; }
+#dte-hero h1 { font-size:1.5rem; font-weight:800; color:#f3f5ff; }
+#dte-hero p { font-size:.86rem; color:#aab3cb; line-height:1.6; margin-top:6px; max-width:980px; }
+
+#dte-stage-wrap { position:relative; border-radius:10px; overflow:hidden; background:#03050c; border:1px solid rgba(255,255,255,.07); }
+#dte-globe { display:block; width:100%; height:clamp(360px, 68vh, 760px); touch-action:none; cursor:grab; }
+#dte-globe:active { cursor:grabbing; }
+#dte-labels { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.dte-mark { position:absolute; transform:translate(-50%, -50%); width:9px; height:9px; border-radius:50%; border:2px solid #03050c; background:#f3f5ff; }
+.dte-mark[hidden] { display:none; }
+.dte-mark span { position:absolute; left:11px; top:-6px; font-size:.68rem; color:#e6ebfa; white-space:nowrap; text-shadow:0 1px 4px #000, 0 0 2px #000; }
+.dte-mark.crater { background:#ff6b5b; width:12px; height:12px; }
+.dte-mark.you { background:#7fd6ae; }
+.dte-mark.pick { background:#ffd166; width:12px; height:12px; }
+.dte-mark.city { width:7px; height:7px; background:#cfd6ea; }
+.dte-mark.city span { color:#cfd6ea; font-size:.64rem; }
+#dte-when { position:absolute; left:14px; top:12px; pointer-events:none; text-shadow:0 1px 6px #000; }
+#dte-when b { display:block; font-size:1.3rem; color:#f3f5ff; font-variant-numeric:tabular-nums; }
+#dte-when span { font-size:.78rem; color:#aab3cb; }
+#dte-frame { position:absolute; right:12px; bottom:10px; font-size:.66rem; color:#8a93ad; pointer-events:none; text-align:right; text-shadow:0 1px 4px #000; }
+#dte-fail, #dte-loading { padding:28px 16px; font-size:.84rem; color:#e3b765; }
+#dte-fail[hidden], #dte-loading[hidden] { display:none; }
+
+.dte-ctl { display:flex; gap:8px 14px; flex-wrap:wrap; align-items:center; margin:10px 0 4px; font-size:.74rem; color:#aab3cb; }
+.dte-ctl label { display:flex; align-items:center; gap:6px; cursor:pointer; }
+.dte-btn { background:#1c3a6b; color:#fff; border:1px solid rgba(160,190,255,.35); border-radius:8px; font:inherit; font-size:.78rem; padding:6px 14px; min-height:34px; min-width:74px; cursor:pointer; }
+.dte-btn:focus-visible, .dte-stops button:focus-visible, #dte-age:focus-visible { outline:2px solid #7fb0ff; outline-offset:1px; }
+#dte-clock { margin-top:6px; --thumb:16px; }
+#dte-age { display:block; width:100%; margin:0; accent-color:#3987e5; height:24px; direction:rtl; }
+#dte-periods { position:relative; height:18px; margin:0 calc(var(--thumb) / 2); border-radius:3px; overflow:hidden; }
+#dte-periods div { position:absolute; top:0; bottom:0; font-size:.6rem; color:#03050c; font-weight:700; display:flex; align-items:center; justify-content:center; overflow:hidden; white-space:nowrap; }
+.dte-stops { position:relative; height:30px; margin:0 calc(var(--thumb) / 2); }
+.dte-stops button { position:absolute; top:0; transform:translateX(-50%); background:none; border:0; color:#aab3cb; font:inherit; font-size:.66rem; padding:12px 3px 2px; cursor:pointer; white-space:nowrap; min-height:24px; }
+.dte-stops button::before { content:''; position:absolute; left:50%; top:0; width:1px; height:9px; background:#8a93ad; }
+.dte-stops button:hover { color:#f3f5ff; text-decoration:underline; }
+.dte-stops button:first-child { transform:translateX(-85%); }
+.dte-stops button:last-child { transform:translateX(-15%); }
+
+.dte-legend { display:flex; gap:6px 14px; flex-wrap:wrap; font-size:.7rem; color:#aab3cb; margin-top:8px; align-items:center; }
+.dte-legend span { display:inline-flex; align-items:center; gap:6px; }
+.dte-legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.dte-legend i.line { height:2px; width:18px; border-radius:0; }
+.dte-legend i.ramp { width:90px; background:linear-gradient(to right, #9edbf5, #5ca8e0, #3373bd, #214d8f, #163066); }
+
+#dte-point .dte-kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:.78rem; margin-top:10px; }
+#dte-point dt { color:#8a93ad; }
+#dte-point dd { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+#dte-point .dte-hint { font-size:.8rem; color:#aab3cb; line-height:1.55; margin-top:8px; }
+#dte-chart svg { display:block; width:100%; height:auto; margin-top:10px; overflow:visible; }
+.dte-presets { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.dte-presets button { background:rgba(255,255,255,.04); color:#cfd6ea; border:1px solid rgba(255,255,255,.14); border-radius:7px; font:inherit; font-size:.72rem; padding:5px 9px; min-height:30px; cursor:pointer; }
+.dte-presets button:hover { border-color:rgba(160,190,255,.5); }
+.dte-check { list-style:none; margin-top:8px; }
+.dte-check li { font-size:.78rem; color:#b9c2da; line-height:1.55; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+.dte-check li b { color:#7fd6ae; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("deep-time-earth");</script>
+
+<div id="dte-app">
+
+  <section class="dte-panel dte-span" id="dte-hero">
+    <h1>Deep-Time Earth</h1>
+    <p>The ground under your feet has been moving the whole time. This globe runs the plates back 250 million years, to when
+      the continents were joined in Pangaea, using a published plate model. Drag the slider to change the age, and click
+      anywhere to see where that spot was and how far it has travelled.</p>
+  </section>
+
+  <section class="dte-panel">
+    <div id="dte-stage-wrap">
+      <canvas id="dte-globe" aria-label="Globe of the Earth's plates at the selected age"></canvas>
+      <div id="dte-labels"></div>
+      <div id="dte-when"><b>Today</b><span></span></div>
+      <div id="dte-frame">Grid: latitude and longitude in the model's mantle frame</div>
+      <div id="dte-loading">Loading the plate model…</div>
+      <div id="dte-fail" hidden>This browser could not start WebGL, so the globe is not shown.</div>
+    </div>
+    <div class="dte-ctl">
+      <button type="button" class="dte-btn" id="dte-play" aria-pressed="false">Play</button>
+      <label><input type="checkbox" id="dte-cities" checked> Cities</label>
+      <label><input type="checkbox" id="dte-coast" checked> Today's coastlines</label>
+      <span id="dte-age-out" aria-live="polite"></span>
+    </div>
+    <div id="dte-clock">
+      <div id="dte-periods" aria-hidden="true"></div>
+      <input type="range" id="dte-age" min="0" max="250" step="0.5" value="0" aria-label="Age in millions of years">
+      <div class="dte-stops" id="dte-stops"></div>
+    </div>
+    <div class="dte-legend">
+      <span><i class="ramp"></i> Seafloor: young → old</span>
+      <span><i style="background:#3a4256"></i> Crust of unknown age</span>
+      <span><i style="background:#c9b48a"></i> Continental crust</span>
+      <span><i class="line" style="background:#f2e6c8"></i> Today's coastlines</span>
+      <span><i style="background:#1b1f2b;border:1px solid #444"></i> Crust that has since been destroyed</span>
+    </div>
+  </section>
+
+  <section class="dte-panel" id="dte-point">
+    <h2>Where was it? <small>Click the globe, or pick a place.</small></h2>
+    <div class="dte-presets" id="dte-presets"></div>
+    <div id="dte-point-body"><p class="dte-hint">Click any point on the globe. You will see which plate it rides, where it is today, where it was at the age on the slider, and its path back as far as the model can follow it.</p></div>
+    <div id="dte-chart"></div>
+  </section>
+
+  <section class="dte-panel dte-span">
+    <h2>What this is, and what it is not</h2>
+    <p class="dte-body"><b>The model.</b> Müller, R. D., et al. (2019), <i>A global plate model including lithospheric deformation
+      along major rifts and orogens since the Triassic</i>, Tectonics 38 — the EarthByte group's model, version 2.0, from their own
+      server, used under <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="license">CC BY-SA 4.0</a>. The plate
+      outlines and rotations on this page are derived from it and are shared under the same licence. Each plate's motion is a chain of
+      rotations about poles, interpolated between the model's dated rows the same way the model's own software does it.</p>
+    <p class="dte-body"><b>Checked against the reference software.</b> The same model files were run through pyGPlates, the
+      EarthByte group's own library, and this page's code is tested against it:</p>
+    <ul class="dte-check" id="dte-check"></ul>
+    <p class="dte-body"><b>The outlines are today's.</b> Every shape on the globe is a piece of the present-day surface carried
+      back on its plate. The tan areas are the model's outlines of continental crust, not past coastlines, and the light lines
+      are today's coastlines. Shallow seas have flooded and drained the continents many times; that history is not in this model.
+      The dark areas are ocean floor that existed then but has since sunk back into the mantle, so nothing of it is left to carry back.</p>
+    <p class="dte-body"><b>The plates move as rigid pieces.</b> The model also describes how rifts and mountain belts stretch and
+      squeeze, but this page moves each piece rigidly. Expect small gaps and overlaps where the crust has deformed, such as the Andes,
+      Tibet and the North Sea.</p>
+    <p class="dte-body"><b>The frame is the mantle's, not the spin axis.</b> The model fixes its reference to the deep mantle.
+      Over tens of millions of years the whole solid Earth also tilts relative to the spin axis (true polar wander, a few degrees
+      since the dinosaurs died out). That tilt is not in this frame, so a past latitude here can differ by a few degrees from the
+      latitude measured in ancient magnetised rocks.</p>
+    <p class="dte-fine"><b>Seafloor age</b> comes from the age at which each strip of ocean floor first appears in the model (its
+      isochron bins), so it is the age of that strip to within its bin, not a measured age grid. The geological periods on the slider
+      are from the International Chronostratigraphic Chart, written from memory; they label the slider and are not used in any
+      calculation. The model ends at 250 million years and the page never goes past it.</p>
+  </section>
+
+</div>
+
+<script type="module" src="js/deep-time-earth.js"></script>
+</body>
+</html>

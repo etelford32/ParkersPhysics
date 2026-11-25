@@ -7,10 +7,13 @@
 #                   and the climate box.
 #   paleo-rotations.mjs  the plate-rotation kernel (js/paleo/) on the baked
 #                   Müller et al. 2019 model: identities, crossovers, and the
-#                   cross-check against PB2002; the 66 Ma site table is
-#                   regenerated and compared inside chicxulub.mjs §12.
+#                   cross-checks against PB2002 and against pyGPlates (the
+#                   baked tests/fixtures/paleo/ oracle); the 66 Ma site table
+#                   is regenerated and compared inside chicxulub.mjs §12.
+#   deep-time-earth.mjs  the deep-time-earth.html page model.
 #
-# The browser gate (tests/chicxulub-page.spec.js) is not run here.
+# The browser gates (tests/chicxulub-page.spec.js, tests/deep-time-earth.spec.js)
+# are not run here.
 name: chicxulub-kernels
 
 on:
@@ -25,6 +28,9 @@ on:
       - 'data/paleo/**'
       - 'tests/paleo-rotations.mjs'
       - 'scripts/build-chicxulub-paleo.mjs'
+      - 'js/deep-time/**'
+      - 'tests/deep-time-earth.mjs'
+      - 'tests/fixtures/paleo/**'
       - '.github/workflows/chicxulub-kernels.yml'
   push:
     branches: [main]
@@ -38,6 +44,9 @@ on:
       - 'data/paleo/**'
       - 'tests/paleo-rotations.mjs'
       - 'scripts/build-chicxulub-paleo.mjs'
+      - 'js/deep-time/**'
+      - 'tests/deep-time-earth.mjs'
+      - 'tests/fixtures/paleo/**'
       - '.github/workflows/chicxulub-kernels.yml'
   workflow_dispatch:
 
@@ -62,3 +71,5 @@ jobs:
         run: node tests/chicxulub.mjs
       - name: plate-rotation kernel
         run: node tests/paleo-rotations.mjs
+      - name: deep-time page model
+        run: node tests/deep-time-earth.mjs

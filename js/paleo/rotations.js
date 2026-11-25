@@ -29,6 +29,7 @@
  */
 
 const DEG = Math.PI / 180;
+const CACHE_MAX = 50000;
 
 // ── quaternions [w, x, y, z] ────────────────────────────────────────────────
 export function quatFromPole(latDeg, lonDeg, angleDeg) {
@@ -100,46 +101,57 @@ export function createModel(baked) {
     }
     const cache = new Map();
 
-    /** The rotation of `moving` relative to its fixed plate at `age`, or null. */
-    function relative(moving, age) {
-        const list = byPlate.get(moving);
-        if (!list) return null;
+    /**
+     * Every sequence of `moving` that covers `age`, in FILE ORDER, each as
+     * { fixed, q, sequence }. More than one only at a crossover age.
+     */
+    function candidates(moving, age) {
+        const list = byPlate.get(moving), out = [];
+        if (!list) return out;
         for (const s of list) {
             if (age < s.from - 1e-9 || age > s.to + 1e-9) continue;
             const R = s.rows;
+            if (R.length === 1) { if (Math.abs(age - R[0].age) < 1e-9) out.push({ fixed: s.fixed, q: R[0].q, sequence: s }); continue; }
             for (let i = 0; i < R.length - 1; i++) {
                 const a = R[i], b = R[i + 1];
                 if (age >= a.age - 1e-9 && age <= b.age + 1e-9) {
                     const span = b.age - a.age;
                     const f = span > 0 ? Math.min(1, Math.max(0, (age - a.age) / span)) : 0;
-                    return { fixed: s.fixed, q: f === 0 ? a.q : f === 1 ? b.q : slerp(a.q, b.q, f), sequence: s };
+                    out.push({ fixed: s.fixed, q: f === 0 ? a.q : f === 1 ? b.q : slerp(a.q, b.q, f), sequence: s });
+                    break;
                 }
             }
-            if (R.length === 1 && Math.abs(age - R[0].age) < 1e-9) return { fixed: s.fixed, q: R[0].q, sequence: s };
         }
-        return null;
+        return out;
     }
+    /** The rotation of `moving` relative to its fixed plate at `age` (the first candidate), or null. */
+    const relative = (moving, age) => candidates(moving, age)[0] || null;
 
-    /** Total rotation of `plate` relative to plate `anchor` (default 0) at `age`. */
+    /**
+     * Total rotation of `plate` relative to plate `anchor` (default 0) at
+     * `age`. At a crossover the FIRST sequence (file order) whose chain
+     * reaches the anchor wins — a chain that dead-ends (its fixed plate has
+     * no rotation at that age: plate 555 → 355 at 230 Ma) falls through to
+     * the next, which is what pyGPlates returns there (gated).
+     */
     function total(plate, age, anchor = 0) {
         const key = plate + '@' + age + '>' + anchor;
         if (cache.has(key)) return cache.get(key);
-        let q = IDENTITY, p = plate, chain = [];
-        for (let hop = 0; p !== 0 && hop < 64; hop++) {
-            const r = relative(p, age);
-            if (!r) { cache.set(key, null); return null; }
-            chain.push(p);
-            q = quatMul(r.q, q);
-            p = r.fixed;
-        }
-        if (p !== 0) { cache.set(key, null); return null; }          // looped
-        let out = q;
-        if (anchor !== 0) {
+        if (cache.size > CACHE_MAX) cache.clear();          // a scrubbed page asks for endless ages
+        const chainTo0 = (p, depth) => {
+            if (p === 0) return { q: IDENTITY, chain: [0] };
+            if (depth > 64) return null;                    // a loop
+            for (const c of candidates(p, age)) {
+                const up = chainTo0(c.fixed, depth + 1);
+                if (up) return { q: quatMul(up.q, c.q), chain: [p].concat(up.chain) };
+            }
+            return null;
+        };
+        let res = chainTo0(plate, 0);
+        if (res && anchor !== 0) {
             const qa = total(anchor, age, 0);
-            if (!qa) { cache.set(key, null); return null; }
-            out = quatMul(quatConj(qa.q), q);
+            res = qa ? { q: quatMul(quatConj(qa.q), res.q), chain: res.chain } : null;
         }
-        const res = { q: out, chain: chain.concat(0) };
         cache.set(key, res);
         return res;
     }
@@ -185,7 +197,7 @@ export function createModel(baked) {
 
     const plates = () => [...byPlate.keys()];
     const oldest = (plate) => { const l = byPlate.get(plate); return l ? Math.max(...l.map((s) => s.to)) : null; };
-    return { relative, total, reconstruct, meanVelocity, crossovers, plates, oldest, meta: baked.meta };
+    return { relative, candidates, total, reconstruct, meanVelocity, crossovers, plates, oldest, meta: baked.meta };
 }
 
 /**

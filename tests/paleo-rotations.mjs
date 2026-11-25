@@ -2,8 +2,7 @@
  * paleo-rotations.mjs — the gate for js/paleo/rotations.js and the baked
  * Müller et al. 2019 plate model (data/paleo/, scripts/build-paleo-model.py).
  *
- * No GPlates is reachable from the build machine (pygplates and the GPlates
- * web service were both unavailable), so the kernel is checked three ways:
+ * The kernel is checked four ways:
  *   1. IDENTITIES — every file row reproduced exactly, slerp on the geodesic,
  *      round trips, rigid distances, refusals;
  *   2. the model's own CROSSOVERS, measured (two unsynchronised ones in the
@@ -11,12 +10,18 @@
  *   3. an INDEPENDENT DATASET — the model's last few Myr of relative motion
  *      against Bird's PB2002 present-day Euler poles (data/earth-interior/),
  *      a different model built from different data, with the sign flipped as
- *      the negative control.
+ *      the negative control;
+ *   4. the REFERENCE IMPLEMENTATION — pyGPlates (EarthByte's own library) run
+ *      on the same files by scripts/paleo_oracle.py: every plate's total
+ *      rotation at 16 ages, its refusals, the plate partition of 4000 points
+ *      (js/paleo/plates.js) and the Chicxulub sites at 66 Ma.
  */
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import * as PR from '../js/paleo/rotations.js';
 import * as PB from '../js/earth-interior/plates.js';
+import * as PL from '../js/paleo/plates.js';
+import { PALEO_SITES } from '../js/chicxulub/paleo-sites.js';
 
 let checks = 0, failed = 0;
 const ok = (c, m) => { checks++; if (!c) failed++; console.log(`  ${c ? '✓' : '✗'} ${m}`); };
@@ -105,6 +110,61 @@ section('5. what Chicxulub gets');
     const b = M.reconstruct(sites.beloc.lat, sites.beloc.lon, 2048, 66.04);
     const dToday = PR.angularDistance(21.33, -89.5, 18.4, -72.6) * Math.PI / 180 * 6371, d66 = PR.angularDistance(c.lat, c.lon, b.lat, b.lon) * Math.PI / 180 * 6371;
     ok(d66 < 0.7 * dToday, `Beloc: ${d66.toFixed(0)} km from the crater at 66 Ma, ${dToday.toFixed(0)} km today — the Caribbean plate has carried it east`);
+}
+
+section('6. against the reference implementation: pyGPlates');
+{
+    const O = load('./fixtures/paleo/pygplates-oracle.json');
+    ok(/^1\./.test(O.meta.pygplates) && O.meta.rotationFile === rot.meta.file, `the oracle ran pyGPlates ${O.meta.pygplates} on the same rotation file`);
+    let n = 0, worst = 0, worstAt = null, onlyUs = 0, onlyThem = 0, both = 0;
+    for (const [plate, age, r] of O.rotations) {
+        const t = M.total(plate, age);
+        if (!r && !t) { both++; continue; }
+        if (!r) { onlyUs++; continue; }       // we answer where pyGPlates refuses
+        if (!t) { onlyThem++; continue; }     // we refuse where pyGPlates answers
+        const a = qAngle(t.q, PR.quatFromPole(r[0], r[1], r[2]));
+        n++; if (a > worst) { worst = a; worstAt = [plate, age]; }
+    }
+    ok(n > 12000 && worst < 5e-4, `${n} plate/age rotations agree to ${worst.toExponential(1)}° (≈ ${(worst * 111195).toFixed(0)} m; worst plate ${worstAt[0]} at ${worstAt[1]} Ma, a crossover age)`);
+    ok(onlyUs === 0 && onlyThem === 0 && both > 3000, `refusals identical: ${both} plate/ages refused by both, none by only one`);
+    // the crossover rule: plate 555 at 230 Ma has two sequences, and the first dead-ends (355 has no rotation)
+    const c = M.candidates(555, 230);
+    ok(c.length === 2 && c[0].fixed === 355 && !M.total(355, 230) && M.total(555, 230).chain[1] === 521,
+        'negative control: first-sequence-wins WITHOUT fall-through refuses plate 555 at 230 Ma, which pyGPlates answers through 521');
+
+    const plates = PL.decodePlates(load('../data/paleo/muller2019-plates.json'));
+    const edge = (lat, lon, ps) => {
+        let best = 1e9; const k = Math.cos(lat * Math.PI / 180);
+        for (const p of ps) for (const r of p.rings) for (let i = 1; i < r.length; i++) {
+            const ax = (r[i - 1][0] - lon) * k, ay = r[i - 1][1] - lat, dx = (r[i][0] - r[i - 1][0]) * k, dy = r[i][1] - r[i - 1][1], L = dx * dx + dy * dy;
+            const t = L ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L)) : 0;
+            best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+        }
+        return best;
+    };
+    let agree = 0, sameAge = 0, far = 0, ageFar = 0;
+    const miss = [];
+    for (const [lat, lon, id, from] of O.partition) {
+        const r = PL.plateAt(plates, lat, lon);
+        if ((r ? r.plate : null) === id) {
+            agree++;
+            if (r === null || r.fromAge === from) sameAge++;
+            else if (edge(lat, lon, plates.static.filter((p) => p.plate === id)) > 2 * plates.meta.toleranceDeg) ageFar++;
+        }
+        else { miss.push([lat, lon, id, r && r.plate]); if (edge(lat, lon, plates.static.filter((p) => p.plate === id || p.plate === r?.plate)) > 2 * plates.meta.toleranceDeg) far++; }
+    }
+    const share = agree / O.partition.length;
+    ok(share > 0.995 && far === 0, `plate partition: ${agree}/${O.partition.length} points (${(100 * share).toFixed(2)} %) get pyGPlates' plate; all ${miss.length} misses lie within 2× the ${plates.meta.toleranceDeg}° simplification of a boundary`);
+    ok(sameAge / agree > 0.995 && ageFar === 0, `and the same piece of crust: its appearance age matches on ${sameAge}/${agree}; every other one is within 2× the simplification of a seam between two polygons of that plate`);
+    // overlap order: Beloc is inside 2048 AND 973; pyGPlates takes 2048 — the highest id; the lowest-id rule would not
+    const b = PL.plateAt(plates, sites.beloc.lat, sites.beloc.lon);
+    ok(Object.values(O.sites).every((v, i) => v.partitionPlate === PL.plateAt(plates, Object.values(sites)[i].lat, Object.values(sites)[i].lon).plate)
+        && b.hits.length === 2 && O.sites.beloc.partitionPlate === 2048 && b.hits[b.hits.length - 1].plate === 973,
+        'every Chicxulub site gets pyGPlates\' plate; negative control: at Beloc (2048 over 973) the lowest-id rule would pick 973');
+
+    let sw = 0;
+    for (const [k, v] of Object.entries(O.sites)) sw = Math.max(sw, PR.angularDistance(v.lat, v.lon, PALEO_SITES[k].at66.latDeg, PALEO_SITES[k].at66.lonDeg));
+    ok(sw < 2e-4, `the Chicxulub sites at 66.04 Ma match pyGPlates to ${sw.toExponential(1)}° (the site table rounds to 1e-4°)`);
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

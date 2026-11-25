@@ -1,7 +1,8 @@
 # Deep-time Earth — a separate simulation of the planet's geography through time
 
 *Proposed 2026-11-23, after the Chicxulub reconstruction needed 66 Ma
-geography. Nothing here is built yet except the shared kernel and data.*
+geography. **Steps 1–3 BUILT 2026-11-25**: the pyGPlates oracle, static
+polygons in the browser, and the page (`deep-time-earth.html`). See §5.*
 
 ## 1. What exists already (built for Chicxulub, made to be shared)
 
@@ -78,3 +79,32 @@ moving back from Bird's present-day ones), Volcanoes (large igneous provinces).
 - Is CC BY-SA data acceptable on the page? It needs attribution and
   share-alike for the derived data files (not for our code).
 - Which palaeogeography dataset, once its licence is read.
+
+## 5. Built 2026-11-25
+
+- **Oracle** (`scripts/paleo_oracle.py`, pyGPlates 1.0.0 in a venv →
+  `tests/fixtures/paleo/pygplates-oracle.json`, gated in
+  `tests/paleo-rotations.mjs` §6): 12 817 plate/age rotations agree to
+  1.8e-4°, refusals identical, 3 995/4 000 plate lookups agree, Chicxulub
+  sites to 4.6e-5°. It found one kernel bug (a dead-end crossover chain;
+  fixed by falling through to the next sequence).
+- **Polygons** (`data/paleo/muller2019-plates.json`, 267 KB gzipped;
+  `js/paleo/plates.js` PURE): static plate polygons with appearance ages and
+  continental-crust outlines; `plateAt` is pyGPlates' highest-id-first rule.
+  Millidegree precision is load-bearing — at centidegrees Beloc (a few km
+  inside its terrane) fell out of it.
+- **The page** (`deep-time-earth.html` → `js/deep-time-earth.js`, the PURE
+  `js/deep-time/page-model.js`, the renderer `js/deep-time/globe.js`): one
+  mesh per plate, set to the kernel's rotation each age; crust younger than
+  the displayed age discarded; seafloor coloured by its isochron-bin age;
+  today's coastlines; a mantle-frame graticule; click → plate, today, then,
+  path and a latitude chart; Chicxulub, cities and "You" carried back;
+  `?age=&at=` deep links (the Chicxulub page links in). Gates:
+  `tests/deep-time-earth.mjs` (20) + `tests/deep-time-earth.spec.js` (5,
+  including a pixel check that the central Atlantic is blue today and not at
+  200 Ma, and that the drawn surface shrinks 1.00 → 0.63 → 0.37 of the
+  sphere at 0 / 66 / 200 Ma as later crust drops out).
+
+Still open, in order: a second model or a palaeomagnetic frame (rule 2/3),
+deforming-mesh flags (rule 4), palaeo-shorelines (rule 1), events on the clock
+beyond Chicxulub.

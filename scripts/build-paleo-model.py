@@ -28,6 +28,15 @@ What is written (stdlib only, deterministic; --check rebuilds and compares):
       id and appearance age, simplified to COAST_TOL_DEG (Douglas–Peucker on
       lon/lat) and quantised to 0.01°. These are TODAY's shorelines carried
       back in time — NOT the shoreline of the age they are drawn at.
+  data/paleo/muller2019-plates.json
+      the present-day STATIC PLATE POLYGONS (every piece of the surface, with
+      its plate id and the age range it exists for: FROMAGE is when that
+      crust appears — oceanic crust younger than an age is not drawn at it)
+      and the CONTINENTAL POLYGONS (the model's continental-crust outlines),
+      simplified to POLY_TOL_DEG and stored as DELTA-CODED integer
+      millidegrees ([lon0, lat0, dlon1, dlat1, ...]); names in a table.
+      Read by js/paleo/plates.js, which reproduces pyGPlates' own
+      PlatePartitioner on them (scripts/paleo_oracle.py, gated).
 """
 import argparse, hashlib, io, json, math, os, struct, sys, urllib.request, zipfile
 
@@ -39,6 +48,8 @@ ROT = P + 'Global_250-0Ma_Rotations_2019_v2.rot'
 STATIC = P + 'StaticGeometries/StaticPolygons/Global_EarthByte_GPlates_PresentDay_StaticPlatePolygons_2019_v1'
 COAST = P + 'StaticGeometries/Coastlines/Global_coastlines_2019_v1_low_res'
 COAST_TOL_DEG = 0.15
+POLY_TOL_DEG = 0.05                      # static + continental polygons (≈ 5 km; sub-pixel on the page's globe)
+CONT = P + 'StaticGeometries/ContinentalPolygons/Global_EarthByte_GPlates_PresentDay_ContinentalPolygons_2019_v1'
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'data', 'paleo')
 
@@ -197,6 +208,36 @@ def coastlines(z):
     return out, vin, vout
 
 
+def delta_ring(ring, tol):
+    s = simplify(ring, tol)
+    out, px, py = [], 0, 0
+    for x, y in s:
+        ix, iy = round(x * 1000), round(y * 1000)
+        out += [ix - px, iy - py]
+        px, py = ix, iy
+    return out
+
+
+def polygons(z, path, tol):
+    recs, geo = read_dbf(z.read(path + '.dbf')), read_shp(z.read(path + '.shp'))
+    names, index, out, vin, vout = [], {}, [], 0, 0
+    for r, rings in zip(recs, geo):
+        nm = r.get('NAME', '')
+        if nm not in index:
+            index[nm] = len(names)
+            names.append(nm)
+        rs = []
+        for ring in rings:
+            vin += len(ring)
+            d = delta_ring(ring, tol)
+            if len(d) >= 8:                       # ≥ 4 vertices (a closed triangle)
+                rs.append(d)
+                vout += len(d) // 2
+        if rs:
+            out.append([int(float(r['PLATEID1'])), num(r['FROMAGE'], 600.0), num(r['TOAGE'], -999.0), index[nm], rs])
+    return {'names': names, 'polygons': out, 'verticesIn': vin, 'verticesOut': vout}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--zip')
@@ -216,6 +257,14 @@ def main():
                                                 'toleranceDeg': COAST_TOL_DEG, 'verticesIn': vin, 'verticesOut': vout,
                                                 'note': 'present-day coastlines cut by the static polygons; NOT palaeo-shorelines'},
                                        'lines': coast},
+    }
+    st, ct = polygons(z, STATIC, POLY_TOL_DEG), polygons(z, CONT, POLY_TOL_DEG)
+    files['muller2019-plates.json'] = {
+        'meta': {**meta, 'files': [STATIC.split('/')[-1] + '.shp', CONT.split('/')[-1] + '.shp'], 'toleranceDeg': POLY_TOL_DEG,
+                 'convention': 'polygons: [plate, fromAge Ma, toAge Ma (-999 = today), name index, rings]; ring = delta-coded '
+                               'integer millidegrees [lon0, lat0, dlon, dlat, ...] (closed: last vertex repeats the first)',
+                 'note': 'present-day geometry; continents are continental CRUST outlines, not palaeo-shorelines'},
+        'static': st, 'continents': ct,
     }
     os.makedirs(OUT, exist_ok=True)
     bad = []
