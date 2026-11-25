@@ -11,6 +11,12 @@
  * PACIFIC-FIXED (Bird's own). Relative motion across a boundary is the same in
  * both — only the arrows change — and the probe says so.
  *
+ * SURFACE: the plates tinted for identity (default), or the AGE OF THE OCEAN FLOOR everywhere —
+ * Seton et al. (2020), baked by scripts/build-seafloor-age.mjs and read through the PURE
+ * seafloor-age.js. The boundaries' "seafloor age" colouring and the age surface share ONE ramp
+ * (seafloor-age.js AGE_RAMP), so a ridge and the floor beside it read the same for the same age.
+ * The grid is fetched on first use of the age surface or of the probe on this view, never at boot.
+ *
  * INSIDE (default on): the crust turns to glass and the plates are followed
  * DOWN — USGS Slab2's 27 subducting slabs at true depth, the 660 km
  * transition zone, and the live feed's hypocentres where they really are
@@ -18,21 +24,16 @@
  * the pointer and, for an earthquake, where it sits relative to that slab.
  */
 import * as THREE from 'three';
-import { decodePlates, plateAt, plateVelocity, stepMotions, boundarySummary, STEP_CLASSES } from './plates.js';
+import { decodePlates, plateAt, plateVelocity, stepMotions, boundarySummary, stepGeometry, STEP_CLASSES } from './plates.js';
 import { FAMILY_STYLE, stepFamily, velocityArrows, nearestStep, depthAge, plateCentroids, plateRGBA, ARROW_DEG_PER_MM_YR } from './plates-model.js';
 import { GlowLines } from './glow-lines.js';
 import { latLonToVec } from './stage.js';
 import { mountSlabLayer, DEPTH_RAMP, DEPTH_MAX_KM } from './slab-layer.js';
+import { loadSeafloorAge, ageAt, ageRGBA, ageColor, areaAgeDistribution, AGE_RAMP, AGE_RAMP_MAX_MYR } from './seafloor-age.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
-const AGE_RAMP = ['#fff3b0', '#f6b26b', '#d9663a', '#8c2d5a', '#3b1f5c'];   // young → old (0 → 180 Ma)
-const ageColor = (a) => {
-    const t = Math.min(1, Math.max(0, a / 180)) * (AGE_RAMP.length - 1), i = Math.min(AGE_RAMP.length - 2, Math.floor(t)), f = t - i;
-    const p = hexRgb(AGE_RAMP[i]), q = hexRgb(AGE_RAMP[i + 1]);
-    return p.map((v, k) => v + (q[k] - v) * f);
-};
 const compass = (az) => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
 const LABEL_MIN_KM2 = 8e6;
 
@@ -47,7 +48,25 @@ export async function loadPlates(fetchFn = fetch, url = 'data/earth-interior/pla
 }
 
 export function mountPlates({ stage, getQuakes = () => [] }) {
-    const S = { active: false, model: null, error: null, frame: 'nnr', colorBy: 'kind', arrows: true, inside: !/[?&]slabs=0\b/.test(location.search), labels: [] };
+    const S = { active: false, model: null, error: null, frame: 'nnr', colorBy: 'kind', arrows: true, inside: !/[?&]slabs=0\b/.test(location.search), labels: [],
+        surface: /[?&]psurface=age\b/.test(location.search) ? 'age' : 'plates', age: null, ageError: null, ageLoading: null, ageRgba: null };
+    // The ocean-floor age grid (Seton et al. 2020): loaded on first need, never at boot.
+    const ensureAge = () => {
+        if (S.age || S.ageLoading) return S.ageLoading;
+        S.ageLoading = loadSeafloorAge().then(({ meta, grid }) => {
+            S.age = { meta, grid, dist: areaAgeDistribution(grid) };
+            applySurface(); renderHud(); renderPanel();
+        }).catch((err) => { S.ageError = err.message; renderHud(); renderPanel(); });
+        return S.ageLoading;
+    };
+    const applySurface = () => {
+        if (!stage || !S.active) return;
+        if (S.surface === 'age') {
+            if (!S.age) { stage.setSurfaceOverlay(null); ensureAge(); return; }
+            S.ageRgba = S.ageRgba || ageRGBA(S.age.grid);
+            stage.setSurfaceOverlay(S.ageRgba, 1800, 900);
+        } else if (S.model) stage.setSurfaceOverlay(plateRGBA(S.model), S.model.raster.nLon, S.model.raster.nLat);
+    };
     let slabs = null;
     const ensureSlabs = () => {
         if (!stage || slabs) return slabs;
@@ -134,8 +153,11 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
             <span class="ei-muted">Pacific plate, NNR: ${pa.rateDegMa.toFixed(3)}°/Myr about ${Math.abs(pa.lat).toFixed(1)}°S ${pa.lon.toFixed(1)}°E</span>${insideLine()}`;
         const key = $('#ei-pkeys');
         if (key) key.innerHTML = S.colorBy === 'age'
-            ? `<div class="ei-fkey"><span>Seafloor age at the boundary (Müller et al. 1997, via Bird)</span><i style="background:linear-gradient(90deg,${AGE_RAMP.join(',')})"></i><span class="ei-fkey-ends"><span>0</span><span>180 Ma</span></span></div>`
+            ? `<div class="ei-fkey"><span>Seafloor age at the boundary (Müller et al. 1997, via Bird)</span><i style="background:linear-gradient(90deg,${AGE_RAMP.join(',')})"></i><span class="ei-fkey-ends"><span>0</span><span>${AGE_RAMP_MAX_MYR}+ Myr</span></span></div>`
             : `<div class="ei-pfam">${Object.values(FAMILY_STYLE).map((f) => `<span><i style="background:${f.hex}"></i>${esc(f.label)}</span>`).join('')}</div>`;
+        if (key && S.surface === 'age') key.innerHTML += S.age
+            ? `<div class="ei-fkey"><span>Age of the ocean floor (Seton et al. 2020) — continents uncoloured</span><i style="background:linear-gradient(90deg,${AGE_RAMP.join(',')})"></i><span class="ei-fkey-ends"><span>0</span><span>${AGE_RAMP_MAX_MYR}+ Myr</span></span></div>`
+            : `<div class="ei-fkey"><span>${S.ageError ? `Ocean-floor age unavailable (${esc(S.ageError)}).` : 'Loading the ocean-floor age grid…'}</span></div>`;
         if (key && S.inside) key.innerHTML += `<div class="ei-fkey"><span>Slab surface and earthquake depth (Slab2 · USGS)</span><i style="background:linear-gradient(90deg,${DEPTH_RAMP.join(',')})"></i><span class="ei-fkey-ends"><span>0</span><span>${DEPTH_MAX_KM} km</span></span></div>`;
         const ak = $('#ei-parrowkey');
         if (ak) ak.textContent = S.arrows ? `Arrows: plate velocity (${S.frame === 'nnr' ? 'no-net-rotation' : 'Pacific-fixed'} frame), length ${ARROW_DEG_PER_MM_YR}° of arc per mm/yr — a display scale.` : '';
@@ -179,7 +201,39 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
             <div><h3 class="ei-h3">Boundaries by what they do</h3><div class="ei-table-wrap"><table class="ei-table"><thead><tr><th>Kind</th><th class="ei-num">Length</th><th class="ei-num">Mean rate</th></tr></thead><tbody>${rows}</tbody></table></div>
                 <p class="ei-muted ei-small">Rates are length-weighted means of the relative velocity across each boundary step (full spreading rate, not half), from the Euler poles.</p></div>
             <div><h3 class="ei-h3">The largest plates</h3><div class="ei-table-wrap"><table class="ei-table"><thead><tr><th>Plate</th><th class="ei-num">Mkm²</th><th class="ei-num" title="Speed at the plate's area centroid, no-net-rotation frame">mm/yr at centre</th><th class="ei-num" title="Rotation rate about its no-net-rotation Euler pole">°/Myr</th></tr></thead><tbody>${prow}</tbody></table></div></div>
-        </div>${depthAgeChart()}`;
+        </div>${depthAgeChart()}${areaAgeChart()}`;
+    }
+
+    // The whole ocean floor: how much of it is how old (Seton et al. 2020), and how it compares with
+    // Bird's tabulated Müller (1997) ages at the same boundary steps.
+    function areaAgeChart() {
+        if (S.ageError) return `<h3 class="ei-h3">How old is the ocean floor?</h3><p class="ei-muted ei-small">The ocean-floor age grid could not be loaded (${esc(S.ageError)}).</p>`;
+        if (!S.age) return `<h3 class="ei-h3">How old is the ocean floor?</h3><p class="ei-muted ei-small">Loading the ocean-floor age grid (Seton et al. 2020)…</p>`;
+        const A = S.age.dist, bins = A.bins.filter((b) => b.from < 200);
+        const W = 560, H = 210, L = 52, R = 14, T = 12, B = 34, top = Math.ceil(Math.max(...bins.map((b) => b.areaKm2)) / 1e6 / 10) * 10;
+        const xs = (a) => L + a / 200 * (W - L - R), ys = (m) => T + (1 - m / top) * (H - T - B);
+        const bars = bins.map((b) => { const x = xs(b.from) + 1, w = xs(b.to) - xs(b.from) - 2, c = ageColor(b.from + 5).map((v) => Math.round(v * 255)).join(',');
+            return `<rect x="${x.toFixed(1)}" y="${ys(b.areaKm2 / 1e6).toFixed(1)}" width="${w.toFixed(1)}" height="${(ys(0) - ys(b.areaKm2 / 1e6)).toFixed(1)}" fill="rgb(${c})" rx="1.5"><title>${b.from}–${b.to} Myr: ${(b.areaKm2 / 1e6).toFixed(1)} million km²</title></rect>`; }).join('');
+        const xt = [0, 40, 80, 120, 160, 200].map((a) => `<text x="${xs(a)}" y="${H - 16}" class="ei-ticklab" text-anchor="middle">${a}</text>`).join('');
+        const yt = []; for (let m = 0; m <= top; m += 10) yt.push(`<text x="${L - 6}" y="${ys(m) + 4}" class="ei-ticklab" text-anchor="end">${m}</text><line x1="${L}" x2="${W - R}" y1="${ys(m)}" y2="${ys(m)}" class="ei-gridline"/>`);
+        // Seton 2020 vs Müller 1997 at Bird's oceanic-transform steps (two independent age products).
+        const diffs = [];
+        for (const st of S.model?.steps || []) {
+            if (st.cls !== 'OTF' || st.ageMa == null) continue;
+            const { mid } = stepGeometry(st.lat1, st.lon1, st.lat2, st.lon2);
+            const a = ageAt(S.age.grid, mid.lat, mid.lon);
+            if (a != null) diffs.push(Math.abs(a - st.ageMa));
+        }
+        diffs.sort((x, y) => x - y);
+        const o = S.age.meta.oldestNode;
+        return `<h3 class="ei-h3">How old is the ocean floor?</h3>
+            <svg viewBox="0 0 ${W} ${H}" class="ei-dachart" role="img" aria-label="Area of ocean floor in each 10-million-year age band">
+                ${yt.join('')}${xt}${bars}<text x="${(L + W - R) / 2}" y="${H - 2}" class="ei-ticklab" text-anchor="middle">age of the ocean floor, Myr</text>
+                <text x="12" y="${(T + H - B) / 2}" class="ei-ticklab" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">million km²</text>
+            </svg>
+            <p class="ei-muted ei-small">Oceanic crust covers ${(100 * A.globeFraction).toFixed(0)} % of the planet (${(A.oceanAreaKm2 / 1e6).toFixed(0)} million km²). Its mean age is ${A.meanMyr.toFixed(0)} Myr and half of it is younger than ${A.medianMyr.toFixed(0)} Myr; only ${(100 * A.olderThan[180]).toFixed(1)} % is older than 180 Myr. The area shrinks steadily with age because subduction consumes old and young floor alike, so the ocean floor is continually recycled. The oldest node in the grid is ${o.ageMyr.toFixed(0)} Myr old, in the eastern Mediterranean (${o.lat.toFixed(1)}°N ${o.lon.toFixed(1)}°E).
+            Measured on the whole grid, each node weighted by its true area. Where both products have an age, at ${diffs.length} of Bird's oceanic-transform steps, the two disagree by a median ${diffs.length ? diffs[diffs.length >> 1].toFixed(1) : '—'} Myr (Seton et al. 2020 against Müller et al. 1997).
+            Data: Seton, Müller, Zahirovic et al. (2020), <i>G³</i> 21, e2020GC009214, release 2020.1 (GTS2012 timescale), CC BY 4.0 — every second node of their 6-arc-minute grid (0.2°), unaveraged. The ages between magnetic anomalies are the authors' interpolation, and their release notes list artefacts around microplates, along some fracture zones and on highly oblique ridges.</p>`;
     }
 
     // The ocean floor: depth vs age along the transforms, against the plate-cooling curve.
@@ -197,7 +251,7 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
                 <text x="12" y="${(T + H - B) / 2}" class="ei-ticklab" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">depth, km</text>
                 ${pts}<polyline points="${curve}" class="ei-da-curve"/>${bins}
             </svg>
-            <p class="ei-muted ei-small">Dots: depth (ETOPO5) and seafloor age (Müller et al. 1997) at each of Bird's ${d.points.length} oceanic-transform boundary steps; rings: medians. Line: the plate-cooling depth of Parsons &amp; Sclater (1977), d = 2.5 km + 0.35 km·√(age/Myr) to 70 Myr, flattening after. New seafloor is made hot and buoyant at the ridges and contracts as it cools. Transforms sit in fracture-zone troughs and are not a random sample of the seafloor, so read this as a comparison, not a fit. A global seafloor-age map (Seton et al. 2020, CC BY 4.0) is planned; its host is not reachable from our build machines yet.</p>`;
+            <p class="ei-muted ei-small">Dots: depth (ETOPO5) and seafloor age (Müller et al. 1997) at each of Bird's ${d.points.length} oceanic-transform boundary steps; rings: medians. Line: the plate-cooling depth of Parsons &amp; Sclater (1977), d = 2.5 km + 0.35 km·√(age/Myr) to 70 Myr, flattening after. New seafloor is made hot and buoyant at the ridges and contracts as it cools. Transforms sit in fracture-zone troughs and are not a random sample of the seafloor, so read this as a comparison, not a fit. The whole-ocean age map is below, and on the globe under "Surface: Seafloor age".</p>`;
     }
 
     function fillSections() {
@@ -220,12 +274,14 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
     function chips() {
         for (const b of document.querySelectorAll('[data-pframe]')) b.setAttribute('aria-pressed', String(b.dataset.pframe === S.frame));
         for (const b of document.querySelectorAll('[data-pcolor]')) b.setAttribute('aria-pressed', String(b.dataset.pcolor === S.colorBy));
+        for (const b of document.querySelectorAll('[data-psurface]')) b.setAttribute('aria-pressed', String(b.dataset.psurface === S.surface));
         $('#ei-parrows')?.setAttribute('aria-pressed', String(S.arrows));
         $('#ei-pinside')?.setAttribute('aria-pressed', String(S.inside));
     }
     function wire() {
         for (const b of document.querySelectorAll('[data-pframe]')) b.addEventListener('click', () => { S.frame = b.dataset.pframe; chips(); drawArrows(); renderHud(); });
         for (const b of document.querySelectorAll('[data-pcolor]')) b.addEventListener('click', () => { S.colorBy = b.dataset.pcolor; chips(); drawBoundaries(); renderHud(); });
+        for (const b of document.querySelectorAll('[data-psurface]')) b.addEventListener('click', () => { S.surface = b.dataset.psurface; chips(); applySurface(); renderHud(); });
         $('#ei-parrows')?.addEventListener('click', () => { S.arrows = !S.arrows; chips(); drawArrows(); renderHud(); });
         $('#ei-pinside')?.addEventListener('click', () => {
             S.inside = !S.inside; chips();
@@ -243,7 +299,7 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
             S.model = m;
             $('#ei-pstatus') && ($('#ei-pstatus').textContent = `PB2002 (Bird 2003): ${m.plates.length} plates, ${m.steps.length.toLocaleString()} boundary steps.`);
             drawBoundaries(); drawArrows(); makeLabels(); renderHud(); renderPanel(); renderSlabPanel();
-            if (stage && S.active) stage.setSurfaceOverlay(plateRGBA(m), m.raster.nLon, m.raster.nLat);
+            applySurface();
             for (const l of S.labels) l.el.style.display = S.active ? '' : 'none';
         }).catch((err) => { S.error = err.message; renderHud(); $('#ei-pstatus') && ($('#ei-pstatus').textContent = `PB2002 unavailable: ${err.message}`); });
         return S.loading;
@@ -256,7 +312,7 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
             for (const l of S.labels) l.el.style.display = on ? '' : 'none';
             if (on) {
                 stage.setCut('none');
-                if (S.model) stage.setSurfaceOverlay(plateRGBA(S.model), S.model.raster.nLon, S.model.raster.nLat);
+                applySurface();
                 // The western Pacific: the Ring of Fire's deepest slabs (Tonga, Izu–Bonin, Kuril) and the Pacific plate feeding them.
                 stage.flyToDirection(latLonToVec(8, 160), { fill: 0.92 });
                 if (S.inside) { ensureSlabs(); slabs.setVisible(true); }
@@ -267,7 +323,7 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
                 stage.setCut('octant');
             }
         }
-        if (on) { renderHud(); ensureModel(); }
+        if (on) { renderHud(); ensureModel(); ensureAge(); }
     }
 
     function probe(hit) {
@@ -287,11 +343,17 @@ export function mountPlates({ stage, getQuakes = () => [] }) {
             const sea = near.step.ageMa != null ? ` · seafloor ${near.step.ageMa} Myr old, ${(-near.step.elevationM / 1000).toFixed(1)} km deep` : '';
             b = `<span>${near.km.toFixed(0)} km from the ${esc(near.step.left.name)}–${esc(near.step.right.name)} boundary: ${esc(near.className)}, ${what}${down}${sea}</span>`;
         }
+        let sea = '';
+        if (S.age) {
+            const a = ageAt(S.age.grid, hit.lat, hit.lon);
+            sea = a == null ? '<span>No oceanic crust here in Seton et al. (2020) — continental or undated.</span>'
+                : `<span>Ocean floor here: <b>${a < 10 ? a.toFixed(1) : a.toFixed(0)} Myr old</b> (Seton et al. 2020)</span>`;
+        }
         let under = '';
         const d = S.inside ? slabs?.describe(hit) : null;
         if (d?.beneath?.length) under = d.beneath.map((u) => `<span>Below: the ${esc(u.slab.name)} slab, its top ${u.depthKm.toFixed(0)} km down${Number.isFinite(u.uncKm) ? ` (±${u.uncKm.toFixed(0)} km)` : ''}</span>`).join('');
         return `<b>${esc(plate.name)} plate · ${Math.abs(hit.lat).toFixed(1)}°${hit.lat < 0 ? 'S' : 'N'} ${Math.abs(hit.lon).toFixed(1)}°${hit.lon < 0 ? 'W' : 'E'}</b>
-            <span>Moving ${v.speed.toFixed(0)} mm/yr toward ${compass(v.azimuth)} (${v.azimuth.toFixed(0)}°) — ${S.frame === 'nnr' ? 'no-net-rotation frame' : 'relative to the Pacific plate'}</span>${b}${under}`;
+            <span>Moving ${v.speed.toFixed(0)} mm/yr toward ${compass(v.azimuth)} (${v.azimuth.toFixed(0)}°) — ${S.frame === 'nnr' ? 'no-net-rotation frame' : 'relative to the Pacific plate'}</span>${sea}${b}${under}`;
     }
 
     function quakeProbe(hit) {

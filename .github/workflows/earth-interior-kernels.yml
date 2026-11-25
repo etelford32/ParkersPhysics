@@ -55,6 +55,7 @@ on:
       - 'scripts/build-chaos.mjs'
       - 'scripts/build-plates.mjs'
       - 'scripts/build-slab2.mjs'
+      - 'scripts/build-seafloor-age.mjs'
       - 'scripts/slab2-pins.json'
       - 'tests/geomag-chaos.mjs'
       - 'tests/fixtures/geomag/**'
@@ -76,6 +77,7 @@ on:
       - 'scripts/build-chaos.mjs'
       - 'scripts/build-plates.mjs'
       - 'scripts/build-slab2.mjs'
+      - 'scripts/build-seafloor-age.mjs'
       - 'scripts/slab2-pins.json'
       - 'tests/geomag-chaos.mjs'
       - 'tests/fixtures/geomag/**'
@@ -140,3 +142,7 @@ jobs:
         run: |
           node tests/earth-interior-slabs.mjs
           node scripts/build-slab2.mjs --check
+      - name: Seafloor age (Seton et al. 2020) vs its text twin and Müller 1997; bake reproduces
+        run: |
+          node tests/earth-interior-seafloor-age.mjs
+          node scripts/build-seafloor-age.mjs --check

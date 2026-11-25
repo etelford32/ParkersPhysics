@@ -452,8 +452,27 @@ fail); NNR Pacific pole −63.23° 107.69° 0.649°/Ma vs NNR-NUVEL-1A −63.04�
 107.33° 0.6411 (an unweighted-mean control fails). The ocean-floor panel
 compares Bird's transform-fault depths with the Parsons & Sclater (1977)
 cooling curve — a comparison, not a fit (fracture zones are not a random
-sample). **Seafloor-age GRID (Seton 2020) is still blocked**: EarthByte,
-NOAA, Zenodo all unreachable; no licence-clean GitHub copy found.
+sample).
+
+**Seafloor age — Seton et al. (2020), BAKED 2026-11-25.** EarthByte's WebDAV became reachable
+(measured 2026-11-23; Zenodo and NOAA still are not). `scripts/build-seafloor-age.mjs` reads the
+release 2020.1 GTS2012 6′ grid (NetCDF-3, our own 60-line reader — no dependency) and keeps every
+2nd node (0.2°, subsampled, never averaged; 423 KB). The binary runs SOUTH → NORTH and is flipped
+once. `js/earth-interior/seafloor-age.js` (PURE) decodes, interpolates (bilinear when all four nodes
+are ocean, else the nearest node — never ocean over a continent) and measures the area–age
+distribution with true cell areas. Gate `tests/earth-interior-seafloor-age.mjs` against two oracles
+we did not write: the release's TEXT twin (`.xyz`, north → south): 7 371 on-lattice nodes within
+half the 0.05 Myr quantum with every land/ocean call agreeing (row-unflipped control: 205 Myr,
+3 729 disagreements), 1 438 between-node samples at 0.012 Myr median; and Müller et al. (1997) as
+Bird tabulates it at 886 oceanic-transform steps: median |Δ| 1.19 Myr, r 0.907 (180°-turned control:
+r 0.11). Ridges (Bird OSR) read 0.70 Myr median (row-flipped control 48 Myr). Measured: oceanic crust
+is 57.4 % of the globe, mean age 63.9 Myr, median 55.1, 0.57 % older than 180 Myr, oldest node 339 Myr
+in the eastern Mediterranean (Herodotus Basin). The Plates view has a "Surface: Seafloor age" chip
+(`?psurface=age`), the probe prints the age under the pointer, and the panel draws the area–age
+distribution. The boundaries' age colouring and the surface share ONE ramp (`AGE_RAMP` in the kernel).
+Browser gate: `tests/earth-interior-seafloor.spec.js` (lazy load, the panel's numbers recomputed
+from the kernel, the overlay texture differs from the plate tint; control: back on Plates the age key
+is gone).
 
 **Slabs — USGS Slab2, the plates going DOWN (2026-11-19).** `scripts/build-slab2.mjs`
 bakes all 27 slabs' depth + 1σ uncertainty, SUBSAMPLED (never averaged) to 0.2°
@@ -503,9 +522,10 @@ iso-depth hairlines alias at high DPR.
 - Bird marks 13 OROGENS where rigid rotation fails; the boundary steps inside them
   carry the flag (baked), but the velocity arrows there are drawn like any rigid
   plate's. They should be dimmed or labelled.
-- Seafloor age is only Bird's per-STEP Müller-1997 value at boundaries. The AGE GRID
-  (Seton 2020 / Müller 2016) is still blocked (EarthByte, NOAA, Zenodo unreachable at
-  build time) — the ocean floor away from boundaries is undrawn, not modelled.
+- Seafloor age: the Seton 2020 GRID is baked (above). Its between-isochron ages are the authors'
+  interpolation, and their release notes list artefacts (microplates, central-Atlantic fracture
+  zones, highly oblique spreading). No bathymetry grid is baked yet (ETOPO 2022 / GEBCO still
+  blocked), so depth vs age remains Bird's boundary steps; a whole-ocean depth–age fit needs it.
 - The Parsons–Sclater curve is a comparison; no plate-cooling fit to our own data.
 
 **Slabs (Slab2).**
@@ -525,8 +545,8 @@ iso-depth hairlines alias at high DPR.
    negative control (strip discard off ⇒ the wall is hidden).
 3. Present-day plate motion: MORVEL/GSRM comparison arrows beside PB2002, and a
    GNSS-station layer if a licence-clean feed exists (UNAVCO/EarthScope is CC BY).
-4. Seafloor-age grid: keep trying a licence-clean mirror of Seton 2020; nothing is
-   drawn until one is reachable.
+4. Seafloor-age grid: DONE (2026-11-25). Next: a bathymetry grid, for a whole-ocean depth–age
+   fit, and the half-space lithosphere thickness from age as a LABELLED model layer.
 5. Slab × quake statistics: Wadati–Benioff zone fit per slab from the USGS catalogue
    (σ of hypocentres about the slab surface) — a second independent check on Slab2.
 6. Native-resolution slab sections, loaded per slab on demand.
@@ -678,7 +698,7 @@ canonical page before shipping.
 | CHAOS-8.1 | field — BAKED (§8b) | ESA-VirES mirror @ 6aa2d4f | B | DTU: free with citation (confirm terms page) |
 | GEM Global Active Faults | world faults | `cossatot/gem-global-active-faults` @ `5681650` (10.6 MB geojson) | B | **CC BY-SA 4.0** † — our baked derivative must be published CC BY-SA too (fine; the app code is unaffected) |
 | PB2002 plates (Bird 2003) | plate boundaries, poles, steps — BAKED (§8b) | Bird's original supplement files in `fraxen/tectonicplates` @ 339b0c5 `original/` (ODC-By 1.0 †) | B | credit Peter Bird and Hugo Ahlenius / Nordpil; cite Bird 2003 |
-| Seafloor age (Seton et al. 2020) | lithosphere age → thickness | EarthByte (blocked) | B | CC BY 4.0 |
+| Seafloor age (Seton et al. 2020) | ocean-floor age — BAKED (§8b) | EarthByte WebDAV (reachable since 2026-11-23), release 2020.1 GTS2012 6′ | B | CC BY 4.0 † — cite Seton et al. (2020) |
 | Global Heat Flow Database (IHFC) | surface heat flow | GFZ (blocked); `ihfc-iugg/ghfdb-portal` is CODE (MIT) | B | CC BY 4.0 (release data) |
 | CRUST1.0 | crust | `jrleeman/Crust1.0` (MIT applies to the PYTHON; the model files carry no licence) | **C** | **ask Laske et al.** — blocks P1's crust term until answered (P1 can run with a stated generic crust meanwhile) |
 | LITHO1.0 | lithosphere thickness | `underworldcode/litho1pt0` GPL-3.0 † | C | ask Pasyanos / LLNL for the original terms |
