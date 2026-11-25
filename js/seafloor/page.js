@@ -7,9 +7,9 @@
  * redraws every panel. Tables update rows IN PLACE where the row set is unchanged.
  */
 import { SEAFLOOR_SITES } from './sites.js';
-import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs, loadWideGrid } from './load.js';
+import { loadIndex, loadCasts, loadGrid, loadWorld, loadDiveGrid, loadPlates, loadSlabs, loadWideGrid, loadAgeIndex, loadAgeGrid } from './load.js';
 import { publishedFor, compareWithPublished, compareTwoThickness } from './trench-literature.js';
-import { brokenStation, summarizeTwoThickness, twoThicknessSections, brokenHeight } from './broken-plate.js';
+import { sectionTwoThickness, summarizeTwoThickness, twoThicknessSections, brokenDepth } from './broken-plate.js';
 import { trenchModel, plateSetting, motionLabel, boundarySegments, flexureHeight, flexureReference, quotedThickness, FAMILY_STYLE } from './trench-model.js';
 import { siteSummaries, siteDetail, KIND_STYLE, DEPTH_RAMP, depthColor, fmt, sitePoint, customSite, castsNear, cameraReport, ambientColor, worldTexture } from './page-model.js';
 import { BEAMS } from './sounder.js';
@@ -20,7 +20,7 @@ import { DIVE_MAX_LAT } from './free-dive.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const NS = 'http://www.w3.org/2000/svg';
-const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, trenchKey: '', station: 0, two: null, twoKey: '', wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
+const S = { index: null, casts: null, world: null, rows: [], grids: new Map(), id: null, at: null, castId: null, beam: BEAMS[2].deg, nominal: 1500, detail: null, stage: null, globe: null, mode: 'globe', custom: null, pick: null, diveWhenReady: false, plates: null, slabs: null, tectonics: 'loading', trench: null, trenchKey: '', station: 0, two: null, twoKey: '', ageIndex: null, ages: new Map(), wides: new Map(), sort: { key: 'gridDepth', dir: -1 }, pingShown: false };
 window.__seaFloor = S;
 
 // ── tiny SVG helpers ─────────────────────────────────────────────────────────
@@ -377,17 +377,37 @@ function computeTrench() {
 }
 // THE TWO-THICKNESS PLATE (broken-plate.js) costs ~0.3 s a section, so it runs one section per task after the
 // one-thickness answer is already on the page, and re-renders as each lands; a new point abandons the old run.
+// It runs on the AGE-CORRECTED profile (broken-plate.js sectionTwoThickness) once the site's age window has
+// settled — loaded, absent or down — so it never computes twice; a down window falls back to the line reference.
+function ageState() {
+    const id = S.custom ? null : S.id;
+    if (!id) return { grid: null, state: 'none' };
+    if (S.ageIndex === null || S.ageIndex === 'loading') return { grid: null, state: 'loading' };
+    if (S.ageIndex === 'down') return { grid: null, state: 'down' };
+    if (!S.ageIndex.sites.some((m) => m.id === id)) return { grid: null, state: 'none' };
+    const g = S.ages.get(id);
+    return g === undefined || g === 'loading' ? { grid: null, state: 'loading' } : g === 'down' ? { grid: null, state: 'down' } : { grid: g, state: 'ok' };
+}
+function requestAges() {
+    const id = S.custom ? null : S.id, done = () => { if (!S.custom && S.id === id && S.detail) { scheduleTwoThickness(); renderPlates(); } };
+    if (S.ageIndex === null) { S.ageIndex = 'loading'; loadAgeIndex().then((ix) => { S.ageIndex = ix; }, () => { S.ageIndex = 'down'; }).then(() => { requestAges(); done(); }); return; }
+    if (!id || typeof S.ageIndex !== 'object' || !S.ageIndex.sites.some((m) => m.id === id) || S.ages.has(id)) return;
+    S.ages.set(id, 'loading');
+    loadAgeGrid(S.ageIndex, id).then((g) => S.ages.set(id, g || 'down'), () => S.ages.set(id, 'down')).then(done);
+}
 function scheduleTwoThickness() {
-    const key = S.trenchKey, secs = twoThicknessSections(S.trench);
+    const secs = twoThicknessSections(S.trench), age = ageState();
+    if (secs.length && age.state === 'loading') { requestAges(); S.twoKey = ''; S.two = { pending: secs.length, stations: [], waiting: 'age' }; return; }
+    const key = S.trenchKey + '|' + age.state;
     if (key === S.twoKey) return;
-    S.twoKey = key; S.two = secs.length ? { pending: secs.length, stations: [] } : null;
+    S.twoKey = key; S.two = secs.length ? { pending: secs.length, stations: [], age: age.state } : null;
     const done = [];
     const step = (i) => {
         if (S.twoKey !== key) return;
-        if (i >= secs.length) { S.two = summarizeTwoThickness(done, !S.trench.along); renderPlates(); return; }
+        if (i >= secs.length) { S.two = { ...summarizeTwoThickness(done, !S.trench.along), age: age.state }; renderPlates(); return; }
         const sec = secs[i];
-        done.push({ offsetKm: sec.offsetKm, fit: sec.profile && sec.flexure ? brokenStation(sec.profile, sec.flexure) : null });
-        S.two = { pending: secs.length - done.length, stations: done.slice() };
+        done.push({ offsetKm: sec.offsetKm, fit: sectionTwoThickness(sec, { ageGrid: age.grid }) });
+        S.two = { pending: secs.length - done.length, stations: done.slice(), age: age.state };
         setTimeout(() => step(i + 1), 0);
     };
     if (secs.length) setTimeout(() => step(0), 30);
@@ -458,20 +478,27 @@ function renderPlates() {
     const two = S.two && S.two.stations ? S.two : null, here = two ? two.stations.find((o) => o.offsetKm === (st ? st.offsetKm : 0)) : null, bf = here && here.fit;
     const iv = (a) => a ? (a[3] ? `${Math.round(a[0])} km or more` : `${Math.round(a[0])}–${Math.round(a[1])} km`) : '—';
     if (s.family === 'subduction' && t.profile) {
-        if (two && two.pending) rows.push(['Weaker near the trench?', `<small>fitting a plate with two thicknesses… ${two.stations.length} of ${two.stations.length + two.pending} sections</small>`]);
+        const REF2 = { ok: 'with the sea floor\'s cooling subsidence removed (ages: Seton et al. 2020)', down: 'on a straight regional slope: the sea-floor age window could not be loaded', none: 'on a straight regional slope: no sea-floor ages are stored for this point' };
+        if (two && two.waiting === 'age') rows.push(['Weaker near the trench?', '<small>loading the sea-floor ages…</small>']);
+        else if (two && two.pending) rows.push(['Weaker near the trench?', `<small>fitting a plate with two thicknesses… ${two.stations.length} of ${two.stations.length + two.pending} sections</small>`]);
         else if (two && two.fitted) {
-            const head = `a second thickness fits significantly better at <b>${two.needed} of ${two.fitted}</b> ${two.fitted === 1 ? 'section' : 'cross-sections'}; both thicknesses are pinned down at ${two.accepted}`;
+            const head = `a second thickness fits significantly better at <b>${two.needed} of ${two.fitted}</b> ${two.fitted === 1 ? 'section' : 'cross-sections'}; both thicknesses are pinned down at ${two.accepted} <small>(fitted ${REF2[two.age] || REF2.none})</small>`;
             rows.push(['Weaker near the trench?', two.quotable
                 ? `${head}. <b>${Math.round(two.temKm)} km</b> near the trench <small>(${Math.round(two.temMin)}–${Math.round(two.temMax)} km), for the first ${Math.round(two.xrKm)} km (${Math.round(two.xrMin)}–${Math.round(two.xrMax)}); before it bends ${two.teMKm ? `<b>${Math.round(two.teMKm)} km</b>` : `at least ${Math.round(two.teMLowerMin)}–${Math.round(two.teMLowerMax)} km, by section`}</small>`
                 : `${head} <small>— three are needed to quote the site</small>`]);
         }
         if (bf && bf.accepted) {
             rows.push([st && st.offsetKm ? 'Two thicknesses, this section' : 'Two thicknesses', `<b>${Math.round(bf.temKm)} km</b> for the first ${bf.xrKm} km <small>(${iv(bf.intervals.tem)}; break ${iv(bf.intervals.xr)})</small>, then <b>${bf.teMStatus === 'measured' ? Math.round(bf.teMKm) + ' km' : 'at least ' + Math.round(bf.intervals.teM[0]) + ' km'}</b> <small>${bf.teMStatus === 'measured' ? '(' + iv(bf.intervals.teM) + ')' : 'the data do not close the upper end'}; misfit ${Math.round(bf.uniform.rms)} → ${Math.round(bf.rms)} m</small>`]);
+            if (bf.thermal) { const th = bf.thermal; rows.push(['Unbent plate and temperature', `a cooling plate ${Math.round(th.ageMa)} million years old is colder than 600 °C down to <b>${Math.round(th.isothermsKm[600])} km</b> and than 300 °C down to ${Math.round(th.isothermsKm[300])} km <small>half-space model, a comparison only${th.aboveHot ? '; the fit asks for more than that, so read the unbent thickness with care' : ''}</small>`]); }
             const c2 = compareTwoThickness(bf, publishedFor(S.detail.point.lat, S.detail.point.lon, S.custom ? null : S.id));
             if (c2) { const r = (v) => v.min === v.max ? `${Math.round(v.min)}` : `${Math.round(v.min)}–${Math.round(v.max)}`, mk = (b) => b ? 'inside ours' : '<b>outside ours</b>';
                 rows.push(['Published, two thicknesses', `${r(c2.tem)} km then ${r(c2.teM)} km, break at ${r(c2.xr)} km <small>Zhang et al. 2018 · ${mk(c2.temInside)}, ${mk(c2.teMInside)}, ${mk(c2.xrInside)}</small>`]); }
         } else if (bf && bf.needed) rows.push([st && st.offsetKm ? 'Two thicknesses, this section' : 'Two thicknesses', `fits better (misfit ${Math.round(bf.uniform.rms)} → ${Math.round(bf.rms)} m) but not quoted <small>${bf.reasons.filter((r) => r !== 'unbent-not-bounded').map((r) => REASON[r] || r).join('; ')}</small>`]);
         else if (bf) rows.push([st && st.offsetKm ? 'Two thicknesses, this section' : 'Two thicknesses', '<small>one thickness explains this section as well as two</small>']);
+    }
+    if (bf && bf.ageRange) {   // our own age grid under the profile replaces the published table's single age for the site
+        const ageRow = [st && st.offsetKm ? 'Sea-floor age, this section' : 'Sea-floor age under the profile', `${Math.round(bf.ageRange[0])}–${Math.round(bf.ageRange[1])} million years <small>Seton et al. 2020</small>`];
+        const k = rows.findIndex((r) => r[0] === 'Sea-floor age'); if (k >= 0) rows[k] = ageRow; else rows.push(ageRow);
     }
     if (f && f.quality === 'good') {
         rows.push([st && st.offsetKm ? 'Outer rise, this section' : 'Outer rise', `<b>${Math.round(f.wb)} m</b> high, ${Math.round(f.xb)} km seaward of the trench <small>modelled fit</small>`]);
@@ -510,7 +537,7 @@ function renderFlex(t, bf = null) {
         svg.appendChild(el('path', { d: 'M' + curve.join('L'), fill: 'none', stroke: 'var(--sf-s2)', 'stroke-width': 2, 'stroke-dasharray': good ? '' : '5 4', 'stroke-opacity': good ? 1 : 0.6 }));
     }
     if (bf && (bf.accepted || bf.needed)) {
-        const c2 = []; for (let v = 0; v <= Math.min(xMax, bf.reachKm); v += 2) c2.push(`${x(v).toFixed(1)},${y(bf.dRef + bf.slope * v - brokenHeight(bf, v)).toFixed(1)}`);
+        const c2 = []; for (let v = 0; v <= Math.min(xMax, bf.reachKm); v += 2) c2.push(`${x(v).toFixed(1)},${y(brokenDepth(bf, v)).toFixed(1)}`);
         svg.appendChild(el('path', { d: 'M' + c2.join('L'), fill: 'none', stroke: 'var(--sf-s3)', 'stroke-width': 2, 'stroke-dasharray': bf.accepted ? '' : '5 4', 'stroke-opacity': bf.accepted ? 1 : 0.6, class: 'sf-two' }));
         svg.appendChild(el('line', { x1: x(bf.xrKm), x2: x(bf.xrKm), y1: m.t, y2: H - m.b, stroke: 'var(--sf-s3)', 'stroke-opacity': .5, 'stroke-dasharray': '1 3' }));
         svg.appendChild(el('text', { x: x(bf.xrKm) + 4, y: H - m.b - 6 }, 'break'));
@@ -526,7 +553,7 @@ function renderFlex(t, bf = null) {
     const base0 = !f ? esc(WHY[t.why] || '') : good
         ? `The curve fits to <b>${Math.round(f.rms)} m</b>; a straight slope fits to ${Math.round(f.lineRms)} m and a flat floor to ${Math.round(f.flatRms)} m.${f.maskedKm ? ` ${Math.round(f.maskedKm)} km left out as seamounts.` : ''}`
         : `<b>${t.station && t.station.offsetKm ? 'This cross-section is rejected' : 'No stiffness is quoted here'}:</b> ${f.reasons.map((r) => REASON[r] || r).join('; ')}. <small>The dashed curve is the rejected fit.</small>`;
-    const two = bf && (bf.accepted || bf.needed) ? ` <span>A plate ${Math.round(bf.temKm)} km thick near the trench and ${bf.teMStatus === 'lower-bound' ? 'at least ' + Math.round(bf.intervals.teM[0]) : Math.round(bf.teMKm)} km beyond ${bf.xrKm} km fits to <b>${Math.round(bf.rms)} m</b>${bf.accepted ? '' : ' (not quoted)'}.</span>` : '';
+    const two = bf && (bf.accepted || bf.needed) ? ` <span>${bf.reference === 'age' ? 'With cooling subsidence removed, a' : 'A'} plate ${Math.round(bf.temKm)} km thick near the trench and ${bf.teMStatus === 'lower-bound' ? 'at least ' + Math.round(bf.intervals.teM[0]) : Math.round(bf.teMKm)} km beyond ${bf.xrKm} km fits to <b>${Math.round(bf.rms)} m</b>${bf.accepted ? '' : ' (not quoted)'}.</span>` : '';
     const base = base0 + two + tail;
     $('sf-flex-read').innerHTML = base;
     hit.addEventListener('pointermove', (e) => { const r = svg.getBoundingClientRect(), xv = ((e.clientX - r.left) / r.width * W - m.l) / (W - m.l - m.r) * (xMax - xMin) + xMin; let b = pts[0]; for (const p of pts) if (Math.abs(p.x - xv) < Math.abs(b.x - xv)) b = p;

@@ -130,6 +130,19 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'sea-floor-age', date: '2026-11-25', pr: null,
+      title: 'Sea Floor: the age of the sea floor, and the plate before it bends', kind: 'simulation',
+      section: 'earth-orbit', icon: 'fluid',
+      summary: 'The page now knows how old the sea floor under each trench is. As the published studies do, it removes the deepening that comes with age before fitting the two-thickness plate, '
+             + 'and that is what lets the stiffer plate further from the trench show up.',
+      highlights: [
+          'Sea-floor ages come from the map of Seton and others (2020). Where it overlaps Garcia and others\' table, the ages agree to within about 2 million years.',
+          'On the old plates of the western Pacific, cooling explains almost none of the tilt the earlier fit had taken up. That tilt had been standing in for the stiffer plate further out.',
+          'With the cooling removed, both thicknesses are pinned down at 19 of 72 cross-sections instead of 8. Four trenches can now be quoted: Philippine, Izu–Bonin, Japan and Middle America.',
+          'At Izu–Bonin the plate is 30 km thick near the trench and at least 38–56 km before it bends. Zhang and others give 31 and 57.',
+          'Each section also shows how deep a cooling plate of its age stays below 600 °C. At 8 of the 19 sections the fit asks for more than that, and the page says to read those with care.',
+      ],
+      links: [{ href: 'sea-floor.html?site=izu-bonin', label: 'Sea Floor: Izu–Bonin Trench' }] },
     { id: 'sea-floor-two-plates', date: '2026-11-23', pr: null,
       title: 'Sea Floor: a plate that weakens as it bends', kind: 'simulation',
       section: 'earth-orbit', icon: 'fluid',

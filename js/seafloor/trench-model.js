@@ -72,6 +72,7 @@ import { nearestStep, stepFamily, FAMILY_STYLE, CLASS_FAMILY } from '../earth-in
 import { plateAt, velocityIn, STEP_CLASSES } from '../earth-interior/plates.js';
 import { slabValueAt, downDip } from '../earth-interior/slabs.js';
 import { section, destination, sampleDepth, trenchAxis } from './bathy.js';
+import { profileAges, removeSubsidence } from './age.js';
 
 export { FAMILY_STYLE, CLASS_FAMILY, stepFamily };
 
@@ -296,6 +297,49 @@ function fitOnce(profile, { x0Range = [0, 110], riseRange = [16, 130], stepKm = 
     return { ...best, farOffset, farDepth: farOffset == null ? null : best.dRef + farOffset, flatRms, lineRms, gain: 1 - best.rms / lineRms, quality: reasons.length ? 'poor' : 'good', reasons, reachKm, n: pts.length, elastic: elasticFromRise(best.x0, best.xb) };
 }
 
+/**
+ * THE REFERENCE THE PLATE BENDS AWAY FROM. Two choices, both kept:
+ *   'age'  (the default where a sea-floor age window covers the profile) — the published method: the depth the
+ *          plate's AGE predicts (age.js, GDH1 on Seton et al. 2020) is removed, and the plate bends away from a
+ *          LEVEL reference. MEASURED (2026-11-25): on the old plates (Kuril, Japan, Izu–Bonin, Tonga, Kermadec,
+ *          Java; 90–160 Myr) cooling predicts a tilt under 0.1 m/km across 500 km, while the free straight slope
+ *          the 'line' fit chose there was 0.5–1.4 m/km — the slope was NOT cooling, it stood in for the stiff
+ *          outer plate (see broken-plate.js), and with it removed the thicknesses move toward the published ones.
+ *   'line' — a fitted straight regional slope (the law shipped 2026-11-22). Used where there is no age (a free
+ *          dive, Hellenic and New Britain, whose windows are mostly unmapped crust) and as the A/B: `{ reference:
+ *          'line' }`. The level-floor control `{ slope: false }` still means a level reference with NO age.
+ * `fitStation` is the ONE place that choice is made; `referenceDepth` is the ONE way to draw either reference.
+ */
+export const AGE_FIT = Object.freeze({ minCoverage: 0.9 });
+export function fitStation(profile, fit = {}, ageGrid = null) {
+    if (!profile) return { flexure: null, fitProfile: null };
+    let note = null;
+    if (ageGrid && fit.reference !== 'line' && fit.slope !== false) {
+        const c = removeSubsidence(profile, profileAges(ageGrid, profile));
+        if (c && c.ageCoverage >= AGE_FIT.minCoverage) {
+            const f = fitFlexure(c, { ...fit, slope: false });
+            if (f) {
+                const raw = new Map(profile.map((p) => [p.x, p.depth]));
+                f.reference = 'age'; f.ageRange = c.ageRange; f.ageCoverage = c.ageCoverage; f.subsidenceSlope = c.subsidenceSlope;
+                f.subsidence = { xs: c.map((p) => p.x), dz: c.map((p) => raw.get(p.x) - p.depth) };   // what was removed, to draw the reference
+            }
+            return { flexure: f, fitProfile: c };
+        }
+        note = c ? 'age-coverage' : 'no-age';
+    } else if (!ageGrid && fit.reference !== 'line') note = 'no-age';
+    const f = fitFlexure(profile, fit);
+    if (f) { f.reference = fit.slope === false ? 'level' : 'line'; f.ageNote = note; }
+    return { flexure: f, fitProfile: profile };
+}
+/** The undisturbed sea floor of a fit at x (m), in the RAW profile's depths: the fitted level/slope plus any subsidence removed. */
+export function referenceDepth(xKm, f) {
+    const base = flexureReference(xKm, f), t = f.subsidence;
+    if (!t || !t.xs.length) return base;
+    const xs = t.xs; if (xKm <= xs[0]) return base + t.dz[0]; if (xKm >= xs[xs.length - 1]) return base + t.dz[xs.length - 1];
+    let lo = 0, hi = xs.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xs[m] <= xKm) lo = m; else hi = m; }
+    const u = (xKm - xs[lo]) / (xs[hi] - xs[lo]); return base + t.dz[lo] * (1 - u) + t.dz[hi] * u;
+}
+
 /** The stacked profile seaward (+x) of the trench axis through a point: fine grid where it reaches, the wide grid beyond. */
 export function bendingProfile(grid, wide, lat, lon, axisDeg, acrossDeg, seaward) {
     let stack = grid ? stackedSection(grid, lat, lon, axisDeg, acrossDeg).map((q) => ({ ...q, src: 'fine' })) : [];
@@ -306,7 +350,10 @@ export function bendingProfile(grid, wide, lat, lon, axisDeg, acrossDeg, seaward
     const near = stack.filter((q) => q.depth != null && Math.abs(q.s) <= 40);
     if (!near.length) return null;
     const axisS = near.reduce((a, q) => (q.depth > a.depth ? q : a)).s;
-    return Object.assign(stack.map((q) => ({ x: (q.s - axisS) * seaward, depth: q.depth, n: q.n, src: q.src })), { axisS });
+    // where the profile lies, so other grids (the sea-floor age, age.js) can be read under the same points:
+    // point x sits axisOffsetKm + x along the SEAWARD bearing from (lat, lon)
+    return Object.assign(stack.map((q) => ({ x: (q.s - axisS) * seaward, depth: q.depth, n: q.n, src: q.src })),
+        { axisS, origin: { lat, lon }, seaBearingDeg: seaward > 0 ? acrossDeg : acrossDeg + 180, axisOffsetKm: axisS * seaward });
 }
 
 /**
@@ -330,10 +377,11 @@ export function bendingProfile(grid, wide, lat, lon, axisDeg, acrossDeg, seaward
  * Returns { stations: [{ offsetKm, lat, lon, acrossDeg, profile, flexure }], good, fitted, quotable, teMedian, teMin, teMax, spanKm }.
  */
 export const ALONG = Object.freeze({ stepKm: 80, each: 2, minGood: 3 });
-export function alongTrench({ grid = null, wide, lat, lon, axisDeg, acrossDeg, seaward, centre = null, profile = null, fit = {} }) {
+export function alongTrench({ grid = null, wide, lat, lon, axisDeg, acrossDeg, seaward, centre = null, profile = null, fit = {}, ageGrid = null }) {
     const seaBearing = seaward > 0 ? acrossDeg : acrossDeg + 180, turn = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
     const prof0 = profile || bendingProfile(grid, wide, lat, lon, axisDeg, acrossDeg, seaward) || [];
-    const stations = [{ offsetKm: 0, lat, lon, acrossDeg: ((seaBearing % 360) + 360) % 360, profile: prof0, flexure: centre || fitFlexure(prof0, fit) }];
+    const c0 = centre || fitStation(prof0, fit, ageGrid);
+    const stations = [{ offsetKm: 0, lat, lon, acrossDeg: ((seaBearing % 360) + 360) % 360, profile: prof0, flexure: c0.flexure, fitProfile: c0.fitProfile }];
     for (const dir of [+1, -1]) {
         let cur = { lat, lon, axis: axisDeg, heading: dir > 0 ? axisDeg : axisDeg + 180, sea: seaBearing };
         for (let k = 1; k <= ALONG.each; k++) {
@@ -346,7 +394,8 @@ export function alongTrench({ grid = null, wide, lat, lon, axisDeg, acrossDeg, s
             const axis = turn(ax.azimuthDeg, cur.heading) <= 90 ? ax.azimuthDeg : ax.azimuthDeg + 180;       // keep walking the same way
             if (turn(axis, cur.heading) > 60) break;                                                          // the "axis" swung: this is no longer the same trench
             const across = turn(axis + 90, cur.sea) <= 90 ? axis + 90 : axis - 90, prof = bendingProfile(null, wide, deep.lat, deep.lon, axis, across, +1);
-            stations.push({ offsetKm: dir * k * ALONG.stepKm, lat: deep.lat, lon: deep.lon, acrossDeg: ((across % 360) + 360) % 360, profile: prof, flexure: prof ? fitFlexure(prof, fit) : null });
+            const fs = fitStation(prof, fit, ageGrid);
+            stations.push({ offsetKm: dir * k * ALONG.stepKm, lat: deep.lat, lon: deep.lon, acrossDeg: ((across % 360) + 360) % 360, profile: prof, flexure: fs.flexure, fitProfile: fs.fitProfile });
             cur = { lat: deep.lat, lon: deep.lon, axis, heading: axis, sea: across };
         }
     }
@@ -364,7 +413,7 @@ export function alongTrench({ grid = null, wide, lat, lon, axisDeg, acrossDeg, s
  *                 the profile only where the fine grid has run out, and `profile[].src` says which fed each point
  * @param fit      options passed to fitFlexure (`{ slope: false }` is the level-floor A/B)
  */
-export function trenchModel({ plates, slabs = null, grid, detail, wide = null, fit = {}, along = true }) {
+export function trenchModel({ plates, slabs = null, grid, detail, wide = null, fit = {}, along = true, ageGrid = null }) {
     if (!plates || !detail || !detail.point) return null;
     const p = detail.point, setting = plateSetting(plates, p.lat, p.lon);
     if (!setting) return null;
@@ -400,8 +449,9 @@ export function trenchModel({ plates, slabs = null, grid, detail, wide = null, f
     out.wide = !!wide;
     out.profile = bendingProfile(grid, wide, p.lat, p.lon, axis.azimuthDeg, across, seaward);
     if (!out.profile) { out.why = 'no-profile'; return out; }
-    out.flexure = fitFlexure(out.profile, fit);
-    if (along && wide && out.flexure) out.along = alongTrench({ grid, wide, lat: p.lat, lon: p.lon, axisDeg: axis.azimuthDeg, acrossDeg: across, seaward, centre: out.flexure, profile: out.profile, fit });
+    const c0 = fitStation(out.profile, fit, ageGrid);
+    out.flexure = c0.flexure; out.fitProfile = c0.fitProfile; out.age = !!ageGrid;
+    if (along && wide && out.flexure) out.along = alongTrench({ grid, wide, lat: p.lat, lon: p.lon, axisDeg: axis.azimuthDeg, acrossDeg: across, seaward, centre: c0, profile: out.profile, fit, ageGrid });
     if (!out.flexure) out.why = 'profile-too-short';
     return out;
 }

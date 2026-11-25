@@ -6,6 +6,7 @@
 import { makeGrid, int16FromBytes, decodeWorld } from './bathy.js';
 import { diveWindow, diveTiles, gridFromTiles, diveMeta, demPath, TILE_PX, DIVE_TILE_ZOOM } from './free-dive.js';
 
+import { makeAgeGrid } from './age.js';
 import { decodePlates } from '../earth-interior/plates.js';
 import { decodeSlabs } from '../earth-interior/slabs.js';
 
@@ -35,6 +36,15 @@ export async function loadWideGrid(meta, fetchFn = fetch, base = DATA_BASE) {
     if (!meta || !meta.wide) return null;
     const u8 = await gunzip(await (await get(fetchFn, base + meta.wide.file)).arrayBuffer());
     return makeGrid(meta.wide, int16FromBytes(u8));
+}
+/** The sea-floor age windows' index (Seton et al. 2020, baked by scripts/build-seafloor-age.py). */
+export async function loadAgeIndex(fetchFn = fetch, base = DATA_BASE) { return (await get(fetchFn, base + 'age-index.json')).json(); }
+/** One trench site's age window, or null when the index has none for it. */
+export async function loadAgeGrid(ageIndex, id, fetchFn = fetch, base = DATA_BASE) {
+    const m = ageIndex && ageIndex.sites.find((s) => s.id === id);
+    if (!m) return null;
+    const u8 = await gunzip(await (await get(fetchFn, base + m.file)).arrayBuffer());
+    return makeAgeGrid(m, int16FromBytes(u8));
 }
 export async function loadWorld(index, fetchFn = fetch, base = DATA_BASE) {
     const u8 = await gunzip(await (await get(fetchFn, base + index.world.file)).arrayBuffer());

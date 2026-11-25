@@ -36,7 +36,23 @@
  *   · `quality` 'good' only when the second thickness is needed, T_eM is bounded on both sides and the
  *     break is not at the edge of its range.
  *
- * MEASURED on the 15 subduction sites, 72 fitted cross-sections (2026-11-23):
+ * THE SHIPPED REFERENCE IS AGE-CORRECTED (2026-11-25, `sectionTwoThickness` with `ageGrid`): thermal subsidence from
+ * the sea floor's own age (age.js, Seton et al. 2020 + GDH1) is removed and the plate bends from a LEVEL reference —
+ * the published method. MEASURED against the line reference below on the same 72 sections:
+ *   · needed 29 (28), both thicknesses pinned at 19 (8), the unbent plate's interval CLOSED at 7 (3), sites quoted
+ *     4 — Philippine, Izu–Bonin, Japan, Middle America — (1, Middle America). Izu–Bonin: 30 km near the trench
+ *     (26–52) against Zhang's 31.3, and at least 38–56 km before it bends against his 57;
+ *   · against Zhang et al. per quantity at the 19: near-trench inside ours at 10, unbent at 13, break at 10, all
+ *     three at 5 — about the same RATE as the line reference (4, 4, 5, 4 of 8) on more than twice the sections;
+ *   · the cooling plate's 600 °C isotherm (`thermalCheck`, half-space, a COMPARISON) lies shallower than the
+ *     unbent plate's lower bound at 8 of 19 — Middle America ×3, Philippine ×3 among them; Zhang's own Philippine
+ *     values (48–57 km at 68–99 Myr) are deeper than that isotherm too, so it is printed, never used as a cap.
+ * WHY: cooling predicts < 0.1 m/km of tilt across the old plates (≥ 90 Myr), where the line reference chose
+ * 0.5–1.4 m/km — that slope was standing in for the stiff outer plate, so the second plate could not show itself.
+ * The one-thickness QUOTE stays on the line reference (trench-model.js `fitStation`); the line results below are
+ * the A/B and the fallback without an age window.
+ *
+ * MEASURED on the 15 subduction sites, 72 fitted cross-sections, LINE reference (2026-11-23):
  *   · the uniform plate on this grid IS the one-thickness fit (misfit within 2 %, thickness within the grid step,
  *     at all 25 sections that pass) — the identity holds on real data, not only on paper;
  *   · a second thickness is SIGNIFICANTLY better at 28 of 72 sections, and where it is the misfit falls by up to
@@ -58,7 +74,8 @@
  * topography, or a gradual (elastic–plastic) weakening; the step is the simplest weakening there is, and
  * Zhang et al. show its integrated reduction matches an elastic–plastic plate's (their Fig. 12).
  */
-import { ELASTIC, SLOPE_MAX_M_PER_KM } from './trench-model.js';
+import { ELASTIC, SLOPE_MAX_M_PER_KM, fitStation, referenceDepth } from './trench-model.js';
+import { thermalCheck } from './age.js';
 
 /** The search: thickness ladder (km, geometric), break distances (km from the axis), the interval threshold. */
 export const GRID = Object.freeze({ teMinKm: 3, teMaxKm: 90, teRatio: 1.08, xrMinKm: 10, xrMaxKm: 200, xrStepKm: 10, latticeKm: 2, deltaChi2: 4, significance: 5.99 });
@@ -164,7 +181,7 @@ export function riseOf(fit, reachKm) {
  *   { temKm, teMKm, xrKm, dRef, slope, b1, b2, sol, rms, ss, uniform: { teKm, rms, ss, … }, nEff, rho,
  *     dChi2, needed, intervals: { tem, teM, xr: [lo, hi, loOpen, hiOpen] }, rise, reasons, quality, n, reachKm }.
  */
-export function fitBrokenPlate(profile, { grid = GRID, minPoints = 30, k = ELASTIC } = {}) {
+export function fitBrokenPlate(profile, { grid = GRID, minPoints = 30, k = ELASTIC, slope: fitSlope = true } = {}) {
     const pts = profile.filter((p) => p.depth != null && p.x >= 0).sort((a, b) => a.x - b.x);
     if (pts.length < minPoints) return null;
     const n = pts.length, x = pts.map((p) => p.x), y = pts.map((p) => p.depth), reachKm = x[n - 1];
@@ -198,9 +215,10 @@ export function fitBrokenPlate(profile, { grid = GRID, minPoints = 30, k = ELAST
         let s1 = 0, s2 = 0; for (let i = 0; i < n; i++) { s1 += g1[i]; s2 += g2[i]; } const m1 = s1 / n, m2 = s2 / n;
         let a11 = sxx, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0, r1 = sxy, r2 = 0, r3 = 0;
         for (let i = 0; i < n; i++) { const p = g1[i] - m1, q = g2[i] - m2; a12 += dx[i] * p; a13 += dx[i] * q; a22 += p * p; a23 += p * q; a33 += q * q; r2 += p * dy[i]; r3 += q * dy[i]; }
-        const S = solve([[a11, a12, a13, r1], [a12, a22, a23, r2], [a13, a23, a33, r3]], 3, 1);
-        if (!S) return null;
-        const [sl, b1, b2] = S[0], ss = Math.max(0, syy - sl * r1 - b1 * r2 - b2 * r3);
+        let sl = 0, b1, b2;
+        if (fitSlope) { const S = solve([[a11, a12, a13, r1], [a12, a22, a23, r2], [a13, a23, a33, r3]], 3, 1); if (!S) return null; [sl, b1, b2] = S[0]; }
+        else { const S = solve([[a22, a23, r2], [a23, a33, r3]], 2, 1); if (!S) return null; [b1, b2] = S[0]; }   // the reference is level: subsidence was removed from the depths
+        const ss = Math.max(0, syy - sl * r1 - b1 * r2 - b2 * r3);
         // the axis must be the low point of the plate (the trench), and a rise must stand somewhere seaward
         const w0 = -(b1 * g1[0] + b2 * g2[0]); if (x[0] > 5 || !(w0 < 0)) return null;
         let up = false; for (let i = 0; i < n && !up; i++) if (-(b1 * g1[i] + b2 * g2[i]) > 0) up = true;
@@ -298,10 +316,35 @@ export function brokenStation(profile, flexure, opts = {}) {
 export const ALONG_2 = Object.freeze({ minGood: 3 });
 function med(a) { const v = a.filter(Number.isFinite).sort((p, q) => p - q); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; }
 /** The sections of a trenchModel the two-thickness fit is run on: its stations, or its one section. */
-export function twoThicknessSections(tm) { return !tm || !tm.profile ? [] : tm.along ? tm.along.stations : [{ offsetKm: 0, profile: tm.profile, flexure: tm.flexure }]; }
+export function twoThicknessSections(tm) { return !tm || !tm.profile ? [] : tm.along ? tm.along.stations : [{ offsetKm: 0, profile: tm.profile, fitProfile: tm.fitProfile, flexure: tm.flexure }]; }
+/**
+ * One section's two-thickness fit. WITH AN AGE WINDOW (`opts.ageGrid`) it runs on the AGE-CORRECTED profile
+ * against a LEVEL reference (trench-model.js `fitStation`, the published method) — MEASURED 2026-11-25: the free
+ * straight slope of the 'line' reference stands in for the stiff outer plate (cooling predicts < 0.1 m/km on
+ * the old plates where the line fit chose 0.5–1.4), so a second, stiffer plate can only show itself once the
+ * slope is gone. Its seamount mask and profile tests are the age-referenced one-thickness fit's own. Without an
+ * age window (a free dive, unmapped crust) it falls back to the section's line fit, and `reference` says which.
+ * The one-thickness QUOTE stays on the line reference on purpose (trench-model.js `fitStation` header).
+ */
+export function sectionTwoThickness(sec, opts = {}) {
+    if (!sec || !sec.profile) return null;
+    const { ageGrid = null, ...rest } = opts;
+    let prof = sec.fitProfile || sec.profile, f = sec.flexure, level = f && (f.reference === 'age' || f.reference === 'level');
+    if (ageGrid) { const fs = fitStation(sec.profile, {}, ageGrid); if (fs.flexure && fs.flexure.reference === 'age') { prof = fs.fitProfile; f = fs.flexure; level = true; } }
+    if (!prof || !f) return null;
+    const b = brokenStation(prof, f, { ...rest, slope: level ? false : rest.slope });
+    if (!b) return null;
+    b.reference = f.reference; b.ageNote = f.ageNote || null;
+    if (f.subsidence) { b.subsidence = f.subsidence; b.ageRange = f.ageRange; }
+    // the unbent plate against temperature: how deep a plate of the age beyond the break is still cold (a COMPARISON, never a cap)
+    if (f.reference === 'age') { const beyond = prof.filter((p) => p.x >= b.xrKm && p.age != null).map((p) => p.age); if (beyond.length) b.thermal = thermalCheck(beyond.reduce((a, v) => a + v, 0) / beyond.length, b); }
+    return b;
+}
+/** The fitted two-thickness plate's sea floor at x (m), in the RAW profile's depths (any removed subsidence put back). */
+export function brokenDepth(fit, xKm) { return referenceDepth(xKm, fit) - brokenHeight(fit, xKm); }
 export function twoThickness(tm, opts = {}) {
     if (!tm || !tm.profile) return null;
-    return summarizeTwoThickness(twoThicknessSections(tm).map((s) => ({ offsetKm: s.offsetKm, fit: s.profile && s.flexure ? brokenStation(s.profile, s.flexure, opts) : null })), !tm.along);
+    return summarizeTwoThickness(twoThicknessSections(tm).map((s) => ({ offsetKm: s.offsetKm, fit: sectionTwoThickness(s, opts) })), !tm.along);
 }
 /** The site summary from per-section results [{ offsetKm, fit }] (a page can compute the sections one at a time). */
 export function summarizeTwoThickness(stations, single = false) {

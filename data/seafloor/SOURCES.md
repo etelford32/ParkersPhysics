@@ -99,3 +99,23 @@ where five are available.
 from the same AWS Terrain Tiles at zoom 6 by the same baker, same encoding; geometry in the site's
 `wide` entry of `index.json`. Read only by the bending-plate fit, for the sea floor 200–520 km seaward
 of the trench. Depths, the 3D block and the sounder never use it.
+
+## Sea-floor age — Seton et al. 2020 (CC BY 4.0)
+
+`<id>.age.bin.gz` + `age-index.json` (the 17 trench sites): the age of the oceanic crust from Seton, Müller,
+Zahirovic et al. (2020), *A global dataset of present-day oceanic crustal age and seafloor spreading
+parameters*, G-cubed, doi:10.1029/2020GC009214 — version 2020.1, the 6 arc-minute grid on the GTS2012
+timescale, from EarthByte's public server. Licence: Creative Commons Attribution 4.0. Baked by
+`scripts/build-seafloor-age.py` (sha256-pinned; `--check` rebuilds byte for byte) as ±6° windows of the
+source's own nodes, age in 0.1 Myr steps, no-data where the grid has no oceanic crust (continents, unmapped
+crust — the Hellenic window is 6 % ocean). Nothing is interpolated in the bake.
+
+Checked against an independent source: at the 20 of Garcia et al.'s 26 sites that fall inside these windows,
+their table's ages (from the older Müller grids) agree with ours to a median 2.3 Myr, worst 5 (ours run ~4 Myr
+older on the old plates — the newer grid and timescale). The windows read upside down miss (the gate's control).
+
+What it is used for: thermal subsidence (GDH1, Stein & Stein 1992 — `js/seafloor/age.js`, coefficients from
+memory, `verified: false`) is removed from the sea floor before the TWO-THICKNESS plate is fitted, the method
+both published trench studies use. The grid is masked at the mapped plate boundary, so the first 0–32 km
+seaward of a trench axis has no age; those points take the age of the nearest dated point seaward (within
+40 km, flagged). Sediment loading is NOT removed (no sediment grid is baked).

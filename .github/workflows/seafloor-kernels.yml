@@ -6,7 +6,9 @@
 #                          controls that must lose; the page model; "no physics in the renderer";
 #                          the trench model on Bird's plates + Slab2 (planted-plate recovery with and without
 #                          a regional slope, the wide windows, the reach test, seamount masking, five stations
-#                          along each trench, recorded rejections).
+#                          along each trench, recorded rejections); the two-thickness plate; the sea-floor age
+#                          (Seton et al. 2020) windows against Garcia et al.'s own site ages, and the plate fitted
+#                          with thermal subsidence removed.
 #
 # The browser gate (tests/sea-floor.spec.js) reads only baked files and is run locally.
 # The bakes (scripts/build-seafloor-*.py) need the network and are run by hand.

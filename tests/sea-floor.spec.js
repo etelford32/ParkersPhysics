@@ -246,19 +246,25 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     expect(await page.locator('#sf-flex-chart svg path').last().getAttribute('d')).not.toBe(before);
     await expect(page.locator('#sf-flex-read')).toContainText('read from the wider, coarser window');
     await chips.nth(2).click();
-    // the two-thickness plate lands after the one-thickness answer, a section at a time
-    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && t.fitted === 5; }, null, { timeout: 60_000 });
-    const two = await page.evaluate(() => { const t = window.__seaFloor.two, h = t.stations.find((o) => o.offsetKm === 0).fit; return { needed: t.needed, accepted: t.accepted, tem: h.temKm, ok: h.accepted, lo: h.intervals.teM[0] }; });
-    expect(two.ok).toBe(true);                                                                        // MEASURED: Kuril's centre section is one of the 8 accepted
-    await expect(facts).toContainText(`at ${two.needed} of 5 cross-sections`);
-    await expect(facts).toContainText('Two thicknesses'); await expect(facts).toContainText(`${Math.round(two.tem)} km`);
-    await expect(facts).toContainText('Published, two thicknesses'); await expect(facts).toContainText('outside ours');   // RECORDED: Kuril disagrees with Zhang et al.
+    // the two-thickness plate lands after the one-thickness answer, a section at a time, on the AGE-CORRECTED reference
+    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
+    const two = await page.evaluate(() => { const t = window.__seaFloor.two, f = (o) => t.stations.find((s) => s.offsetKm === o).fit;
+        return { age: t.age, needed: t.needed, here: f(0).accepted, hereNeeded: f(0).needed, w: f(-160).accepted, tem: f(-160).temKm, ref: f(-160).reference, lo: f(-160).intervals.teM[0] }; });
+    expect(two.age).toBe('ok'); expect(two.ref).toBe('age');
+    await expect(facts).toContainText(`at ${two.needed} of 5 cross-sections`); await expect(facts).toContainText('cooling subsidence removed');
+    expect(two.here).toBe(false); expect(two.hereNeeded).toBe(false);                                // MEASURED: at Kuril's centre one thickness is enough once subsidence is removed
+    await expect(facts).toContainText('one thickness explains this section as well as two');
+    await expect(page.locator('#sf-flex-chart .sf-two')).toHaveCount(0);
+    await expect(page.locator('#sf-flex-chart svg path')).toHaveCount(2);                            // sea floor + one-thickness model
+    expect(two.w).toBe(true);                                                                         // −160 km is the Kuril section both thicknesses are pinned at
+    await chips.first().click();
+    await expect(facts).toContainText('Two thicknesses, this section'); await expect(facts).toContainText(`${Math.round(two.tem)} km`); await expect(facts).toContainText(`at least ${Math.round(two.lo)} km`);
+    await expect(facts).toContainText('Sea-floor age, this section'); await expect(facts).toContainText('Seton et al. 2020');
+    await expect(facts).toContainText('Unbent plate and temperature'); await expect(facts).toContainText('600 °C');
+    await expect(facts).toContainText('Published, two thicknesses'); await expect(facts).toContainText('outside ours');   // RECORDED: Kuril's near-trench value disagrees with Zhang et al.
     await expect(page.locator('#sf-flex-chart svg path')).toHaveCount(3);                            // sea floor + one-thickness model + two-thickness model
     await expect(page.locator('#sf-flex-chart .sf-two')).toHaveCount(1);
     await expect(page.locator('#sf-flex-keys')).toContainText('Two thicknesses');
-    await chips.first().click();                                                                      // −160 km: one thickness is enough there, so no second curve
-    await expect(facts).toContainText('one thickness explains this section as well as two');
-    await expect(page.locator('#sf-flex-chart .sf-two')).toHaveCount(0);
     await chips.nth(2).click();
     await expect(page.locator('#sf-deep-chart svg path')).toHaveCount(2);                            // sea floor + slab top
     await expect(page.locator('#sf-plate-keys')).toContainText('Bird 2003');
@@ -281,10 +287,16 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     await expect(page.locator('#sf-plates-facts')).toContainText('not quoted');
     await expect(page.locator('#sf-plates-facts')).toContainText('only 2 of 5 cross-sections');
     await expect(page.locator('#sf-flex-read')).toContainText('The curve fits to');
+    // ...but with subsidence removed three Izu–Bonin sections pin BOTH thicknesses, and the site is quoted for the plate before it bends
+    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
+    const izu = await page.evaluate(() => window.__seaFloor.two);
+    expect(izu.quotable).toBe(true); expect(izu.accepted).toBe(3);
+    await expect(page.locator('#sf-plates-facts')).toContainText(`${Math.round(izu.temKm)} km near the trench`);
     // the one site where three sections pin both thicknesses: quoted as a median with its range, the unbent plate as lower bounds
     await page.goto('/sea-floor.html?site=middle-america', { waitUntil: 'load' }); await tectonics(page);
-    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && t.fitted === 5; }, null, { timeout: 60_000 });
+    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
     const ma = await page.evaluate(() => window.__seaFloor.two);
+    expect(ma.age).toBe('ok');
     expect(ma.quotable).toBe(true); expect(ma.accepted).toBe(3); expect(ma.teMKm).toBeNull();
     await expect(page.locator('#sf-plates-facts')).toContainText(`${Math.round(ma.temKm)} km near the trench`);
     await expect(page.locator('#sf-plates-facts')).toContainText(`at least ${Math.round(ma.teMLowerMin)}–${Math.round(ma.teMLowerMax)} km, by section`);
@@ -303,6 +315,17 @@ test('NEGATIVE CONTROL: wide window down ⇒ the Kuril plate is not fitted, and 
     await expect(page.locator('#sf-flex-stations button')).toHaveCount(0);
     await expect(page.locator('#sf-flex-read')).toContainText('wider window could not be loaded');
     await expect(page.locator('#sf-flex-read')).toContainText('110 km is needed');
+});
+
+test('NEGATIVE CONTROL: sea-floor age down ⇒ the two-thickness plate falls back to a straight slope, and the page says so', async ({ page }) => {
+    await page.route('**/data/seafloor/age-index.json', (r) => r.fulfill({ status: 503, body: '' }));
+    await boot(page, '/sea-floor.html?site=kuril'); await tectonics(page);
+    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
+    const t = await page.evaluate(() => { const t = window.__seaFloor.two, h = t.stations.find((o) => o.offsetKm === 0).fit; return { age: t.age, ref: h.reference, ok: h.accepted }; });
+    expect(t.age).toBe('down'); expect(t.ref).toBe('line');
+    expect(t.ok).toBe(true);                                                                          // MEASURED: on the line reference Kuril's centre IS accepted — the reference changes the answer
+    await expect(page.locator('#sf-plates-facts')).toContainText('the sea-floor age window could not be loaded');
+    await expect(page.locator('#sf-plates-facts')).not.toContainText('Seton et al. 2020');
 });
 
 test('NEGATIVE CONTROL: plate model down ⇒ no motions, no boundaries, depths untouched', async ({ page }) => {

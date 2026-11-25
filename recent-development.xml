@@ -11,12 +11,22 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Mon, 23 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Wed, 25 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Sea Floor: the age of the sea floor, and the plate before it bends</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-age</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-age</guid>
+      <pubDate>Wed, 25 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;The page now knows how old the sea floor under each trench is. As the published studies do, it removes the deepening that comes with age before fitting the two-thickness plate, and that is what lets the stiffer plate further from the trench show up.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Sea-floor ages come from the map of Seton and others (2020). Where it overlaps Garcia and others&amp;#39; table, the ages agree to within about 2 million years.&lt;/li&gt;&lt;li&gt;On the old plates of the western Pacific, cooling explains almost none of the tilt the earlier fit had taken up. That tilt had been standing in for the stiffer plate further out.&lt;/li&gt;&lt;li&gt;With the cooling removed, both thicknesses are pinned down at 19 of 72 cross-sections instead of 8. Four trenches can now be quoted: Philippine, Izu–Bonin, Japan and Middle America.&lt;/li&gt;&lt;li&gt;At Izu–Bonin the plate is 30 km thick near the trench and at least 38–56 km before it bends. Zhang and others give 31 and 57.&lt;/li&gt;&lt;li&gt;Each section also shows how deep a cooling plate of its age stays below 600 °C. At 8 of the 19 sections the fit asks for more than that, and the page says to read those with care.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=izu-bonin&quot;&gt;Open Sea Floor: Izu–Bonin Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>Sea Floor: a plate that weakens as it bends</title>
@@ -506,16 +516,6 @@
       <category>Improvement</category>
       <category>Space Weather</category>
       <description>&lt;p&gt;The homepage globe is NASA imagery turned to today&amp;#39;s sunlight and season, with the live OVATION aurora oval on the real magnetic dipole.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>EarthView clouds follow the clock</title>
-      <link>https://parkersphysics.com/recent-development.html#cloud-time-aware</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#cloud-time-aware</guid>
-      <pubDate>Wed, 23 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Earth &amp; Orbit</category>
-      <description>&lt;p&gt;Scrubbing time now shows archived satellite cloud frames for that moment, a wind-advected nowcast just ahead, and model-only clouds further out.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/earth.html&quot;&gt;Open EarthView&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
   </channel>

@@ -25,6 +25,7 @@ import { terrariumEncode, tileLatLon, TILE_PX } from '../js/climalytix/terrain.j
 import * as TM from '../js/seafloor/trench-model.js';
 import * as LIT from '../js/seafloor/trench-literature.js';
 import * as BP from '../js/seafloor/broken-plate.js';
+import * as AG from '../js/seafloor/age.js';
 import { decodePlates } from '../js/earth-interior/plates.js';
 import { decodeSlabs } from '../js/earth-interior/slabs.js';
 
@@ -517,6 +518,82 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
       const bp = rd('js/seafloor/broken-plate.js').toString();
       ok(!/^import[^\n]*trench-literature/m.test(bp), 'the two-thickness model never reads the literature either');
       for (const fnc of ['brokenSolution(', 'plateOf(', 'fitBrokenPlate(']) ok(!rd('js/seafloor/page.js').toString().includes(fnc), `page.js never calls ${fnc}`); }
+    // ── the sea-floor AGE (Seton et al. 2020) and the two-thickness plate on an age-corrected reference ──
+    { // GDH1: the two branches meet at 20 Myr in value AND slope — the internal evidence the remembered coefficients are the published ones
+      const M = AG.SUBSIDENCE, t = M.tJoin;
+      near(M.d0 + M.a * Math.sqrt(t), M.dInf - M.b * Math.exp(-M.k * t), 2, 'GDH1 branches meet at 20 Myr (value)');
+      near(M.a / (2 * Math.sqrt(t)), M.b * M.k * Math.exp(-M.k * t), 2, 'GDH1 branches meet at 20 Myr (slope, m/Myr)');
+      ok(AG.subsidenceDepth(0) === 2600 && AG.subsidenceDepth(-1) === null && AG.subsidenceDepth(1000) < M.dInf && AG.subsidenceDepth(150) > AG.subsidenceDepth(100), 'subsidence: ridge depth, refuses a negative age, deepens and flattens toward 5651 m');
+      // erf / erf⁻¹ / the isotherm
+      near(AG.erf(1), 0.8427007929497149, 1e-15, 'erf(1)'); near(AG.erf(0.5), 0.5204998778130465, 1e-15, 'erf(0.5)'); near(AG.erf(3), 0.9999779095030014, 2e-7, 'erf(3) on the A&S branch');
+      for (const y of [-0.9, -0.3, 0.01, 0.444, 0.8, 0.98]) near(AG.erf(AG.erfinv(y)), y, 1e-13, `erf(erfinv(${y}))`);
+      near(AG.isothermDepthKm(100, 600) / AG.isothermDepthKm(25, 600), 2, 1e-12, 'a half-space isotherm deepens as √t');
+      ok(AG.isothermDepthKm(100, 300) < AG.isothermDepthKm(100, 600) && AG.isothermDepthKm(0, 600) === null && AG.isothermDepthKm(50, 1400) === null, 'isotherms: colder is shallower; no age, or hotter than the mantle, has no depth');
+      // a synthetic age window: age = 10 + 0.1·(lat + 90) Myr... bilinear is exact on a planted plane, any no-data corner is no age
+      const meta = { id: 'syn', nx: 41, ny: 41, north: 10, west: 170, step_deg: 0.5 }, q = new Int16Array(41 * 41);
+      for (let j = 0; j < 41; j++) for (let i = 0; i < 41; i++) q[j * 41 + i] = Math.round(10 * (20 + 2 * (10 - j * 0.5) + 1 * (i * 0.5)));
+      const ag = AG.makeAgeGrid(meta, q);
+      near(AG.sampleAge(ag, 3.3, 181.7), 20 + 2 * 3.3 + (181.7 - 170), 1e-9, 'bilinear age is exact on a planted plane');
+      near(AG.sampleAge(ag, 3.3, -178.3), AG.sampleAge(ag, 3.3, 181.7), 1e-9, 'across the date line the same point has the same age');
+      ok(AG.sampleAge(ag, 11, 175) === null && AG.sampleAge(ag, 0, 169) === null, 'outside the window: no age');
+      const q2 = q.slice(); q2[20 * 41 + 20] = AG.AGE_NO_DATA; const ag2 = AG.makeAgeGrid(meta, q2);
+      ok(AG.sampleAge(ag2, 0.2, 180.2) === null && AG.sampleAge(ag2, 1.2, 181.2) !== null, 'a no-data node voids the four cells around it and nothing else (a continent is never averaged into an age)');
+      // profileAges reads under the profile's OWN geometry: a profile running due east from (0, 175) sees the age rise 1 Myr per degree
+      const prof = Object.assign(Array.from({ length: 101 }, (_, k) => ({ x: 4 * k, depth: 5000 })), { origin: { lat: 0, lon: 175 }, seaBearingDeg: 90, axisOffsetKm: 0 });
+      const pa = AG.profileAges(ag, prof);
+      ok(pa.every((a, k) => a != null && Math.abs(a - (20 + 2 * 0 + 5 + 4 * k / 111.195)) < 0.02), 'profile ages follow the profile east (1 Myr per degree)');
+      const pw = AG.profileAges(ag, Object.assign(prof.map((p) => ({ ...p })), { origin: { lat: 0, lon: 175 }, seaBearingDeg: 270, axisOffsetKm: 0 }));
+      ok(pw[50] < pa[0] && pa[50] > pa[0], 'NEGATIVE CONTROL: the same profile pointed west reads ages falling, not rising');
+      // removeSubsidence: a planted plate on a YOUNG, steep age ramp — removed, the level fit recovers it; fitted with a straight line instead it does not
+      const young = { id: 'y', nx: 81, ny: 41, north: 5, west: 0, step_deg: 0.1 }, qy = new Int16Array(81 * 41);
+      for (let j = 0; j < 41; j++) for (let i = 0; i < 81; i++) qy[j * 81 + i] = Math.round(10 * (0.5 + i * 0.1 * 2.5));    // young and getting older seaward: a curved (√t) subsidence
+      const gy = AG.makeAgeGrid(young, qy), plant = { x0: 40, xb: 90, wb: 300 };
+      const base = Object.assign(Array.from({ length: 221 }, (_, k) => ({ x: 2 * k, depth: 0 })), { origin: { lat: 3, lon: 0.5 }, seaBearingDeg: 90, axisOffsetKm: 0 });
+      const ay = AG.profileAges(gy, base);
+      base.forEach((p, k) => { p.depth = AG.subsidenceDepth(ay[k]) + 1500 - TM.flexureHeight(p.x, plant) + 8 * Math.sin(p.x * 1.7); });
+      const cy = AG.removeSubsidence(base, ay), fa = TM.fitFlexure(cy, { slope: false, mask: false, stability: 0 }), fl = TM.fitFlexure(base, { mask: false, stability: 0 });
+      const te0 = TM.elasticFromRise(40, 90).teKm;
+      ok(Math.abs(fa.elastic.teKm - te0) < 0.02 * te0 && cy.subsidenceSlope > 1, `subsidence removed: a planted ${te0.toFixed(1)} km plate on a ${cy.ageRange.map((v) => v.toFixed(0)).join('→')} Myr ramp comes back as ${fa.elastic.teKm.toFixed(1)} km`);
+      ok(Math.abs(fl.elastic.teKm - te0) > 0.08 * te0 && fl.rms < 1.3 * fa.rms, `NEGATIVE CONTROL, and the trade-off in miniature: a straight slope fits that curved subsidence nearly as well (${fl.rms.toFixed(1)} vs ${fa.rms.toFixed(1)} m) and reads the plate as ${fl.elastic.teKm.toFixed(1)} km`);
+      // the axis hold: ages missing in the first 20 km are held from the first dated point; past AGE_HOLD_KM nothing is held
+      const hole = ay.map((a, k) => (base[k].x < 20 ? null : a)), ch = AG.removeSubsidence(base, hole);
+      ok(ch.length === base.length && ch.filter((p) => p.ageHeld).length === 10 && ch.every((p) => !p.ageHeld || p.age === ay[10]) && ch.ageHeldKm === 20, 'ages held across a 20 km gap at the axis, flagged, from the first dated point');
+      const far = ay.map((a, k) => (base[k].x < 60 ? null : a)), cf = AG.removeSubsidence(base, far);
+      ok(cf.length === base.length - 30 && cf.every((p) => !p.ageHeld), `NEGATIVE CONTROL: a ${60} km gap is past AGE_HOLD_KM (${AG.AGE_HOLD_KM}) and nothing is held`); }
+    { // the BAKED windows: exactly the trench sites, intact, the pinned source; and an INDEPENDENT check against Garcia et al.'s own site ages
+      const AI = JSON.parse(rd('data/seafloor/age-index.json')), baker = rd('scripts/build-seafloor-age.py').toString();
+      ok(AI.sites.map((m) => m.id).join() === SEAFLOOR_SITES.filter((s) => s.kind === 'trench').map((s) => s.id).join(), 'an age window for every trench site and nothing else');
+      ok(baker.includes(`SHA256 = '${AI.source.sha256}'`) && AI.source.licence === 'CC BY 4.0' && /Seton/.test(AI.source.citation), 'the index names the pinned file (sha256 in the baker), its licence and its citation');
+      const AGRID = new Map();
+      for (const m of AI.sites) { const raw = rd('data/seafloor/' + m.file), g = AG.makeAgeGrid(m, BA.int16FromBytes(new Uint8Array(zlib.gunzipSync(raw)))); AGRID.set(m.id, g);
+          ok(raw.length === m.bytes && [...g.q].every((v) => v === AG.AGE_NO_DATA || (v >= 0 && v <= 3400)), `${m.id}: age window intact, ages 0–340 Myr or no data`); }
+      const check = (grids) => { const d = [];
+          for (const r of LIT.GARCIA_2019.rows) { let best = null;
+              for (const g of grids) for (let k = 0; k <= 12; k++) for (let b = 0; b < 360; b += 30) { const p = k ? BA.destination(r.lat, r.lon, b, 5 * k) : r, a = AG.sampleAge(g, p.lat, p.lon); if (a != null && (!best || 5 * k < best.k)) best = { k: 5 * k, a }; if (!k) break; }
+              if (best) d.push(Math.abs(best.a - r.ageMa)); }
+          d.sort((a, b) => a - b); return { n: d.length, med: d[d.length >> 1], max: d[d.length - 1] }; };
+      const real = check([...AGRID.values()]);
+      ok(real.n === 20 && real.med < 3 && real.max < 6, `Seton 2020 under our windows vs Garcia et al.'s site ages (Müller grids): ${real.n} sites, median ${real.med.toFixed(1)} Myr, worst ${real.max.toFixed(1)}`);
+      const flipped = check([...AGRID.values()].map((g) => { const f = new Int16Array(g.q.length); for (let j = 0; j < g.ny; j++) f.set(g.q.subarray((g.ny - 1 - j) * g.nx, (g.ny - j) * g.nx), j * g.nx); return { ...g, q: f }; }));
+      ok(!(flipped.med < 3 && flipped.max < 6), `NEGATIVE CONTROL: the same windows read upside down miss Garcia's ages (median ${flipped.med.toFixed(1)}, worst ${flipped.max.toFixed(1)} Myr)`);
+      // REAL stations (MEASURED 2026-11-25). (1) On the old plates cooling predicts almost no tilt, while the free line chose one —
+      // the slope was not subsidence. (2) The axis hold is never more than 32 km. (3) The two-thickness plate on the age reference.
+      let oldPlates = 0, notCooling = 0, maxHeld = 0; const per = { n: 0, tem: 0, teM: 0, xr: 0, all: 0 }; let fitted2 = 0, needed2 = 0, acc2 = 0, closed2 = 0, above2 = 0; const quoted2 = [];
+      for (const id of SEAFLOOR_SITES.filter((q) => q.kind === 'trench').map((q) => q.id)) { const t = model(id); if (!t.along) continue; const g = AGRID.get(id);
+          for (const sec of t.along.stations) { if (!sec.profile || !sec.flexure) continue; const c = AG.removeSubsidence(sec.profile, AG.profileAges(g, sec.profile));
+              if (c && c.ageCoverage >= 0.9) { maxHeld = Math.max(maxHeld, c.ageHeldKm); if (c.ageRange[0] >= 90) { oldPlates++; if (Math.abs(c.subsidenceSlope) < 0.1) notCooling += Math.abs(sec.flexure.slope) >= 0.5; } } }
+          const two = BP.twoThickness(t, { ageGrid: g }); fitted2 += two.fitted; needed2 += two.needed; acc2 += two.accepted; if (two.quotable) quoted2.push(id);
+          for (const s of two.stations) if (s.fit && s.fit.accepted) { closed2 += s.fit.teMStatus === 'measured'; above2 += !!(s.fit.thermal && s.fit.thermal.aboveHot);
+              const st = t.along.stations.find((o) => o.offsetKm === s.offsetKm), cc = LIT.compareTwoThickness(s.fit, LIT.publishedFor(st.lat, st.lon, id));
+              if (cc) { per.n++; per.tem += cc.temInside; per.teM += cc.teMInside; per.xr += cc.xrInside; per.all += cc.temInside && cc.teMInside && cc.xrInside; } } }
+      ok(oldPlates >= 25 && notCooling >= 15, `old plates (≥ 90 Myr, ${oldPlates} sections): cooling predicts < 0.1 m/km, yet the free line chose ≥ 0.5 m/km at ${notCooling} — that slope was not subsidence`);
+      ok(maxHeld <= 32, `ages held at the axis over at most ${maxHeld} km`);
+      ok(fitted2 === 72 && needed2 === 29 && acc2 === 19 && closed2 === 7, `two thicknesses on the age reference: needed at ${needed2} of ${fitted2}, both pinned at ${acc2}, the unbent plate's interval closed at ${closed2} (measured 29 / 72 / 19 / 7; on the line reference 28 / 72 / 8 / 3)`);
+      ok(quoted2.join() === 'philippine,izu-bonin,japan,middle-america', `quoted on the age reference: ${quoted2.join(', ')} (on the line reference only Middle America)`);
+      ok(per.n === 19 && per.tem === 10 && per.teM === 13 && per.xr === 10 && per.all === 5, `against Zhang et al. 2018 at the ${per.n} accepted sections: near-trench inside ours at ${per.tem}, unbent at ${per.teM}, break at ${per.xr}, all three at ${per.all} — recorded, not tuned`);
+      ok(above2 === 8, `at ${above2} of 19 the unbent plate's LOWER bound is deeper than a half-space 600 °C isotherm of that age — printed as a comparison (Zhang's own Philippine values are deeper too)`);
+      const tmSrc = rd('js/seafloor/trench-model.js').toString(), agSrc = rd('js/seafloor/age.js').toString();
+      ok(!/^import[^\n]*trench-literature/m.test(tmSrc) && !/^import[^\n]*trench-literature/m.test(agSrc), 'the age model never reads the literature'); }
     // the renderers compute none of it
     for (const file of ['js/seafloor/page.js', 'js/seafloor/stage.js', 'js/seafloor/globe.js']) { const src = rd(file).toString();
         for (const fnc of ['flexureShape(', 'elasticFromRise(', 'fitFlexure(', 'velocityIn(', 'slabValueAt(', 'nearestStep(']) ok(!src.includes(fnc), `${file} never calls ${fnc}`); }
