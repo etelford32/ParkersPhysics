@@ -1,0 +1,37 @@
+{
+ "source": {
+  "citation": "Seton, M., Müller, R. D., Zahirovic, S., Williams, S., Wright, N., Cannon, J., Whittaker, J., Matthews, K., McGirr, R. (2020). A global dataset of present-day oceanic crustal age and seafloor spreading parameters. Geochemistry, Geophysics, Geosystems 21, e2020GC009214. doi:10.1029/2020GC009214",
+  "release": "2020.1",
+  "timescale": "GTS2012 (Ogg 2012)",
+  "url": "https://www.earthbyte.org/webdav/ftp/earthbyte/agegrid/2020/Grids/age.2020.1.GTS2012.6m.grd",
+  "sha256": "67c1803d08050578a8b131b13788d1583192dcc3b06d470474e9529e455f2f6c",
+  "licence": "CC BY 4.0 (earthbyte/agegrid/2020/LICENSE.txt)",
+  "knownArtefacts": "Gridding artefacts around microplates (e.g. Bauer), along fracture zones (e.g. central Atlantic) and where spreading is highly oblique (e.g. SW Indian Ridge) — the release README."
+ },
+ "grid": {
+  "nLat": 901,
+  "nLon": 1800,
+  "stepDeg": 0.2,
+  "lat0": 90,
+  "lon0": -180,
+  "registration": "gridline",
+  "rows": "north→south",
+  "quantumMyr": 0.05,
+  "none": 65535,
+  "encoding": "uint16 ages / quantum; zig-zag delta along each row, reset at every no-crust node and at each row start; byte-shuffled (all high bytes, then all low bytes); gzip"
+ },
+ "counts": {
+  "nodes": 1621800,
+  "oceanNodes": 797653
+ },
+ "oldestNode": {
+  "ageMyr": 338.68,
+  "lat": 34.6,
+  "lon": 31.2
+ },
+ "output": {
+  "file": "seafloor-age.bin.gz",
+  "bytes": 423617,
+  "sha256": "625d66abd275490ca41f61fc3c832297d9958b25085f5ad8a160b73675f57fc1"
+ }
+}
