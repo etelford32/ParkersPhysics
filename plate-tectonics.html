@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plates Through Time · 1.8 Billion Years of Plate Tectonics · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/plate-tectonics.html">
+<meta name="description" content="Earth's tectonic plates reconstructed from 1.8 billion years ago to today — continents, ridges and trenches moved by the Cao et al. / Merdith et al. full-plate model, with ridge length, crust production, plate speed and the supercontinent cycle measured frame by frame.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/plate-tectonics.html">
+<meta property="og:title" content="Plates Through Time — 1.8 billion years of plate tectonics">
+<meta property="og:description" content="Scrub from Nuna through Rodinia and Pangaea to today, and watch the planet's ridges, trenches and plate speeds measured as they change.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Plates Through Time — Parkers Physics">
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is pt- prefixed; there is intentionally NO nav styling here. -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+:root {
+    --pt-surface: #0b1322; --pt-surface-2: #111b2e; --pt-line: #22304a;
+    --pt-text: #f0efec; --pt-text-2: #c3c2b7; --pt-muted: #8a91a1;
+    --pt-ridge: #3987e5; --pt-trench: #d95926; --pt-transform: #199e70; --pt-other: #8a91a1;
+    --pt-warn: #e66767; --pt-accent: #6da7ec;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #04070d; color: var(--pt-text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x: clip; }
+.skip-link { position: absolute; left: -9999px; } .skip-link:focus { left: 8px; top: 8px; z-index: 100; background: #fff; color: #000; padding: 6px 10px; }
+.pt-wrap { max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+.pt-hero { padding: 18px 16px 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.pt-hero h1 { margin: 0; font-size: 28px; letter-spacing: .01em; }
+.pt-badge { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--pt-text-2); border: 1px solid var(--pt-line); border-radius: 999px; padding: 2px 10px; }
+.pt-hero p { flex-basis: 100%; margin: 0; color: var(--pt-text-2); max-width: 92ch; }
+.pt-muted { color: var(--pt-muted); }
+.pt-warn { color: var(--pt-warn); }
+
+/* ── stage ── */
+#pt-stage { position: relative; height: clamp(440px, 66vh, 820px); border: 1px solid var(--pt-line); border-radius: 12px 12px 0 0; overflow: hidden; background: #04070d; }
+#pt-globe, #pt-map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#pt-globe { cursor: grab; } #pt-globe:active { cursor: grabbing; } #pt-map { cursor: crosshair; }
+#pt-globe[hidden], #pt-map[hidden] { display: none; }
+.pt-overlay { position: absolute; background: rgba(11, 19, 34, .86); border: 1px solid var(--pt-line); border-radius: 10px; padding: 8px 10px; backdrop-filter: blur(4px); }
+#pt-readout { top: 12px; left: 12px; width: min(300px, calc(100% - 24px)); pointer-events: none; }
+#pt-age { font-size: 30px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+#pt-unit { font-size: 13px; color: var(--pt-text-2); margin-top: 2px; min-height: 1.3em; }
+#pt-stats { display: grid; grid-template-columns: 1fr; gap: 1px; max-width: 230px; margin-top: 8px; font-size: 12px; }
+#pt-stats div { display: flex; justify-content: space-between; gap: 6px; } #pt-stats span { color: var(--pt-muted); } #pt-stats b { font-variant-numeric: tabular-nums; }
+#pt-gap { margin-top: 6px; font-size: 12px; color: var(--pt-warn); }
+#pt-gap[hidden] { display: none; }
+#pt-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+#pt-controls > .pt-overlay { position: static; }
+.pt-seg { display: flex; gap: 4px; }
+.pt-btn { font: 600 13px/1 system-ui, sans-serif; color: var(--pt-text-2); background: transparent; border: 1px solid var(--pt-line); border-radius: 7px; padding: 8px 11px; cursor: pointer; min-height: 34px; }
+.pt-btn[aria-pressed="true"] { color: #fff; background: #1c5cab; border-color: #3987e5; }
+.pt-btn:hover:not(:disabled) { border-color: #6da7ec; color: #fff; }
+.pt-btn:disabled { opacity: .45; cursor: not-allowed; }
+.pt-btn[hidden] { display: none; }
+#pt-layers { display: grid; gap: 4px; font-size: 13px; color: var(--pt-text-2); }
+#pt-layers label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+#pt-legend { left: 12px; bottom: 12px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 12px; max-width: calc(100% - 24px); }
+#pt-legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+#pt-legend .pt-sw-land { height: 10px; width: 12px; background: #a99472; }
+#pt-legend .pt-sw-crust { height: 10px; width: 12px; background: #5e5543; }
+#pt-legend .pt-sw-gap { height: 10px; width: 12px; background: repeating-linear-gradient(45deg, #4c2426 0 3px, #29141a 3px 6px); }
+#pt-probe { right: 12px; bottom: 12px; width: min(320px, calc(100% - 24px)); font-size: 13px; display: grid; gap: 3px; }
+#pt-probe[hidden] { display: none; }
+.pt-probe-h { font-weight: 600; }
+#pt-status { position: absolute; inset: 0; display: grid; place-items: center; color: var(--pt-text-2); font-size: 15px; pointer-events: none; }
+#pt-status.is-err { color: var(--pt-warn); }
+#pt-status[hidden] { display: none; }
+
+/* ── time bar (docked under the stage, never over it) ── */
+#pt-timebar { border: 1px solid var(--pt-line); border-top: 0; border-radius: 0 0 12px 12px; background: var(--pt-surface); padding: 10px 14px 12px; display: grid; gap: 8px; }
+.pt-tb-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#pt-slider { width: 100%; accent-color: #3987e5; margin: 0; height: 28px; }
+#pt-eras { position: relative; display: grid; gap: 2px; }
+.pt-band-row { position: relative; height: 16px; }
+.pt-band-row span { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--pt-line); font-size: 10.5px; color: var(--pt-muted); padding-left: 4px; overflow: hidden; white-space: nowrap; line-height: 16px; }
+.pt-band-row.pt-eon span { color: var(--pt-text-2); background: rgba(255,255,255,.025); }
+.pt-tb-label { font-size: 12px; color: var(--pt-muted); }
+select.pt-btn { padding: 6px 8px; }
+.pt-jumps { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ── panels ── */
+.pt-panel { border: 1px solid var(--pt-line); border-radius: 12px; background: var(--pt-surface); padding: 14px 16px; margin-top: 16px; }
+.pt-panel h2 { margin: 0 0 4px; font-size: 19px; }
+.pt-panel > p { margin: 0 0 10px; color: var(--pt-text-2); max-width: 95ch; }
+.pt-chart { position: relative; margin-top: 10px; }
+.pt-chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; align-items: baseline; }
+.pt-chart-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.pt-unit { color: var(--pt-muted); font-weight: 400; font-size: 12px; }
+.pt-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--pt-text-2); }
+.pt-legend i, .pt-tip i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.pt-legend i.pt-dash { background: repeating-linear-gradient(90deg, #c3c2b7 0 4px, transparent 4px 7px); }
+.pt-legend i.pt-band { height: 10px; background: rgba(195,194,183,.25); }
+.pt-svg { display: block; width: 100%; height: auto; cursor: crosshair; }
+.pt-tip { position: absolute; top: 26px; z-index: 3; background: rgba(11,19,34,.96); border: 1px solid var(--pt-line); border-radius: 8px; padding: 6px 9px; font-size: 12px; pointer-events: none; min-width: 200px; }
+.pt-tip[hidden] { display: none; }
+.pt-tip-t { font-weight: 600; margin-bottom: 2px; }
+.pt-table { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; width: 100%; }
+.pt-table th, .pt-table td { border-bottom: 1px solid var(--pt-line); padding: 4px 8px; text-align: right; white-space: nowrap; }
+.pt-table th:first-child, .pt-table td:first-child { text-align: left; }
+.pt-table-wrap { overflow-x: auto; }
+details > summary { cursor: pointer; color: var(--pt-accent); margin-top: 10px; }
+.pt-notes { margin: 6px 0 0; padding-left: 20px; color: var(--pt-text-2); }
+.pt-notes li { margin: 4px 0; }
+.pt-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 24px; }
+#pt-prov { font-size: 12px; color: var(--pt-muted); margin-top: 10px; }
+a { color: var(--pt-accent); }
+@media (max-width: 768px) {
+    #pt-stage { height: clamp(420px, 72vh, 640px); }
+    #pt-readout { width: calc(100% - 24px); }
+    #pt-age { font-size: 24px; }
+    #pt-stats { display: none; }
+    #pt-controls { top: auto; bottom: 12px; right: 12px; }
+    #pt-layers { display: none; }
+    #pt-legend { display: none; }
+    #pt-probe { bottom: 64px; }
+    .pt-jumps { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in place. -->
+<nav></nav>
+
+<header class="pt-wrap pt-hero">
+    <h1>Plates Through Time</h1>
+    <span class="pt-badge">1.8 billion years · reconstructed · measured</span>
+    <p>Earth's tectonic plates from 1.8 billion years ago to today, moved by a published full-plate reconstruction
+       (Cao et al., extending Merdith et al. 2021). Continents travel exactly as the model's rotations carry them; ridges
+       and trenches are its plate boundaries. Every number beside them — boundary lengths, sea floor made and destroyed,
+       plate speeds, how tightly the continents cluster — is measured here, frame by frame, and checked against the
+       model authors' own published figures.</p>
+</header>
+
+<main id="main-content" class="pt-wrap">
+    <section aria-label="Reconstruction stage">
+        <div id="pt-stage">
+            <canvas id="pt-globe" aria-label="Globe showing the plate reconstruction at the selected time"></canvas>
+            <canvas id="pt-map" hidden aria-label="Flat map showing the plate reconstruction at the selected time"></canvas>
+            <div id="pt-status" role="status" aria-live="polite">Loading…</div>
+
+            <div id="pt-readout" class="pt-overlay" aria-live="polite">
+                <div id="pt-age">today</div>
+                <div id="pt-unit"></div>
+                <div id="pt-stats"></div>
+                <div id="pt-gap" hidden></div>
+            </div>
+
+            <div id="pt-controls">
+                <div class="pt-overlay pt-seg" role="group" aria-label="View">
+                    <button class="pt-btn" id="pt-view-globe" aria-pressed="true">Globe</button>
+                    <button class="pt-btn" id="pt-view-map" aria-pressed="false">Flat map</button>
+                    <button class="pt-btn" id="pt-reset" title="Back to the opening view">Reset</button>
+                </div>
+                <div id="pt-layers" class="pt-overlay" role="group" aria-label="Layers">
+                    <label><input type="checkbox" data-layer="boundaries" checked> Plate boundaries</label>
+                    <label><input type="checkbox" data-layer="velocities" checked> Plate velocities</label>
+                    <label><input type="checkbox" data-layer="tint" checked> Plates shaded</label>
+                    <label><input type="checkbox" data-layer="coasts" checked> Today's land</label>
+                    <label><input type="checkbox" data-layer="graticule" checked> Latitude grid</label>
+                </div>
+            </div>
+
+            <div id="pt-legend" class="pt-overlay">
+                <span><i style="background:var(--pt-ridge)"></i>Spreading ridge</span>
+                <span><i style="background:var(--pt-trench)"></i>Subduction zone (teeth on the overriding plate)</span>
+                <span><i style="background:var(--pt-transform)"></i>Transform fault</span>
+                <span><i style="background:var(--pt-other)"></i>Other boundary</span>
+                <span><i class="pt-sw-crust"></i>Continental crust (incl. shelves)</span>
+                <span><i class="pt-sw-land"></i>Today's land, carried back</span>
+                <span><i class="pt-sw-gap"></i>No plate (model gap)</span>
+            </div>
+
+            <div id="pt-probe" class="pt-overlay" hidden aria-live="polite"></div>
+        </div>
+
+        <div id="pt-timebar">
+            <input id="pt-slider" type="range" min="0" max="1800" step="1" value="1800" aria-label="Time — left is the past, right is today">
+            <div id="pt-eras" aria-hidden="true"></div>
+            <div class="pt-tb-row">
+                <button class="pt-btn" id="pt-play" aria-pressed="false">Play</button>
+                <button class="pt-btn" id="pt-dir" aria-label="Playing toward the present; switch to play into the past">Forward in time →</button>
+                <label class="pt-tb-label">Speed
+                    <select class="pt-btn" id="pt-rate">
+                        <option value="10">10 Myr/s</option>
+                        <option value="40" selected>40 Myr/s</option>
+                        <option value="100">100 Myr/s</option>
+                        <option value="250">250 Myr/s</option>
+                    </select>
+                </label>
+                <div class="pt-jumps" role="group" aria-label="Jump to a time (literature ages)">
+                    <button class="pt-btn" data-jump="1800">1.8 Ga</button>
+                    <button class="pt-btn" data-jump="1450" title="Nuna (Columbia) — literature age ~1.6–1.4 Ga">Nuna</button>
+                    <button class="pt-btn" data-jump="800" title="Rodinia — literature age ~900–750 Ma">Rodinia</button>
+                    <button class="pt-btn" data-jump="520" title="Gondwana assembled — ~520 Ma">Gondwana</button>
+                    <button class="pt-btn" data-jump="250" title="Pangaea — literature age ~320–180 Ma">Pangaea</button>
+                    <button class="pt-btn" data-jump="0">Today</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="pt-panel" aria-labelledby="pt-charts-h">
+        <h2 id="pt-charts-h">The planet's tectonic vital signs</h2>
+        <p>Measured from the reconstruction every 5 million years. Ridge and trench lengths come from the model's plate
+           boundaries; sea floor made is ridge length × the opening rate between the two plates, sea floor destroyed is trench
+           length × the subducting plate's convergence on the overriding one. The dashed lines are the model authors' own
+           published figures (Merdith et al. 2021, their version 1.0) — a check we did not write. Click any chart to jump there.</p>
+        <div id="pt-charts"></div>
+        <details>
+            <summary>Show the numbers as a table</summary>
+            <div class="pt-table-wrap" id="pt-table"></div>
+        </details>
+    </section>
+
+    <section class="pt-panel" aria-labelledby="pt-notes-h">
+        <h2 id="pt-notes-h">What this is — and is not</h2>
+        <div class="pt-grid2">
+            <ul class="pt-notes">
+                <li><b>A kinematic reconstruction, not a simulation of the mantle.</b> The model's authors fitted the motions to
+                    palaeomagnetic poles, geology and, since about 200 Ma, the magnetic stripes of the ocean floor. Nothing here
+                    solves for the forces that drive plates.</li>
+                <li><b>Before ~200 Ma the oceans are inferred.</b> No sea floor older than that survives, so oceanic plates, ridges
+                    and trenches in deep time are drawn to fit the continents' motion. The model's own notes say the great external
+                    ocean (Panthalassa) is poorly constrained.</li>
+                <li><b>Latitude is measured; longitude mostly is not.</b> Palaeomagnetism fixes how far a continent was from the
+                    pole, not where it sat round the globe. The map's frame is the model's palaeomagnetic frame.</li>
+            </ul>
+            <ul class="pt-notes">
+                <li><b>The light land is today's coastline, carried back</b> on its plate — a way to recognise each piece, not the
+                    ancient shoreline (sea level and the land itself were different). The darker ground is continental crust
+                    including shelves, as the model outlines it.</li>
+                <li><b>Continents move continuously; boundaries are resolved every 5 Myr.</b> Between those frames each boundary
+                    piece is carried by its own plate's rotation. Where the model changes a boundary's shape, it changes at a frame.</li>
+                <li><b>Some instants are the model's own defects, shown as such.</b> Near 855 Ma its plate polygons fail to close
+                    (hatched, "no plate"). Where a plate's rotation jumps (for example at 1000 Ma, where two rotation files meet),
+                    positions jump as the model has them and velocities are taken from the continuous side.</li>
+                <li><b>"Supercontinent index" is our measure</b>: how tightly continental area clusters (0 = spread round the
+                    globe, 1 = one mass). It knows no names or dates; its peaks land on Pangaea, Gondwana, Rodinia and Nuna by
+                    themselves. Only crust the model includes at each time counts, so deep-time values rest on less crust.</li>
+            </ul>
+        </div>
+        <p id="pt-prov"></p>
+    </section>
+
+    <section class="pt-panel" aria-labelledby="pt-deep-h">
+        <h2 id="pt-deep-h">Before 1.8 billion years</h2>
+        <p>The scrubber stops at 1.8 Ga because no plate reconstruction reaches further: older crust is too scattered, too
+           deformed and too sparsely dated for its motions to be fitted. Earth is 4.57 billion years old, and when plate
+           tectonics began — more than 3 billion years ago, or not until about 2 billion — is still argued over. Rather than draw maps nobody can
+           check, this page stops where the evidence does.</p>
+    </section>
+
+    <section class="pt-panel" aria-labelledby="pt-src-h">
+        <h2 id="pt-src-h">Sources</h2>
+        <ul class="pt-notes">
+            <li>Cao, X., Merdith, A. S., Williams, S. E., Müller, R. D. et al. — 1.8 Ga full-plate tectonic model (EarthByte Data
+                Collections, Cao_etal_2023). CC BY 4.0.</li>
+            <li>Merdith, A. S. et al. (2021) A continuous, kinematic full-plate motion model from 1 Ga to present.
+                <i>Earth-Science Reviews</i> 214, 103477 — and its supplementary ridge/trench statistics (SM3). CC BY 4.0.</li>
+            <li>Present-day boundaries cross-checked against Bird, P. (2003) <i>G³</i> 4(3) 1027 (PB2002) — see
+                <a href="earth-interior.html">Inner Earth</a>, which draws today's plates and slabs in 3-D.</li>
+            <li>Reconstructions resolved with pyGPlates (EarthByte); plate rotations re-implemented in our own kernel and checked
+                against it. Geologic time scale: ICS chart v2023/09.</li>
+        </ul>
+    </section>
+</main>
+
+<script type="module" src="js/plate-history/page.js"></script>
+<script type="module">import { initNav } from "./js/nav.js?v=20261123"; initNav("plate-tectonics");</script>
+</body>
+</html>

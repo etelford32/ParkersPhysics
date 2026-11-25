@@ -15,32 +15,65 @@ const LS_LIST_KEY = 'ppx_user_locations';   // multi-location watch list (AurOra
 const MAX_SAVED   = 8;                        // keep the list (and globe pins) sane
 
 /**
+ * One Nominatim row → the site's place shape. PURE (node-tested by
+ * tests/climalytix-places.mjs). `detail` is the region + country a reader
+ * needs to tell two Springfields apart; it never repeats the city.
+ */
+export function nominatimPlace(r, query = '') {
+    const lat = parseFloat(r?.lat), lon = parseFloat(r?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const adr = r.address ?? {};
+    const city = adr.city || adr.town || adr.village || adr.hamlet || adr.municipality
+               || adr.county || adr.state || adr.country || r.name || query || `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
+    const detail = [adr.state || adr.region, adr.country].filter((v) => v && v !== city)
+        .filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    return { lat, lon, city, detail, displayName: r.display_name || city };
+}
+
+async function nominatim(path, params, signal) {
+    const res = await fetch(
+        `https://nominatim.openstreetmap.org/${path}?${new URLSearchParams(params)}`,
+        { headers: { 'Accept-Language': 'en' }, signal }
+    );
+    if (!res.ok) throw new Error(`Geocoder HTTP ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Geocode a free-text query and return EVERY distinct match (best first), so a
+ * caller can offer "did you mean" instead of silently taking the first
+ * Springfield. Call it on SUBMIT only — Nominatim's usage policy forbids
+ * type-ahead against it.
+ * @returns {Promise<Array<{lat, lon, city, detail, displayName}>>} (never empty)
+ * @throws {Error} on network failure or no result
+ */
+export async function geocodeCandidates(query, { limit = 5, signal } = {}) {
+    const data = await nominatim('search', { q: query, format: 'json', limit: String(limit), addressdetails: '1' }, signal);
+    const out = [];
+    for (const r of Array.isArray(data) ? data : []) {
+        const p = nominatimPlace(r, query);
+        if (p && !out.some((o) => Math.abs(o.lat - p.lat) < 0.01 && Math.abs(o.lon - p.lon) < 0.01)) out.push(p);
+    }
+    if (!out.length) throw new Error('Location not found — try a city name or zip code');
+    return out;
+}
+
+/**
  * Geocode a free-text query (city name, zip code, or street address) via Nominatim.
  * @param {string} query
  * @returns {Promise<{lat:number, lon:number, city:string, displayName:string}>}
  * @throws {Error} on network failure or no result
  */
 export async function geocodeQuery(query) {
-    const params = new URLSearchParams({
-        q: query, format: 'json', limit: '1', addressdetails: '1',
-    });
-    const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?${params}`,
-        { headers: { 'Accept-Language': 'en' } }
-    );
-    if (!res.ok) throw new Error(`Geocoder HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data.length) throw new Error('Location not found — try a city name or zip code');
-    const r   = data[0];
-    const adr = r.address ?? {};
-    const city = adr.city || adr.town || adr.village || adr.hamlet
-               || adr.county || adr.state || adr.country || query;
-    return {
-        lat:         parseFloat(r.lat),
-        lon:         parseFloat(r.lon),
-        city,
-        displayName: r.display_name,
-    };
+    return (await geocodeCandidates(query, { limit: 1 }))[0];
+}
+
+/** Name a point (for "use my location"). Rejects on failure — callers fall back to the coordinates. */
+export async function reverseGeocode(lat, lon, { signal } = {}) {
+    const r = await nominatim('reverse', { lat: String(lat), lon: String(lon), format: 'json', zoom: '10', addressdetails: '1' }, signal);
+    const p = nominatimPlace({ ...r, lat, lon });
+    if (!p || r?.error) throw new Error('No name for this point');
+    return p;
 }
 
 /** Persist a location object to localStorage and dispatch 'user-location-changed'. */
