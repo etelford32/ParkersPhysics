@@ -84,10 +84,14 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         verb: 'Fly to your sky',
         accent: '#2eff9e',
         capture: {
-            // ?at= faces the Americas from 7,000 km. WHICH side is lit is the real
-            // Sun's doing: shoot between ~14 and 24 UT for daylight there (the
-            // 2026-11-22 still is 21:50 UT — dusk crossing the Atlantic).
-            url: '/earth.html?verdict=0&at=18,-78,7000',
+            // THE DUSK LINE, WHEREVER IT IS (2026-11-25). The best frame this
+            // page makes is the terminator: night-side city lights beside a
+            // daylit continent and the Sun's glint on the sea. It moves with
+            // the clock, so the camera is aimed at it AT CAPTURE TIME — 70°
+            // west of the page's own sub-solar point, 22°N — rather than at a
+            // fixed place that is only lit for part of the day. The `?at=` is
+            // just the boot framing the eval below replaces.
+            url: '/earth.html?verdict=0&at=18,72,9000',
             waitUntil: 'domcontentloaded',
             crop: '#c',
             ready: 'typeof window.__evCloudMode === "function"',
@@ -100,7 +104,7 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // present that as weather. What is left is real — NASA's surface
             // map, the city lights and today's terminator from the real Sun.
             shots: [{ eval: 'for (const id of ["lyr-clouds","lyr-wind","lyr-isobars","lyr-obs-sst","lyr-cities","lyr-rotate","lyr-volcanoes-active","lyr-volcanoes-dormant","lyr-volcanoes-inactive","lyr-glacier-flow"]) { const c=document.getElementById(id); if (c && c.checked) c.click(); }', wait: 2500 },
-                    { wait: 6000 }],
+                    { eval: 'const s = window.__evSunDir(); const ls = Math.atan2(-s[2], s[0]); const l = ls - 70 * Math.PI / 180, la = 22 * Math.PI / 180; window.__evSetCamDir(Math.cos(la) * Math.cos(l), Math.sin(la), -Math.cos(la) * Math.sin(l)); window.__evSetCamDist(2.95);', wait: 6000 }],
             settleMs: 10000,
             clipMs: 7000,
         },
@@ -128,8 +132,20 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // the real Sun wherever sdo.gsfc.nasa.gov is reachable.
             // Five notches: the disc fills the frame's height, which also puts the
             // browse JPEG's burned-in caption (drawn by the off-limb layer) out of frame.
-            shots: [{ wheel: -240, n: 5, wait: 800 }],
-            settleMs: 16000,
+            // THE CORONA TODAY (2026-11-25). In white light on a software
+            // rasteriser the disc reads as a flat over-exposed yellow; the
+            // same page in AIA 193 Å shows the observed frame's real coronal
+            // holes and active regions (sdo.gsfc.nasa.gov is reachable at
+            // capture). The wind particles, field lines and CME train are
+            // switched off for the still: around a full disc they read as
+            // speckle, not as structure.
+            shots: [{ eval: 'for (const id of ["tog-wind", "tog-fieldlines", "tog-cmetrain"]) { const t = document.getElementById(id); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change", { bubbles: true })); } } const v = document.getElementById("view-mode"); v.value = "3"; v.dispatchEvent(new Event("change", { bubbles: true }));', wait: 4000 },
+                    { wheel: -240, n: 5, wait: 800 },
+                    // NOAA region markers are click targets (torus rings), not
+                    // the Sun — hidden for the still; the regions themselves
+                    // are in the observed frame.
+                    { eval: 'for (const g of window.__sun.scene.children) if (g.isGroup && g.children.some((c) => c.userData && c.userData.lat !== undefined)) g.visible = false;' }],
+            settleMs: 20000,
             clipMs: 7000,
         },
     },
@@ -280,12 +296,25 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         verb: 'Visit the pad',
         accent: '#8ff0ff',
         capture: {
-            url: '/launch-planner.html?lpfx=low',
+            // LIFTOFF (2026-11-25). A rocket standing on a pad is a model; the
+            // page's best moment is T+5 s — the stack clearing the tower, the
+            // plume lighting its own ground cloud. Full-screen stage, 3/4
+            // view, high post chain; Liftoff is clicked last (smoke is
+            // emitted on MISSION time, and a
+            // software frame takes seconds): the last step waits until the
+            // page's own mission clock reads T-0 and shoots: on a software
+            // rasteriser the next frame lands seconds later, i.e. at liftoff.
+            // Clicks are scripted (the main thread is too busy for a real one);
+            // the generic overlay stripper has already hidden the toolbars.
+            url: '/launch-planner.html?lpfx=high',
             crop: '#lh-vehicle-canvas',
             ready: '!!(window.__lpVehicle3d && window.__lpVehicle3d.renderStats)',
             hide: ['nav'],
-            shots: [{ wheel: -240, n: 2 }, { drag: [0.5, 0.5, 0.4, 0.46], wait: 600 }],
-            settleMs: 12000,
+            shots: [{ eval: 'document.querySelector("[data-vehicle=starship]").click();', wait: 5000 },
+                    { eval: 'document.querySelector("#lh-cam-full").click();', wait: 4000 },
+                    { eval: 'document.querySelector(".lh-view[data-view=threequarter]").click();', wait: 5000 },
+                    { eval: 'document.querySelector("#lh-liftoff").click(); return new Promise((ok) => { const f = () => (window.__lpVehicle3d.missionT >= 0 ? ok() : requestAnimationFrame(f)); f(); });' }],
+            settleMs: 0,
             clipMs: 7000,
         },
     },
@@ -412,8 +441,11 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             // The still is the SURFACE: the exosphere atoms, sodium tail, quake and
             // anomaly markers and the landing-site plates are switched off (they
             // read as noise at thumbnail size); the page's own toggles do it.
-            prep: 'for (const id of ["lyr-quakes","lyr-anomalies","lyr-hops","lyr-rad-ring","lyr-exo","lyr-natail","lyr-apollo","lyr-artemis","lyr-colony"]) { const c = document.getElementById(id); if (c && c.checked) c.click(); } document.getElementById("vt-earthview")?.click()',
-            shots: [{ wheel: -240, n: 1, wait: 800 }],
+            // 2026-11-25: the grid and the radiation ring off too, and the
+            // landmark rings hidden — at hero size they read as a diagram
+            // drawn over the Moon, which is what the old still looked like.
+            prep: 'for (const id of ["lyr-quakes","lyr-anomalies","lyr-hops","lyr-radiation","lyr-rad-ring","lyr-exo","lyr-natail","lyr-grid","lyr-apollo","lyr-artemis","lyr-colony"]) { const c = document.getElementById(id); if (c && c.checked) c.click(); } document.getElementById("vt-earthview")?.click()',
+            shots: [{ eval: 'window.__moonLab.landmarks.group.visible = false;', wait: 1500 }],
             settleMs: 9000,
             clipMs: 7000,
         },
@@ -433,8 +465,16 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             hide: ['nav', '#landmark-card', '.loader-status', '#climate-controls', '.mars-header', '.mission-strip',
                    '.camera-dock', '.mission-panel', '.layers-panel', '.data-dock', '.feature-index', '#climate-legend',
                    '#climate-readout'],
-            shots: [{ wheel: -160, n: 3 }, { drag: [0.5, 0.5, 0.62, 0.42], wait: 800 }],
-            settleMs: 10000,
+            // THE WHOLE PLANET, CLEAN (2026-11-25). Driven first: the
+            // feature index's Valles Marineris approach is the page's best
+            // LIVE moment, but a still of it is limited by the imagery
+            // reachable at capture (the bundled 15 km/px Viking mosaic; NASA
+            // Trek's streamed tiles sharpen it on the live page) and read as
+            // blur. So the poster is the globe — MOLA relief, the real
+            // terminator — with every overlay layer (landmarks, grid, rover
+            // route, landing sites) switched off by the page's own toggles.
+            shots: [{ eval: 'for (const i of document.querySelectorAll("input[data-layer^=landmark-], input[data-layer=grid], input[data-layer=route], input[data-layer=waypoints], input[data-layer=rover], input[data-layer=landing]")) if (i.checked) i.click();', wait: 2500 }],
+            settleMs: 6000,
             clipMs: 7000,
         },
     },
@@ -451,11 +491,19 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             crop: '#canvas-wrap',
             ready: '!!window.__solarRender',
             hide: ['nav'],
-            // The default framing shows the whole system small; close in so
-            // the inner orbits and the Sun fill the frame.
-            prep: 'const R=window.__solarRender; if(R&&R.camera){R.camera.position.multiplyScalar(0.55); R.camera.updateProjectionMatrix();}',
-            shots: [{ drag: [0.5, 0.35, 0.56, 0.72] }, { wheel: -240, n: 3, wait: 600 }],
-            settleMs: 12000,
+            // JUPITER TONIGHT (2026-11-25). The default is the system seen
+            // pole-down — a small Sun in rings. Lock mode keeps the CURRENT
+            // view direction, and a headless drag never reaches this page's
+            // controls (measured: every drag-composed still was pole-down), so
+            // the camera is set to a low oblique angle FIRST, then Jupiter is
+            // selected: its banded disc with the Galilean moons where they
+            // really are tonight. The selection reticle is hidden for the still.
+            prep: 'const c = window.__solarRender.camera; const r = c.position.length(); c.position.set(r * 0.55, r * 0.22, r * 0.80); c.lookAt(0, 0, 0);',
+            shots: [{ wait: 2500 },
+                    { eval: '[...document.querySelectorAll("#planet-btns button")].find((b) => /Jupiter/.test(b.textContent)).click();', wait: 9000 },
+                    { wheel: -200, n: 2, wait: 1500 },
+                    { eval: 'let sc = window.__solarRender.sunMesh; while (sc.parent) sc = sc.parent; sc.traverse((o) => { if (/marker|reticle/i.test(o.name)) o.visible = false; });' }],
+            settleMs: 3000,
             clipMs: 7000,
         },
     },

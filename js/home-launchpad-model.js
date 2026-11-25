@@ -57,13 +57,16 @@ export const FIXTURE_IDS = Object.freeze([
  * it sits on a 280 px tile. index.html carries the same text statically and
  * the node gate compares them.
  */
+// Each line is the VALUE to a first-time visitor — what they can do or see in
+// the first minute, in plain words (2026-11-25: the earlier lines read like spec
+// sheets: "ephemeris", "MOLA"). Every claim must be something the page does.
 export const FIXTURE_LIVE = Object.freeze({
-    'galactic-map': 'A 3D map of the Milky Way’s stars — and where tonight’s sky sits in it.',
-    'solar-system': 'Every planet placed from the ephemeris at this instant, with near-Earth objects and CMEs in flight.',
-    'earth':        'Live weather, wind, clouds and tonight’s aurora oval on one physically lit globe.',
-    'climalytix':   'One location, every dataset on one clock: the forecast, the record, the terrain, the air.',
-    'mars':         'MOLA terrain you can descend to, with today’s season and local time from JPL.',
-    'sun':          'Today’s solar disk from SDO, NOAA’s active regions, and flares and CMEs as they launch.',
+    'galactic-map': 'Find Betelgeuse, the Orion Nebula or Andromeda on a 3D map of our galaxy — and fly there.',
+    'solar-system': 'Every planet and moon exactly where it is tonight. Speed up time and watch them move.',
+    'earth':        'Spin the real Earth: tonight’s city lights, tomorrow’s weather, and where the aurora will be.',
+    'climalytix':   'Search any place for its forecast, past weather, terrain and air quality on one timeline.',
+    'mars':         'Drop into Valles Marineris or Jezero Crater, at the real Martian hour and season.',
+    'sun':          'Today’s Sun as NASA’s SDO sees it, with flares and solar storms as they launch.',
 });
 
 /**

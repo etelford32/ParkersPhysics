@@ -1,19 +1,19 @@
 {
   "earth": [
-    34,
-    44
+    50,
+    48
   ],
   "sun": [
     50,
     50
   ],
   "mars": [
-    60,
-    46
+    50,
+    48
   ],
   "solar-system": [
     50,
-    50
+    52
   ],
   "galactic-map": [
     50,
@@ -24,8 +24,8 @@
     42
   ],
   "launch-planner": [
-    50,
-    46
+    51,
+    45
   ],
   "earth-interior": [
     47,

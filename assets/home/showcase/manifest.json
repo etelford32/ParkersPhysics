@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-23T00:12:03.547Z",
+  "generatedAt": "2026-11-25T01:57:30.252Z",
   "slides": [
     {
       "id": "earth",
@@ -8,12 +8,12 @@
       "clip": "assets/home/showcase/earth.webm",
       "width": 1920,
       "height": 1150,
-      "source": "/earth.html?verdict=0&at=18,-78,7000",
-      "capturedAt": "2026-11-22T22:21:38.387Z",
+      "source": "/earth.html?verdict=0&at=18,72,9000",
+      "capturedAt": "2026-11-25T01:47:56.112Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 73171,
-        "clip": 77800
+        "poster": 106914,
+        "clip": 137989
       }
     },
     {
@@ -23,11 +23,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/sun.html",
-      "capturedAt": "2026-11-22T23:59:31.227Z",
+      "capturedAt": "2026-11-25T01:51:56.408Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 163772,
-        "clip": 142298
+        "poster": 81578,
+        "clip": 78469
       }
     },
     {
@@ -118,14 +118,14 @@
       "id": "launch-planner",
       "poster": "assets/home/showcase/launch-planner.jpg",
       "clip": "assets/home/showcase/launch-planner.webm",
-      "width": 1042,
-      "height": 650,
-      "source": "/launch-planner.html?lpfx=low",
-      "capturedAt": "2026-11-22T22:14:26.039Z",
+      "width": 1920,
+      "height": 1200,
+      "source": "/launch-planner.html?lpfx=high",
+      "capturedAt": "2026-11-25T01:57:04.638Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 87400,
-        "clip": 453032
+        "poster": 44551,
+        "clip": 32699
       }
     },
     {
@@ -205,11 +205,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/moon.html",
-      "capturedAt": "2026-11-23T00:03:49.369Z",
+      "capturedAt": "2026-11-25T01:53:56.719Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 186246,
-        "clip": 226311
+        "poster": 156980,
+        "clip": 203911
       }
     },
     {
@@ -219,11 +219,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/mars.html",
-      "capturedAt": "2026-11-22T22:16:03.765Z",
+      "capturedAt": "2026-11-25T01:57:30.205Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 110217,
-        "clip": 116922
+        "poster": 80100,
+        "clip": 141114
       }
     },
     {
@@ -233,11 +233,11 @@
       "width": 1920,
       "height": 1200,
       "source": "/solar-system.html",
-      "capturedAt": "2026-11-22T22:16:47.516Z",
+      "capturedAt": "2026-11-25T01:55:14.790Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 125909,
-        "clip": 181293
+        "poster": 72112,
+        "clip": 107061
       }
     },
     {
