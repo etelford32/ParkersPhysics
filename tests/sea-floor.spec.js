@@ -249,9 +249,10 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     // the two-thickness plate lands after the one-thickness answer, a section at a time, on the AGE-CORRECTED reference
     await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
     const two = await page.evaluate(() => { const t = window.__seaFloor.two, f = (o) => t.stations.find((s) => s.offsetKm === o).fit;
-        return { age: t.age, needed: t.needed, here: f(0).accepted, hereNeeded: f(0).needed, w: f(-160).accepted, tem: f(-160).temKm, ref: f(-160).reference, lo: f(-160).intervals.teM[0] }; });
-    expect(two.age).toBe('ok'); expect(two.ref).toBe('age');
+        return { age: t.age, sed: t.sed, needed: t.needed, here: f(0).accepted, hereNeeded: f(0).needed, w: f(-160).accepted, tem: f(-160).temKm, ref: f(-160).reference, lo: f(-160).intervals.teM[0] }; });
+    expect(two.age).toBe('ok'); expect(two.sed).toBe('ok'); expect(two.ref).toBe('age');
     await expect(facts).toContainText(`at ${two.needed} of 5 cross-sections`); await expect(facts).toContainText('cooling subsidence removed');
+    await expect(facts).toContainText('sediment\'s weight taken off (GlobSed)');
     expect(two.here).toBe(false); expect(two.hereNeeded).toBe(false);                                // MEASURED: at Kuril's centre one thickness is enough once subsidence is removed
     await expect(facts).toContainText('one thickness explains this section as well as two');
     await expect(page.locator('#sf-flex-chart .sf-two')).toHaveCount(0);
@@ -260,6 +261,7 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     await chips.first().click();
     await expect(facts).toContainText('Two thicknesses, this section'); await expect(facts).toContainText(`${Math.round(two.tem)} km`); await expect(facts).toContainText(`at least ${Math.round(two.lo)} km`);
     await expect(facts).toContainText('Sea-floor age, this section'); await expect(facts).toContainText('Seton et al. 2020');
+    await expect(facts).toContainText('Sediment, this section'); await expect(facts).toContainText('GlobSed; its weight taken off');
     await expect(facts).toContainText('Unbent plate and temperature'); await expect(facts).toContainText('600 °C');
     await expect(facts).toContainText('Published, two thicknesses'); await expect(facts).toContainText('outside ours');   // RECORDED: Kuril's near-trench value disagrees with Zhang et al.
     await expect(page.locator('#sf-flex-chart svg path')).toHaveCount(3);                            // sea floor + one-thickness model + two-thickness model
@@ -287,19 +289,17 @@ test('plates: boundaries on the globe and the block, the bending plate, the slab
     await expect(page.locator('#sf-plates-facts')).toContainText('not quoted');
     await expect(page.locator('#sf-plates-facts')).toContainText('only 2 of 5 cross-sections');
     await expect(page.locator('#sf-flex-read')).toContainText('The curve fits to');
-    // ...but with subsidence removed three Izu–Bonin sections pin BOTH thicknesses, and the site is quoted for the plate before it bends
+    // ...but with sediment unloaded and subsidence removed four Izu–Bonin sections pin BOTH thicknesses, and the site is quoted for the plate before it bends
     await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
     const izu = await page.evaluate(() => window.__seaFloor.two);
-    expect(izu.quotable).toBe(true); expect(izu.accepted).toBe(3);
+    expect(izu.quotable).toBe(true); expect(izu.accepted).toBe(4);
     await expect(page.locator('#sf-plates-facts')).toContainText(`${Math.round(izu.temKm)} km near the trench`);
-    // the one site where three sections pin both thicknesses: quoted as a median with its range, the unbent plate as lower bounds
+    // MEASURED: with its sediment unloaded Middle America pins both thicknesses at only 2 of 5 sections and is NOT quoted (the sediment-down control below quotes it)
     await page.goto('/sea-floor.html?site=middle-america', { waitUntil: 'load' }); await tectonics(page);
     await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
     const ma = await page.evaluate(() => window.__seaFloor.two);
-    expect(ma.age).toBe('ok');
-    expect(ma.quotable).toBe(true); expect(ma.accepted).toBe(3); expect(ma.teMKm).toBeNull();
-    await expect(page.locator('#sf-plates-facts')).toContainText(`${Math.round(ma.temKm)} km near the trench`);
-    await expect(page.locator('#sf-plates-facts')).toContainText(`at least ${Math.round(ma.teMLowerMin)}–${Math.round(ma.teMLowerMax)} km, by section`);
+    expect(ma.age).toBe('ok'); expect(ma.sed).toBe('ok');
+    expect(ma.quotable).toBe(false); expect(ma.accepted).toBe(2);
     // a transform fault has no bending plate and no slab
     await page.goto('/sea-floor.html?site=romanche', { waitUntil: 'load' }); await tectonics(page);
     await expect(page.locator('#sf-flex-chart')).toContainText('no plate sinks');
@@ -326,6 +326,20 @@ test('NEGATIVE CONTROL: sea-floor age down ⇒ the two-thickness plate falls bac
     expect(t.ok).toBe(true);                                                                          // MEASURED: on the line reference Kuril's centre IS accepted — the reference changes the answer
     await expect(page.locator('#sf-plates-facts')).toContainText('the sea-floor age window could not be loaded');
     await expect(page.locator('#sf-plates-facts')).not.toContainText('Seton et al. 2020');
+});
+
+test('NEGATIVE CONTROL: sediment down ⇒ the fit runs on the age reference alone, Middle America is quoted again, and the page says sediment was not removed', async ({ page }) => {
+    await page.route('**/data/seafloor/sediment-index.json', (r) => r.fulfill({ status: 503, body: '' }));
+    await boot(page, '/sea-floor.html?site=middle-america'); await tectonics(page);
+    await page.waitForFunction(() => { const t = window.__seaFloor.two; return t && !t.pending && !t.waiting && t.fitted === 5; }, null, { timeout: 90_000 });
+    const ma = await page.evaluate(() => window.__seaFloor.two);
+    expect(ma.age).toBe('ok'); expect(ma.sed).toBe('down');
+    expect(ma.stations.every((s) => !s.fit || !s.fit.sediment)).toBe(true);
+    expect(ma.quotable).toBe(true); expect(ma.accepted).toBe(3); expect(ma.teMKm).toBeNull();             // MEASURED: the age-only answer
+    await expect(page.locator('#sf-plates-facts')).toContainText(`${Math.round(ma.temKm)} km near the trench`);
+    await expect(page.locator('#sf-plates-facts')).toContainText(`at least ${Math.round(ma.teMLowerMin)}–${Math.round(ma.teMLowerMax)} km, by section`);
+    await expect(page.locator('#sf-plates-facts')).toContainText('the sediment window could not be loaded, so sediment is NOT removed');
+    await expect(page.locator('#sf-plates-facts')).not.toContainText('GlobSed; its weight taken off');
 });
 
 test('NEGATIVE CONTROL: plate model down ⇒ no motions, no boundaries, depths untouched', async ({ page }) => {

@@ -47,6 +47,11 @@
  *   · the cooling plate's 600 °C isotherm (`thermalCheck`, half-space, a COMPARISON) lies shallower than the
  *     unbent plate's lower bound at 8 of 19 — Middle America ×3, Philippine ×3 among them; Zhang's own Philippine
  *     values (48–57 km at 68–99 Myr) are deeper than that isotherm too, so it is printed, never used as a cap.
+ * SEDIMENT IS UNLOADED FIRST (2026-11-25, `sedGrid`, sediment.js: GlobSed + Zhang eq. 1; `sediment: false` is the A/B).
+ * MEASURED on the same 72: needed 28, pinned at 16, closed 3, quoted 2 — Philippine (30 km near the trench, at least
+ * 52–60 beyond) and Izu–Bonin (37 km, 26–56; at least 33–56) — Japan and Middle America drop out; but against Zhang
+ * per quantity at the 15: near-trench 9, unbent 13, break 10, all three 7 — every share UP on age only (53→60 %,
+ * 68→87 %, 53→67 %, 26→47 %); above the 600 °C isotherm at 7 of 15. Sediment is used at 65 sections (7 have no age).
  * WHY: cooling predicts < 0.1 m/km of tilt across the old plates (≥ 90 Myr), where the line reference chose
  * 0.5–1.4 m/km — that slope was standing in for the stiff outer plate, so the second plate could not show itself.
  * The one-thickness QUOTE stays on the line reference (trench-model.js `fitStation`); the line results below are
@@ -328,14 +333,14 @@ export function twoThicknessSections(tm) { return !tm || !tm.profile ? [] : tm.a
  */
 export function sectionTwoThickness(sec, opts = {}) {
     if (!sec || !sec.profile) return null;
-    const { ageGrid = null, ...rest } = opts;
+    const { ageGrid = null, sedGrid = null, sediment = true, ...rest } = opts;
     let prof = sec.fitProfile || sec.profile, f = sec.flexure, level = f && (f.reference === 'age' || f.reference === 'level');
-    if (ageGrid) { const fs = fitStation(sec.profile, {}, ageGrid); if (fs.flexure && fs.flexure.reference === 'age') { prof = fs.fitProfile; f = fs.flexure; level = true; } }
+    if (ageGrid) { const fs = fitStation(sec.profile, { sediment }, ageGrid, sedGrid); if (fs.flexure && fs.flexure.reference === 'age') { prof = fs.fitProfile; f = fs.flexure; level = true; } }
     if (!prof || !f) return null;
     const b = brokenStation(prof, f, { ...rest, slope: level ? false : rest.slope });
     if (!b) return null;
     b.reference = f.reference; b.ageNote = f.ageNote || null;
-    if (f.subsidence) { b.subsidence = f.subsidence; b.ageRange = f.ageRange; }
+    if (f.subsidence) { b.subsidence = f.subsidence; b.ageRange = f.ageRange; b.sediment = f.sediment || null; b.sedNote = f.sedNote || null; }
     // the unbent plate against temperature: how deep a plate of the age beyond the break is still cold (a COMPARISON, never a cap)
     if (f.reference === 'age') { const beyond = prof.filter((p) => p.x >= b.xrKm && p.age != null).map((p) => p.age); if (beyond.length) b.thermal = thermalCheck(beyond.reduce((a, v) => a + v, 0) / beyond.length, b); }
     return b;

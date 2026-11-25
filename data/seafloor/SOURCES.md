@@ -118,4 +118,26 @@ What it is used for: thermal subsidence (GDH1, Stein & Stein 1992 — `js/seaflo
 memory, `verified: false`) is removed from the sea floor before the TWO-THICKNESS plate is fitted, the method
 both published trench studies use. The grid is masked at the mapped plate boundary, so the first 0–32 km
 seaward of a trench axis has no age; those points take the age of the nearest dated point seaward (within
-40 km, flagged). Sediment loading is NOT removed (no sediment grid is baked).
+40 km, flagged). Sediment is removed first (next section).
+
+## Sediment thickness — GlobSed (Straume et al. 2019)
+
+`<id>.sed.bin.gz` + `sediment-index.json` (the 17 trench sites): total sediment thickness from Straume, Gaina,
+Medvedev et al. (2019), *GlobSed: Updated total sediment thickness in the world's oceans*, G-cubed,
+doi:10.1029/2018GC008115, at 5 arc-minutes. NOAA NCEI distributes it as `GlobSed-v3.nc`, but NOAA, Zenodo,
+PANGAEA and figshare are all egress-blocked here, so `scripts/build-seafloor-sediment.py` reads an UNOFFICIAL
+copy committed (Git LFS) to the public GitHub repository AAC-Open-Source-Pool/Ocean-Floor-Mapping, sha256-pinned
+(the pin equals the LFS pointer's own oid; `--check` rebuilds byte for byte). The file's own `history` attribute
+(copied into the index) names `GlobSed_v2.nc` although it is distributed as v3 — which release it is cannot be
+settled from here. Baked as ±6° windows of the source's own nodes, whole metres, no-data on land.
+
+Because the copy is unofficial it is checked against an INDEPENDENT dataset: under the same windows, sediment must
+thin toward young crust in Seton et al.'s ages. It does — median 119 m on 0–5 Myr crust against 305 m on
+100–200 Myr; read upside down the windows give 322 vs 315 m (the gate's control).
+
+What it is used for: the sediment's isostatic load is taken off before the two-thickness plate is fitted —
+Zhang et al. 2018 eq. 1, ΔT = H·(ρm − ρs)/(ρm − ρw) with their Table 1 densities (ρs 2000, ρm 3300, ρw 1030
+kg/m³), i.e. 0.573 m deeper per metre of sediment (`js/seafloor/sediment.js`). One density for the whole column
+(real sediment compacts, so the true correction is smaller for a thick pile); local Airy, not flexural; crustal
+thickness is not removed (Zhang removes it; no crustal model is baked). A point without a sediment value is
+dropped, never treated as zero, and a section with < 90 % coverage falls back to the age correction alone.

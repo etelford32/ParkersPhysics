@@ -19,6 +19,16 @@
     </image>
 
     <item>
+      <title>Sea Floor: the weight of the sediment taken off the plate</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-sediment</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-sediment</guid>
+      <pubDate>Wed, 25 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;Sediment lying on a plate weighs it down, and a thick pile near a margin can look like bending. The page now removes that weight before fitting the two-thickness plate, as the published trench studies do.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Sediment thickness comes from GlobSed (Straume and others, 2019). The copy used is unofficial, so the page checks it against the sea-floor age map: the sediment thins toward young sea floor, as it should.&lt;/li&gt;&lt;li&gt;The weight is taken off with the densities in Zhang and others&amp;#39; table, so each metre of sediment deepens the sea floor by 0.57 m.&lt;/li&gt;&lt;li&gt;Fewer sections now pin down both thicknesses (16 of 72 instead of 19). Only Philippine and Izu–Bonin are quoted; Japan and Middle America drop out.&lt;/li&gt;&lt;li&gt;Where a section is pinned down, Zhang and others&amp;#39; numbers fall inside ours more often for every quantity. All three agree at 7 of 15 sections, up from 5 of 19.&lt;/li&gt;&lt;li&gt;Each section shows how much sediment it carries. If the sediment map cannot be loaded, the page says the sediment was not removed.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=philippine&quot;&gt;Open Sea Floor: Philippine Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
       <title>Sea Floor: the age of the sea floor, and the plate before it bends</title>
       <link>https://parkersphysics.com/recent-development.html#sea-floor-age</link>
       <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-age</guid>
@@ -506,16 +516,6 @@
       <category>New layer / feature</category>
       <category>Space Weather</category>
       <description>&lt;p&gt;The homepage opens on today&amp;#39;s Sun — real NOAA active regions — and plays the next 24 hours of CMEs through the flux-rope engine.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage: today&#39;s Earth and NOAA&#39;s aurora</title>
-      <link>https://parkersphysics.com/recent-development.html#hero-real-earth</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#hero-real-earth</guid>
-      <pubDate>Wed, 23 Sep 2026 00:00:00 GMT</pubDate>
-      <category>Improvement</category>
-      <category>Space Weather</category>
-      <description>&lt;p&gt;The homepage globe is NASA imagery turned to today&amp;#39;s sunlight and season, with the live OVATION aurora oval on the real magnetic dipole.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
   </channel>

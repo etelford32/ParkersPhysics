@@ -8,7 +8,8 @@
 #                          a regional slope, the wide windows, the reach test, seamount masking, five stations
 #                          along each trench, recorded rejections); the two-thickness plate; the sea-floor age
 #                          (Seton et al. 2020) windows against Garcia et al.'s own site ages, and the plate fitted
-#                          with thermal subsidence removed.
+#                          with thermal subsidence removed; the GlobSed sediment windows (an unofficial copy, checked
+#                          against Seton's ages with an upside-down control) and the plate fitted with the sediment unloaded.
 #
 # The browser gate (tests/sea-floor.spec.js) reads only baked files and is run locally.
 # The bakes (scripts/build-seafloor-*.py) need the network and are run by hand.

@@ -26,6 +26,7 @@ import * as TM from '../js/seafloor/trench-model.js';
 import * as LIT from '../js/seafloor/trench-literature.js';
 import * as BP from '../js/seafloor/broken-plate.js';
 import * as AG from '../js/seafloor/age.js';
+import * as SD from '../js/seafloor/sediment.js';
 import { decodePlates } from '../js/earth-interior/plates.js';
 import { decodeSlabs } from '../js/earth-interior/slabs.js';
 
@@ -594,6 +595,57 @@ console.log('8. trench-model.js (Bird PB2002 + USGS Slab2 + the elastic-plate fi
       ok(above2 === 8, `at ${above2} of 19 the unbent plate's LOWER bound is deeper than a half-space 600 °C isotherm of that age — printed as a comparison (Zhang's own Philippine values are deeper too)`);
       const tmSrc = rd('js/seafloor/trench-model.js').toString(), agSrc = rd('js/seafloor/age.js').toString();
       ok(!/^import[^\n]*trench-literature/m.test(tmSrc) && !/^import[^\n]*trench-literature/m.test(agSrc), 'the age model never reads the literature'); }
+    // ── the SEDIMENT (GlobSed) and its weight taken off before the two-thickness fit (Zhang et al. 2018 eq. 1) ──
+    { const K = SD.SEDIMENT;
+      ok(K.rhoMantle === TM.ELASTIC.rhoMantle && K.rhoWater === TM.ELASTIC.rhoWater && K.rhoSediment === 2000 && K.verified, 'sediment densities: Zhang Table 1 — mantle and water the SAME numbers as ELASTIC, sediment 2000 kg/m³');
+      near(SD.sedimentLift(1000), 1000 * 1300 / 2270, 1e-9, 'Airy: 1 km of sediment stands the floor 573 m higher');
+      ok(SD.sedimentLift(0) === 0, 'no sediment, no correction');
+      // removeSediment: deepens each point by the lift; a missing value is DROPPED, never read as zero sediment
+      const prof = Object.assign([0, 10, 20, 30, 40].map((x) => ({ x, depth: 5000 + x })), { origin: { lat: 0, lon: 0 }, seaBearingDeg: 90, axisOffsetKm: 0, axisS: 2 });
+      const r = SD.removeSediment(prof, [200, 400, null, 800, 1000]);
+      ok(r.length === 4 && r.every((p) => p.x !== 20) && r.every((p) => Math.abs(p.depth - (5000 + p.x + SD.sedimentLift(p.sediment))) < 1e-9), 'every point deepened by its own lift; the point with no value is dropped');
+      ok(r.sedCoverage === 0.8 && r.sedRange[0] === 200 && r.sedRange[1] === 1000 && r.axisS === 2 && r.seaBearingDeg === 90, 'coverage 4 / 5, range and geometry carried for the age correction');
+      // the shared sampler: profileStack under profileAges is unchanged (planted plane), and a sediment window reads in whole metres
+      const meta = { id: 't', nx: 41, ny: 41, north: 10, west: 170, step_deg: 0.5 }, q = new Int16Array(41 * 41);
+      for (let j = 0; j < 41; j++) for (let i = 0; i < 41; i++) q[j * 41 + i] = 100 + 10 * j + i;
+      const sg = SD.makeSedimentGrid(meta, q); near(SD.sampleSediment(sg, 10 - 2.25, 172.75), 100 + 45 + 5.5, 1e-9, 'bilinear sediment is exact on a planted plane, in metres (age.js sampleGrid at scale 1)');
+      near(AG.sampleAge(AG.makeAgeGrid(meta, q), 10 - 2.25, 172.75), (100 + 45 + 5.5) / 10, 1e-9, 'the same sampler reads the age at 0.1 Myr per unit');
+      const q3 = q.slice(); q3[4 * 41 + 5] = SD.SED_NO_DATA; ok(SD.sampleSediment(SD.makeSedimentGrid(meta, q3), 10 - 2.25, 172.75) === null, 'a no-data node (land) voids the cell — land is never zero sediment');
+      // the BAKED windows: exactly the trench sites, intact, the pinned copy
+      const SI = JSON.parse(rd('data/seafloor/sediment-index.json')), baker = rd('scripts/build-seafloor-sediment.py').toString();
+      ok(SI.sites.map((m) => m.id).join() === SEAFLOOR_SITES.filter((x) => x.kind === 'trench').map((x) => x.id).join(), 'a sediment window for every trench site and nothing else');
+      ok(baker.includes(`SHA256 = '${SI.source.sha256}'`) && /Straume/.test(SI.source.citation) && /unofficial/.test(SI.source.copy) && /GlobSed/.test(SI.source.history_attr), 'the index names the pinned copy (sha256 in the baker), says it is unofficial, and carries the file\'s own history attribute');
+      const SGRID = new Map(), AI = JSON.parse(rd('data/seafloor/age-index.json')), AGR = new Map();
+      for (const m of SI.sites) { const raw = rd('data/seafloor/' + m.file), g = SD.makeSedimentGrid(m, BA.int16FromBytes(new Uint8Array(zlib.gunzipSync(raw)))); SGRID.set(m.id, g);
+          ok(raw.length === m.bytes && [...g.q].every((v) => v === SD.SED_NO_DATA || (v >= 0 && v <= 20000)), `${m.id}: sediment window intact, 0–20 km or no data`); }
+      for (const m of AI.sites) AGR.set(m.id, AG.makeAgeGrid(m, BA.int16FromBytes(new Uint8Array(zlib.gunzipSync(rd('data/seafloor/' + m.file))))));
+      // an INDEPENDENT check of the copy: under the same windows, sediment must thin toward young crust in Seton's age grid
+      const youngOld = (flip) => { const y = [], o = [];
+          for (const [id, a] of AGR) { let sg2 = SGRID.get(id);
+              if (flip) { const f = new Int16Array(sg2.q.length); for (let j = 0; j < sg2.ny; j++) f.set(sg2.q.subarray((sg2.ny - 1 - j) * sg2.nx, (sg2.ny - j) * sg2.nx), j * sg2.nx); sg2 = { ...sg2, q: f }; }
+              for (let j = 0; j < a.ny; j += 2) for (let i = 0; i < a.nx; i += 2) { const lat = a.north - j * a.step, lon = a.west + i * a.step, t = AG.sampleAge(a, lat, lon), h = SD.sampleSediment(sg2, lat, lon);
+                  if (t == null || h == null) continue; if (t < 5) y.push(h); else if (t >= 100 && t < 200) o.push(h); } }
+          const med = (v) => v.sort((p, w) => p - w)[v.length >> 1]; return { y: med(y), o: med(o), ny: y.length }; };
+      const yo = youngOld(false), yf = youngOld(true);
+      ok(yo.ny > 1000 && yo.y < 0.5 * yo.o, `GlobSed thins toward young crust in Seton's ages: median ${yo.y} m on 0–5 Myr crust vs ${yo.o} m on 100–200 Myr (measured 119 vs 305)`);
+      ok(!(yf.y < 0.5 * yf.o), `NEGATIVE CONTROL: read upside down the sediment no longer follows the ages (${yf.y} vs ${yf.o} m)`);
+      // REAL stations (MEASURED 2026-11-25): the two-thickness plate with the sediment unloaded, then the cooling subsidence removed
+      let fitted = 0, needed = 0, acc = 0, closed = 0, above = 0, used = 0; const per = { n: 0, tem: 0, teM: 0, xr: 0, all: 0 }, quoted = [];
+      for (const id of SEAFLOOR_SITES.filter((x) => x.kind === 'trench').map((x) => x.id)) { const t = model(id); if (!t.along) continue;
+          const two = BP.twoThickness(t, { ageGrid: AGR.get(id), sedGrid: SGRID.get(id) }); fitted += two.fitted; needed += two.needed; acc += two.accepted; if (two.quotable) quoted.push(id);
+          for (const s of two.stations) { if (s.fit && s.fit.sediment) used++;
+              if (s.fit && s.fit.accepted) { closed += s.fit.teMStatus === 'measured'; above += !!(s.fit.thermal && s.fit.thermal.aboveHot);
+                  const st = t.along.stations.find((o) => o.offsetKm === s.offsetKm), cc = LIT.compareTwoThickness(s.fit, LIT.publishedFor(st.lat, st.lon, id));
+                  if (cc) { per.n++; per.tem += cc.temInside; per.teM += cc.teMInside; per.xr += cc.xrInside; per.all += cc.temInside && cc.teMInside && cc.xrInside; } } } }
+      ok(used === 65, `sediment unloaded at ${used} sections (the other 7 have no age reference)`);
+      ok(fitted === 72 && needed === 28 && acc === 16 && closed === 3, `two thicknesses with sediment unloaded: needed at ${needed} of ${fitted}, both pinned at ${acc}, unbent interval closed at ${closed} (measured 28 / 72 / 16 / 3; age only 29 / 72 / 19 / 7)`);
+      ok(quoted.join() === 'philippine,izu-bonin', `quoted with sediment unloaded: ${quoted.join(', ')} (age only adds Japan and Middle America)`);
+      ok(per.n === 15 && per.tem === 9 && per.teM === 13 && per.xr === 10 && per.all === 7, `against Zhang et al. 2018 at the ${per.n} accepted sections: near-trench ${per.tem}, unbent ${per.teM}, break ${per.xr}, all three ${per.all} — every share up on age only (10/13/10/5 of 19), recorded, not tuned`);
+      ok(above === 7, `at ${above} of 15 the unbent plate's lower bound lies deeper than the 600 °C isotherm`);
+      // NEGATIVE CONTROL: `sediment: false` is EXACTLY the age-only fit
+      const t0 = model('philippine'), off = BP.twoThickness(t0, { ageGrid: AGR.get('philippine'), sedGrid: SGRID.get('philippine'), sediment: false }), age = BP.twoThickness(t0, { ageGrid: AGR.get('philippine') });
+      ok(JSON.stringify(off.stations.map((s) => s.fit && s.fit.tem)) === JSON.stringify(age.stations.map((s) => s.fit && s.fit.tem)) && off.stations.every((s) => !s.fit || !s.fit.sediment), 'sediment: false reproduces the age-only fit exactly');
+      ok(!/^import[^\n]*trench-literature/m.test(rd('js/seafloor/sediment.js').toString()), 'the sediment model never reads the literature'); }
     // the renderers compute none of it
     for (const file of ['js/seafloor/page.js', 'js/seafloor/stage.js', 'js/seafloor/globe.js']) { const src = rd(file).toString();
         for (const fnc of ['flexureShape(', 'elasticFromRise(', 'fitFlexure(', 'velocityIn(', 'slabValueAt(', 'nearestStep(']) ok(!src.includes(fnc), `${file} never calls ${fnc}`); }

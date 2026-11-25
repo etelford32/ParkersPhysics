@@ -37,8 +37,11 @@ export function makeAgeGrid(meta, int16) {
     return { id: meta.id, nx: meta.nx, ny: meta.ny, north: meta.north, west: meta.west, step: meta.step_deg, q: int16 };
 }
 
-/** Age (Myr) at a point: bilinear on the source's nodes, null outside the window or next to any no-data node. */
-export function sampleAge(g, lat, lon) {
+/**
+ * A value on a baked int16 window (an age or sediment window — the same layout): bilinear on the source's own nodes,
+ * divided by `scale`; null outside the window or next to ANY no-data node (a continent is never averaged into a value).
+ */
+export function sampleGrid(g, lat, lon, scale = 1) {
     let d = lon - g.west; d -= 360 * Math.floor(d / 360);
     const fj = (g.north - lat) / g.step, fi = d / g.step, E = 1e-6;
     if (!(fj >= -E && fi >= -E && fj <= g.ny - 1 + E && fi <= g.nx - 1 + E)) return null;
@@ -47,33 +50,37 @@ export function sampleAge(g, lat, lon) {
     const at = (i, j) => g.q[j * g.nx + i];
     const a = at(i0, j0), b = at(i0 + 1, j0), c = at(i0, j0 + 1), e = at(i0 + 1, j0 + 1);
     if (a === AGE_NO_DATA || b === AGE_NO_DATA || c === AGE_NO_DATA || e === AGE_NO_DATA) return null;
-    return ((a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + e * u) * v) / 10;
+    return ((a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + e * u) * v) / scale;
 }
+/** Age (Myr) at a point (0.1 Myr steps in the window). */
+export function sampleAge(g, lat, lon) { return sampleGrid(g, lat, lon, 10); }
 
 /**
- * The age under each point of a stacked bending profile (trench-model.js `bendingProfile`, which records its
- * origin, seaward bearing and axis offset): the MEAN over the same parallel lines the depth was stacked from,
- * null where fewer than `minLines` have an age. A mean, not the depth's median, because subsidence is close to
- * linear in age over an 80 km stack and the median of nine nearly equal ages adds nothing but rounding.
+ * A baked field under each point of a stacked bending profile (trench-model.js `bendingProfile`, which records its
+ * origin, seaward bearing and axis offset): the MEAN over the same parallel lines the depth was stacked from, null
+ * where fewer than `minLines` have a value. A mean, not the depth's median: the fields read this way (age, sediment
+ * thickness) enter the correction LINEARLY, so the mean of the lines is the correction of the stack.
  */
-export function profileAges(ageGrid, profile, { offsetsKm = [-40, -30, -20, -10, 0, 10, 20, 30, 40], minLines = 5 } = {}) {
-    if (!ageGrid || !profile || !profile.origin) return null;
+export function profileStack(grid, profile, sample, { offsetsKm = [-40, -30, -20, -10, 0, 10, 20, 30, 40], minLines = 5 } = {}) {
+    if (!grid || !profile || !profile.origin) return null;
     const { origin, seaBearingDeg: sb, axisOffsetKm } = profile, along = sb + 90;
     const lines = offsetsKm.map((o) => (o >= 0 ? destination(origin.lat, origin.lon, along, o) : destination(origin.lat, origin.lon, along + 180, -o)));
     return profile.map((p) => {
         const s = axisOffsetKm + p.x; let sum = 0, n = 0;
-        for (const L of lines) { const q = s >= 0 ? destination(L.lat, L.lon, sb, s) : destination(L.lat, L.lon, sb + 180, -s), a = sampleAge(ageGrid, q.lat, q.lon); if (a != null) { sum += a; n++; } }
+        for (const L of lines) { const q = s >= 0 ? destination(L.lat, L.lon, sb, s) : destination(L.lat, L.lon, sb + 180, -s), a = sample(grid, q.lat, q.lon); if (a != null) { sum += a; n++; } }
         return n >= minLines ? sum / n : null;
     });
 }
+/** The age under each point of a stacked profile. */
+export function profileAges(ageGrid, profile, opts = {}) { return profileStack(ageGrid, profile, sampleAge, opts); }
 
 /**
  * A profile with thermal subsidence REMOVED: each point's depth minus the depth its age predicts (plus a constant
  * so the numbers stay depths near the trench's own), keeping only the points that have an age. Returns the new
  * profile (same `x`, `n`, `src`, plus `age`, `ageHeld` and `subsidence`) with `ageCoverage` (share of the input's
- * depth points that kept an age, held ones included), `ageHeldKm` (how far from the axis an age was held) and the mean slope the subsidence implies (m/km, positive = deepening seaward).
- */
-/**
+ * depth points that kept an age, held ones included), `ageHeldKm` (how far from the axis an age was held) and the
+ * mean slope the subsidence implies (m/km, positive = deepening seaward).
+ *
  * AT THE AXIS THE GRID STOPS SHORT OF THE PLATE: Seton et al. mask their grid at the mapped plate boundary, and the
  * stacked lines near a trench axis reach onto the overriding plate — MEASURED on the 75 stations: the first dated
  * point lies 0–32 km seaward of the axis (Hellenic aside), and dropping those points silently removed the deepest

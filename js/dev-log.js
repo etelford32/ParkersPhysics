@@ -130,6 +130,19 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'sea-floor-sediment', date: '2026-11-25', pr: null,
+      title: 'Sea Floor: the weight of the sediment taken off the plate', kind: 'simulation',
+      section: 'earth-orbit', icon: 'fluid',
+      summary: 'Sediment lying on a plate weighs it down, and a thick pile near a margin can look like bending. The page now removes that weight before fitting the two-thickness plate, '
+             + 'as the published trench studies do.',
+      highlights: [
+          'Sediment thickness comes from GlobSed (Straume and others, 2019). The copy used is unofficial, so the page checks it against the sea-floor age map: the sediment thins toward young sea floor, as it should.',
+          'The weight is taken off with the densities in Zhang and others\' table, so each metre of sediment deepens the sea floor by 0.57 m.',
+          'Fewer sections now pin down both thicknesses (16 of 72 instead of 19). Only Philippine and Izu–Bonin are quoted; Japan and Middle America drop out.',
+          'Where a section is pinned down, Zhang and others\' numbers fall inside ours more often for every quantity. All three agree at 7 of 15 sections, up from 5 of 19.',
+          'Each section shows how much sediment it carries. If the sediment map cannot be loaded, the page says the sediment was not removed.',
+      ],
+      links: [{ href: 'sea-floor.html?site=philippine', label: 'Sea Floor: Philippine Trench' }] },
     { id: 'sea-floor-age', date: '2026-11-25', pr: null,
       title: 'Sea Floor: the age of the sea floor, and the plate before it bends', kind: 'simulation',
       section: 'earth-orbit', icon: 'fluid',
