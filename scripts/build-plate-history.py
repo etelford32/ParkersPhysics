@@ -74,6 +74,7 @@ RASTER_DEG = 1
 TOL_DEG = 0.05          # 3-D Douglas–Peucker tolerance for continents/coasts (~5.6 km)
 Q = 100                 # coordinate quantum: 0.01°
 FOREVER = 10000         # stands in for an infinite begin time (distant past)
+USER_AGENT = 'parkersphysics-plate-history-bake/1.0 (+https://parkersphysics.com)'
 
 
 def sha256(b):
@@ -85,7 +86,10 @@ def fetch(cache):
     path = os.path.join(cache, os.path.basename(MODEL['url']))
     if not os.path.exists(path):
         print('downloading', MODEL['url'], file=sys.stderr)
-        with urllib.request.urlopen(MODEL['url'], timeout=300) as r, open(path, 'wb') as f:
+        # EarthByte answers 403 to Python's default 'Python-urllib/x.y' User-Agent (measured
+        # 2026-11-25 on the CI runner and here; a named client gets the file), so name ours.
+        req = urllib.request.Request(MODEL['url'], headers={'User-Agent': USER_AGENT})
+        with urllib.request.urlopen(req, timeout=300) as r, open(path, 'wb') as f:
             f.write(r.read())
     raw = open(path, 'rb').read()
     if sha256(raw) != MODEL['sha256']:
