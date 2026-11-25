@@ -58,7 +58,7 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
 .dte-mark span { position:absolute; left:11px; top:-6px; font-size:.68rem; color:#e6ebfa; white-space:nowrap; text-shadow:0 1px 4px #000, 0 0 2px #000; }
 .dte-mark.crater { background:#ff6b5b; width:12px; height:12px; }
 .dte-mark.you { background:#7fd6ae; }
-.dte-mark.pick { background:#ffd166; width:12px; height:12px; }
+.dte-mark.pick { background:#6fe0ff; width:12px; height:12px; }
 .dte-mark.city { width:7px; height:7px; background:#cfd6ea; }
 .dte-mark.city span { color:#cfd6ea; font-size:.64rem; }
 #dte-when { position:absolute; left:14px; top:12px; pointer-events:none; text-shadow:0 1px 6px #000; }
@@ -87,7 +87,7 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
 .dte-legend span { display:inline-flex; align-items:center; gap:6px; }
 .dte-legend i { width:12px; height:12px; border-radius:3px; display:inline-block; }
 .dte-legend i.line { height:2px; width:18px; border-radius:0; }
-.dte-legend i.ramp { width:90px; background:linear-gradient(to right, #9edbf5, #5ca8e0, #3373bd, #214d8f, #163066); }
+.dte-legend i.ramp { width:90px; background:linear-gradient(to right, #fff3b0, #f6b26b, #d9663a, #8c2d5a, #3b1f5c); }
 
 #dte-point .dte-kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:.78rem; margin-top:10px; }
 #dte-point dt { color:#8a93ad; }
@@ -142,9 +142,9 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
     </div>
     <p class="dte-spread" id="dte-spread" aria-live="polite"></p>
     <div class="dte-legend">
-      <span><i class="ramp"></i> Seafloor: young → old</span>
+      <span><i class="ramp"></i> Seafloor: 0 → 180+ million years old at the age shown (<span id="dte-seafloor-src">loading the age grid…</span>)</span>
       <span><i style="background:#3a4256"></i> Crust of unknown age</span>
-      <span><i style="background:#c9b48a"></i> Continental crust</span>
+      <span><i style="background:#8d9c7e"></i> Continental crust</span>
       <span><i class="line" style="background:#f2e6c8"></i> Today's coastlines</span>
       <span><i class="line" style="background:#ff6fd8"></i> The second model's coastlines, aligned in longitude</span>
       <span><i style="background:#1b1f2b;border:1px solid #444"></i> Crust that has since been destroyed</span>
@@ -169,15 +169,14 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
       EarthByte group's own library, and this page's code is tested against it:</p>
     <ul class="dte-check" id="dte-check"></ul>
     <p class="dte-body"><b>The outlines are today's.</b> Every shape on the globe is a piece of the present-day surface carried
-      back on its plate. The tan areas are the model's outlines of continental crust, not past coastlines, and the light lines
+      back on its plate. The sage-green areas are the model's outlines of continental crust, not past coastlines, and the light lines
       are today's coastlines. Shallow seas have flooded and drained the continents many times; that history is not in this model.
       The dark areas are ocean floor that existed then but has since sunk back into the mantle, so nothing of it is left to carry back.</p>
     <p class="dte-body"><b>The plates move as rigid pieces.</b> The model also describes how rifts and mountain belts stretch and
       squeeze, but this page moves each piece rigidly. Expect small gaps and overlaps where the crust has deformed, such as the Andes,
       Tibet and the North Sea.</p>
     <p class="dte-body"><b>Two models, two frames.</b> The globe and the first answer are Müller et al. (2019), which fixes its
-      reference to the deep mantle. The second model, in pink, is Merdith, A. S., et al. (2021), <i>Extending full-plate tectonic
-      models into deep time</i>, Earth-Science Reviews 214 (version 1.2.4, from the same EarthByte server, under
+      reference to the deep mantle. The second model, in pink, is Merdith, A. S., et al. (2021), <i>A continuous, kinematic full-plate motion model from 1 Ga to present</i>, Earth-Science Reviews 214 (version 1.2.4, from the same EarthByte server, under
       <a href="https://creativecommons.org/licenses/by/4.0/" rel="license">CC BY 4.0</a>). It fixes its reference to the spin axis
       as ancient magnetised rocks record it. Over tens of millions of years the whole solid Earth also tilts relative to the spin
       axis (true polar wander), so the two frames give different latitudes even where the plates move the same way.</p>
@@ -186,10 +185,24 @@ body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:
       least that uncertain. Where they agree, it may still be wrong in the same way in both. Palaeomagnetism measures latitude but not
       longitude, so the latitude difference is the meaningful one. The distance apart also includes a longitude that each frame
       fixes by its own convention.</p>
-    <p class="dte-fine"><b>Seafloor age</b> comes from the age at which each strip of ocean floor first appears in the model (its
-      isochron bins), so it is the age of that strip to within its bin, not a measured age grid. The geological periods on the slider
-      are from the International Chronostratigraphic Chart, written from memory; they label the slider and are not used in any
-      calculation. The model ends at 250 million years and the page never goes past it.</p>
+    <p class="dte-body"><b>Further back, and deeper down.</b> This page stops at 250 million years because its model does.
+      <a href="plate-tectonics.html">Plates Through Time</a> runs to 1.8 billion years on Cao et al. (2023), which extends the
+      same Merdith 2021 model drawn here in pink, so beyond 250 million years it is the continuation of the second answer, not a
+      third opinion. <a href="earth-interior.html">Inner Earth</a> shows the same ocean-floor ages on today's globe, with the plate
+      boundaries and the slabs that carry old floor down. <a href="chicxulub.html">The Chicxulub reconstruction</a> uses this
+      page's model for where the crater was.</p>
+    <p class="dte-fine"><b>Seafloor age</b> is the age of the ocean floor at the age on the slider: where that floor still exists,
+      its age today from Seton, M., et al. (2020), <i>A global dataset of present-day oceanic crustal age and seafloor spreading
+      parameters</i>, G³ 21 (release 2020.1, <a href="https://creativecommons.org/licenses/by/4.0/" rel="license">CC BY 4.0</a>),
+      minus the age shown; where it has since been subducted, the age at which that strip first appears in Müller's model (its
+      isochron bins, so to within a bin). The grid also decides when surviving floor first appears, whenever it is older than the
+      model's bin: from about 121 to 83 million years ago Earth's magnetic field did not reverse, so floor formed then carries no
+      stripes to date it, and the model's Atlantic polygons start it at 83 million years. That floor is drawn from the grid's age
+      and moves with its own plate, which is how GPlates reconstructs an age grid. The grid is on the GTS2012 time scale and was built with an EarthByte plate model of its
+      own, so at a few places the two disagree by a few million years. The colours are the same ramp as Inner Earth and Plates
+      Through Time. The geological periods on the slider are the site's one time scale, the International Chronostratigraphic
+      Chart written from memory (not yet checked against the chart); they label the slider and are not used in any calculation.
+      The model ends at 250 million years and the page never goes past it.</p>
   </section>
 
 </div>

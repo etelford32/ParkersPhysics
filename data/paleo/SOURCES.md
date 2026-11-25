@@ -71,8 +71,7 @@ in the global file.
 
 ## The second model: Merdith et al. 2021
 
-**Merdith, A. S., et al. (2021).** Extending full-plate tectonic models into deep
-time: linking the Neoproterozoic and the Phanerozoic. *Earth-Science Reviews*
+**Merdith, A. S., et al. (2021).** A continuous, kinematic full-plate motion model from 1 Ga to present. *Earth-Science Reviews*
 214, 103477. doi:10.1016/j.earscirev.2020.103477. Supplementary model SM2,
 v1.2.4 (the December 2023 corrections), from EarthByte's own server:
 

@@ -48,9 +48,11 @@ test('the Atlantic is ocean today and not there at 200 Ma (pixels)', async ({ pa
         return { now, then };
     });
     const [r0, g0, b0] = px.now, [r1, g1, b1] = px.then;
-    expect(b0).toBeGreaterThan(r0 + 40);                       // blue seafloor today
-    // at 200 Ma the spot is continent (Pangaea) or destroyed crust — never young blue seafloor
-    expect(b1).toBeLessThan(r1 + 20);
+    // seafloor today on the shared ocean-age ramp: green is below red at every stop of it, while
+    // the continental crust is sage (green above red) — the land colour was chosen off the ramp
+    expect(g0).toBeLessThan(r0 - 10);
+    // at 200 Ma the spot is continent (Pangaea) or destroyed crust — never that seafloor
+    expect(g1 > r1 || Math.max(r1, g1, b1) < 70).toBe(true);
     expect(Math.hypot(r1 - r0, g1 - g0, b1 - b0)).toBeGreaterThan(60);
 });
 
@@ -133,4 +135,40 @@ test('?second=0 fetches nothing of the second model; a failed second model leave
     await expect(p2.locator('#dte-spread')).toContainText('could not be loaded');
     await expect(p2.locator('#dte-point-body')).toContainText('England');     // the first model still answers
     expect(errs).toEqual([]);
+});
+
+test('the seafloor is coloured from the Seton 2020 grid; without it the model\'s isochrons stand in and the legend says so', async ({ page }) => {
+    test.setTimeout(200_000);
+    await boot(page, '?second=0');
+    await page.waitForFunction(() => window.__deepTime.globe.hasSeafloorGrid, null, { timeout: 60_000 });
+    const k = await page.evaluate(() => {
+        const g = window.__deepTime.globe; g.setAge(0); const d0 = { ...g.drawn }; g.setAge(100);
+        return { d0, d100: { ...g.drawn }, src: document.getElementById('dte-seafloor-src').textContent };
+    });
+    // today most seafloor vertices sit on present-day ocean floor of the grid; at 100 Ma more of it has since been subducted
+    expect(k.d0.seafloorFromGrid).toBeGreaterThan(k.d0.seafloorFromBins);
+    expect(k.d100.seafloorFromGrid).toBeLessThan(k.d0.seafloorFromGrid + k.d0.seafloorFromBins);
+    expect(k.src).toContain('Seton');
+    // the grid also brings back surviving floor the model's bins start late (the Cretaceous quiet zone)
+    const cov = await page.evaluate(() => {
+        const { globe, S } = window.__deepTime;
+        const withGrid = globe.coveredFraction(100), ext = globe.drawn.seafloorExtended;
+        globe.setSeafloorGrid(null); const without = globe.coveredFraction(100);
+        globe.setSeafloorGrid(S.seafloor);
+        return { withGrid, without, ext };
+    });
+    expect(cov.ext).toBeGreaterThan(1000);
+    expect(cov.withGrid).toBeGreaterThan(cov.without + 0.01);
+    // the point panel names the grid for an ocean point
+    await page.evaluate(() => { window.__deepTime.setAge(0); window.__deepTime.selectPresent(0.0, -24.5, null); });
+    await expect(page.locator('#dte-point-body')).toContainText('Seton et al. 2020 age grid');
+
+    // negative control: the grid 404s
+    const p2 = await page.context().newPage();
+    await p2.route(/data\/earth-interior\/seafloor-age/, (r) => r.fulfill({ status: 404, body: '' }));
+    await p2.goto('/deep-time-earth.html?second=0');
+    await p2.waitForFunction(() => window.__deepTime && /isochron bins/.test(document.getElementById('dte-seafloor-src').textContent), null, { timeout: 90_000 });
+    const n = await p2.evaluate(() => ({ grid: window.__deepTime.globe.hasSeafloorGrid, d: { ...window.__deepTime.globe.drawn } }));
+    expect(n.grid).toBe(false);
+    expect(n.d.seafloorFromGrid).toBe(0);
 });

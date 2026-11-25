@@ -11,6 +11,9 @@ import * as PL from '../js/paleo/plates.js';
 import * as M from '../js/deep-time/page-model.js';
 import { PALEO_SITES } from '../js/chicxulub/paleo-sites.js';
 import { measureAgainstOracle } from './helpers/paleo-oracle.mjs';
+import zlib from 'node:zlib';
+import * as GT from '../js/plate-history/geotime.js';
+import * as SA from '../js/earth-interior/seafloor-age.js';
 
 let checks = 0, failed = 0;
 const ok = (c, m) => { checks++; if (!c) failed++; console.log(`  ${c ? '✓' : '✗'} ${m}`); };
@@ -65,11 +68,30 @@ section('3. tracks and clicks');
 
 section('4. display furniture');
 {
-    ok(M.PERIODS.every((p, i) => p.from > p.to && (!i || Math.abs(M.PERIODS[i - 1].from - p.to) < 1e-9)) && M.PERIODS.at(-1).from > M.AGE_MAX && M.PERIODS_VERIFIED === false,
-        'periods tile 0 → past 250 Ma with no gap, and are flagged as written from memory');
+    ok(M.PERIODS.every((p, i) => p.from > p.to && (!i || Math.abs(M.PERIODS[i - 1].from - p.to) < 1e-9)) && M.PERIODS.at(-1).from > M.AGE_MAX && M.PERIODS_VERIFIED === GT.VERIFIED,
+        'periods tile 0 → past 250 Ma with no gap, and carry the site time scale\u2019s verified flag');
+    const gtIn = GT.PERIODS.filter(([, , top]) => top < M.AGE_MAX);
+    ok(gtIn.length === M.PERIODS.length && gtIn.every(([n, b, t], i) => M.PERIODS[i].name === n && M.PERIODS[i].from === b && M.PERIODS[i].to === t),
+        `the slider's periods ARE js/plate-history/geotime.js clipped to 250 Ma (one time scale on the site; the Cretaceous base is ${M.PERIODS.find((p) => p.name === 'Cretaceous').from})`);
+    ok(M.SEAFLOOR_RAMP === SA.AGE_RAMP && [0, 30, 90, 179, 400].every((a) => M.crustColor(a).every((v, k) => v === SA.ageColor(a)[k])) && M.crustColor(-5).every((v, k) => v === SA.ageColor(0)[k]),
+        'the seafloor ramp IS the site\u2019s one ocean-age ramp (Inner Earth, Plates Through Time); a not-yet-formed age clamps to the youngest colour');
     const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    const L = [0, 5, 20, 40, 80, 120, 160, 200].map((a) => lum(M.crustColor(a)));
-    ok(L.every((v, i) => !i || v < L[i - 1]), 'seafloor ramp: older is always darker up to 200 Myr, then held (one hue, monotone lightness)');
+    const L = [0, 20, 60, 100, 140, 180].map((a) => lum(M.crustColor(a)));
+    ok(L.every((v, i) => !i || v < L[i - 1]), 'seafloor ramp: older is always darker up to 180 Myr, then held');
+    const meta = load('../data/earth-interior/seafloor-age.json');
+    const grid = SA.decodeSeafloorAge(meta, new Uint8Array(zlib.gunzipSync(fs.readFileSync(new URL('../data/earth-interior/' + meta.output.file, import.meta.url)))));
+    const ridge = M.crustAgeToday(grid, 0.0, -24.5), pacific = M.crustAgeToday(grid, 18, 155), land = M.crustAgeToday(grid, 48.85, 2.35);
+    ok(ridge != null && ridge < 5 && pacific > 140 && land === null && M.crustAgeToday(null, 0, -24.5) === null,
+        `the Seton 2020 grid as the page samples it: Mid-Atlantic Ridge ${ridge?.toFixed(1)} Myr, western Pacific ${pacific?.toFixed(0)} Myr, Paris none, no grid none`);
+    // the grid decides when surviving floor APPEARS where the model's bins start it late (the quiet zone)
+    const qz = M.hitAt(plates, 30, -65, grid), qzNo = M.hitAt(plates, 30, -65, null);
+    ok(qz.crustSource === 'grid' && qz.polygonFromAge === 83 && qz.fromAge > 100 && qzNo.fromAge === 83 && qzNo.crustSource === 'model',
+        `western central Atlantic (30°N 65°W): the model's polygon starts it at ${qz.polygonFromAge} Ma, the grid dates it ${qz.fromAge.toFixed(0)} Myr, and the grid's age is used`);
+    const r100 = M.pointReport(model, plates, 30, -65, 100, grid), r100no = M.pointReport(model, plates, 30, -65, 100);
+    ok(r100.ok && !r100no.ok && r100no.reason === 'not-formed' && M.trackSamples(model, plates, 30, -65, 1, grid).maxAge > 100,
+        'so at 100 Ma the panel and the track follow it back; without the grid the model calls it not yet formed (negative control)');
+    ok(M.crustAppearAge(83, 60) === 83 && M.crustAppearAge(83, null) === 83 && M.hitAt(plates, 48.85, 2.35, grid).crustSource === 'model',
+        'the grid only ever makes floor appear EARLIER, and never touches continental crust');
     const ch = M.latitudeChart(M.trackSamples(model, plates, -33.87, 151.21, 1), 340, 170);
     ok(ch && ch.lo <= -60 && ch.hi >= -30 && /^M[\d.]+,[\d.]+(L[\d.]+,[\d.]+)+$/.test(ch.path), `Sydney's latitude chart spans ${ch.lo}° to ${ch.hi}° (it was far south: Australia moved north)`);
     ok(M.formatAge(0) === 'Today' && M.formatAge(66.04) === '66 million years ago' && M.formatLon(-89.5) === '89.5°W' && M.formatLon(190) === '170.0°W', 'formatting');

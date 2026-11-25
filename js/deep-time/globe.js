@@ -33,7 +33,7 @@ import * as M from './page-model.js';
 const DEG = Math.PI / 180;
 export const SUBDIV_DEG = 2.5;
 const R_SEA = 1.0, R_CONT = 1.0015, R_COAST = 1.003, R_GHOST = 1.0036, R_TRACK = 1.005, R_GRID = 1.0008;
-const COL = { void: '#1b1f2b', unknown: '#3a4256', cont: '#c9b48a', coast: '#f2e6c8', ghost: '#ff6fd8', grid: '#9fb3d9', track: '#ffd166' };
+const COL = { void: '#1b1f2b', unknown: '#3a4256', cont: '#8d9c7e', coast: '#f2e6c8', ghost: '#ff6fd8', grid: '#9fb3d9', track: '#6fe0ff' };
 
 const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const hexToLinear = (h) => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };   // THREE.Color(hex) decodes sRGB → linear
@@ -131,6 +131,7 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
         for (const [plate, list] of byPlate) {
             const n = list.reduce((s, x) => s + x.tri.length, 0);
             const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), span = new Float32Array(n * 2), from = new Float32Array(n);
+            const ll = layer === 'sea' ? new Float32Array(n * 2) : null;
             let k = 0;
             for (const { p, tri } of list) {
                 const c = colorFn(p);
@@ -138,6 +139,7 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
                     pos.set(llToScene(lat, lon, radius), k * 3);
                     col.set(c, k * 3);
                     span[k * 2] = p.fromAge; span[k * 2 + 1] = p.toAge; from[k] = p.fromAge;
+                    if (ll) { ll[k * 2] = lat; ll[k * 2 + 1] = lon; }
                     k++;
                 }
             }
@@ -152,7 +154,7 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
             scene.add(mesh);
             group(plate).objects.push(mesh);
             pickMeshes.push(mesh);
-            if (layer === 'sea') seaColorArrays.push({ col, from, attr: colAttr });
+            if (layer === 'sea') seaColorArrays.push({ col, from, ll, today: null, attr: colAttr, span, spanAttr: g.getAttribute('aSpan') });
         }
     }
     const seaMat = ageDiscard(new THREE.MeshLambertMaterial({ vertexColors: true }), uAge);
@@ -254,18 +256,27 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
                 drawn.ghostPlates++;
             }
         }
+        // Seafloor age at the displayed age: Seton 2020's age TODAY at the vertex's present
+        // position minus the displayed age; where that floor has since been subducted (no grid
+        // value) the model's isochron bin stands in. drawn.seafloorFromGrid counts which.
+        let fromGrid = 0, fromBins = 0;
         for (const s of seaColorArrays) {
-            const { col, from } = s;
-            let lastFrom = NaN, c = null;
+            const { col, from, today } = s;
+            let lastKey = NaN, c = null;
             for (let i = 0; i < from.length; i++) {
-                if (from[i] !== lastFrom) {
-                    lastFrom = from[i];
-                    c = from[i] >= M.CRUST_AGE_UNKNOWN ? unknownCol : M.crustColor(from[i] - a).map(srgbToLinear);
+                const g = today ? today[i] : NaN;
+                const key = Number.isFinite(g) ? -1 - Math.round(g * 4) : from[i];   // quarter-Myr steps on the grid path
+                if (key !== lastKey) {
+                    lastKey = key;
+                    c = Number.isFinite(g) ? M.crustColor(g - a).map(srgbToLinear)
+                        : from[i] >= M.CRUST_AGE_UNKNOWN ? unknownCol : M.crustColor(from[i] - a).map(srgbToLinear);
                 }
+                if (Number.isFinite(g)) fromGrid++; else fromBins++;
                 col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
             }
             s.attr.needsUpdate = true;
         }
+        drawn.seafloorFromGrid = fromGrid; drawn.seafloorFromBins = fromBins;
         render();
     }
 
@@ -413,9 +424,41 @@ export function createGlobe(canvas, { model, plates, coast, onPick, onRender } =
         render();
     }
 
+    /**
+     * Hand the globe the Seton 2020 age grid (decoded); null puts the model's isochrons back.
+     * The grid sets two things per seafloor vertex: its COLOUR (age today minus the age shown)
+     * and when it APPEARS — the older of the polygon's own appearance age and the grid's age
+     * (M.crustAppearAge), so floor the model's bins start late (the Cretaceous quiet zone has
+     * no reversals to date it, and Müller's Atlantic polygons there start at 83 Ma) is drawn
+     * from when it formed. It still moves with its own plate's rotation, which is how GPlates
+     * reconstructs an age grid.
+     */
+    let seafloorGrid = null;
+    function setSeafloorGrid(grid) {
+        seafloorGrid = grid;
+        let extended = 0;
+        for (const s of seaColorArrays) {
+            const n = s.from.length;
+            if (!grid) { s.today = null; for (let i = 0; i < n; i++) s.span[i * 2] = s.from[i]; s.spanAttr.needsUpdate = true; continue; }
+            const t = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                const v = M.crustAgeToday(grid, s.ll[i * 2], s.ll[i * 2 + 1]);
+                t[i] = v == null ? NaN : v;
+                const appear = M.crustAppearAge(s.from[i], v);
+                if (appear > s.from[i]) extended++;
+                s.span[i * 2] = appear;
+            }
+            s.today = t;
+            s.spanAttr.needsUpdate = true;
+        }
+        drawn.seafloorExtended = extended;
+        applyAge(age);
+    }
+
     resize();
     applyAge(0);
     return {
+        setSeafloorGrid, get hasSeafloorGrid() { return !!seafloorGrid; },
         setAge: applyAge, get age() { return age; }, coveredFraction, readPixel, setTrack, setTrack2, setSecondModel, get hasSecondModel() { return !!ghost; }, setCoastVisible, get coastOn() { return coastOn; }, project, pickAt, lookAt, render,
         drawn, renderer, camera, controls,
         stats: { plates: plateGroups.size, meshes: pickMeshes.length, triangles: pickMeshes.reduce((s, m) => s + m.geometry.getAttribute('position').count / 3, 0) },

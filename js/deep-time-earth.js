@@ -17,14 +17,15 @@ import * as PL from './paleo/plates.js';
 import * as M from './deep-time/page-model.js';
 import { MAJOR_CITIES } from './data/major-cities.js';
 import { loadUserLocation } from './user-location.js';
+import { loadSeafloorAge } from './earth-interior/seafloor-age.js';
 
 const $ = (id) => document.getElementById(id);
 const CITY_NAMES = ['London', 'New York', 'Rio de Janeiro', 'Cape Town', 'Mumbai', 'Sydney', 'Tokyo', 'Nairobi', 'Reykjavík', 'Honolulu', 'Moscow'];
 const PLAY_MA_PER_S = 10;
 
 const ageInput = $('dte-age'), playBtn = $('dte-play');
-const S = { age: 0, pick: null, track: null, track2: null, playing: false, globe: null, second: null, spread: null, secondState: 'off' };
-const COLORS = { first: '#ffd166', second: '#ff6fd8' };
+const S = { age: 0, seafloor: null, pick: null, track: null, track2: null, playing: false, globe: null, second: null, spread: null, secondState: 'off' };
+const COLORS = { first: '#6fe0ff', second: '#ff6fd8' };
 
 function fmtKm(km) { return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km).toLocaleString('en-US')} km`; }
 
@@ -88,8 +89,8 @@ playBtn.addEventListener('click', () => (S.playing ? stop() : play()));
 
 // ── the point panel ──────────────────────────────────────────────────────────
 function selectPresent(lat, lon, label) {
-    S.pick = { lat, lon, label, hit: PL.plateAt(S.plates, lat, lon) };
-    S.track = M.trackSamples(S.model, S.plates, lat, lon, 1);
+    S.pick = { lat, lon, label, hit: M.hitAt(S.plates, lat, lon, S.seafloor) };
+    S.track = M.trackSamples(S.model, S.plates, lat, lon, 1, S.seafloor);
     S.track2 = S.secondState === 'on' ? M.trackSamples(S.second.model, S.second.plates, lat, lon, 1) : null;
     if (S.globe) {
         S.globe.setTrack(S.track);
@@ -102,7 +103,7 @@ function selectPresent(lat, lon, label) {
 function renderPoint() {
     const body = $('dte-point-body'), chart = $('dte-chart');
     if (!S.pick || !S.model) return;
-    const r = M.pointReport(S.model, S.plates, S.pick.lat, S.pick.lon, S.age);
+    const r = M.pointReport(S.model, S.plates, S.pick.lat, S.pick.lon, S.age, S.seafloor);
     const name = S.pick.label ? `<b>${S.pick.label}</b>` : 'The point you picked';
     if (r.reason === 'no-plate') {
         body.innerHTML = `<p class="dte-hint">${name} (${M.formatLatLon(r.today)}) is in a gap between the model's plate outlines, so it has no plate to follow.</p>`;
@@ -112,7 +113,7 @@ function renderPoint() {
     const rows = [
         ['Plate', `${r.plateName || 'unnamed'} (${r.plate})`],
         ['Today', `${M.formatLatLon(r.today)} · ${r.bandToday || M.latitudeBand(r.today.lat)}`],
-        ['Crust', r.continental ? 'continental' : r.fromAge >= M.CRUST_AGE_UNKNOWN ? 'ocean floor of unknown age' : `ocean floor, formed ${Math.round(r.fromAge)} million years ago`],
+        ['Crust', crustText(r)],
     ];
     if (r.ok) {
         rows.push([S.age > 0.005 ? `At ${S.age.toFixed(S.age < 10 ? 2 : 1)} Ma` : 'At the slider', S.age > 0.005 ? `${M.formatLatLon(r.then)} · ${r.band}` : 'where it is today']);
@@ -237,7 +238,7 @@ async function boot() {
         stop();
         if (a != null) setAge(a);
         selectPresent(lat, lon, n);
-        const r = M.pointReport(S.model, S.plates, lat, lon, S.age);
+        const r = M.pointReport(S.model, S.plates, lat, lon, S.age, S.seafloor);
         if (r.ok) S.globe.lookAt(r.then.lat, r.then.lon);
     });
 
@@ -247,7 +248,7 @@ async function boot() {
     const at = (q.get('at') || '').split(',').map(Number);
     if (at.length === 2 && at.every(Number.isFinite)) {
         selectPresent(at[0], at[1], null);
-        const r = M.pointReport(S.model, S.plates, at[0], at[1], S.age);
+        const r = M.pointReport(S.model, S.plates, at[0], at[1], S.age, S.seafloor);
         if (r.ok) S.globe.lookAt(r.then.lat, r.then.lon);
     }
     window.__deepTime = { S, M, PR, PL, setAge, selectPresent, globe: S.globe, loadSecond };
@@ -256,6 +257,33 @@ async function boot() {
     toggle.checked = q.get('second') !== '0';
     toggle.addEventListener('change', () => (toggle.checked ? loadSecond() : unloadSecond()));
     if (toggle.checked) requestAnimationFrame(() => setTimeout(loadSecond, 0));     // after the first frame
+    if (q.get('seafloor') !== '0') requestAnimationFrame(() => setTimeout(loadSeafloor, 0));
+}
+
+/**
+ * The present-day ocean-floor age grid (Seton et al. 2020, the one Inner Earth and Plates
+ * Through Time use), fetched after the first frame. A failure leaves the model's own isochron
+ * bins colouring the seafloor, and the legend says which one is drawn.
+ */
+function crustText(r) {
+    if (r.continental) return 'continental';
+    const g = M.crustAgeToday(S.seafloor, r.today.lat, r.today.lon);
+    if (g != null) return `ocean floor, ${Math.round(g)} million years old today (Seton et al. 2020 age grid)` + (r.crustSource === 'grid' ? ` — older than the ${Math.round(PL.plateAt(S.plates, r.today.lat, r.today.lon).fromAge)} Ma at which the model\u2019s polygon starts it, so it is followed back to the grid\u2019s age` : '');
+    return r.fromAge >= M.CRUST_AGE_UNKNOWN ? 'ocean floor of unknown age' : `ocean floor, formed ${Math.round(r.fromAge)} million years ago (the model\u2019s isochrons)`;
+}
+
+async function loadSeafloor() {
+    try {
+        const { grid } = await loadSeafloorAge(fetch, 'data/earth-interior/');
+        S.seafloor = grid;
+        S.globe?.setSeafloorGrid(grid);
+        if (S.pick) selectPresent(S.pick.lat, S.pick.lon, S.pick.label);
+    } catch (e) { console.warn('seafloor age grid unavailable', e); }
+    renderSeafloorNote();
+}
+function renderSeafloorNote() {
+    const el = $('dte-seafloor-src');
+    if (el) el.textContent = S.seafloor ? 'age today: Seton et al. 2020 grid, minus the age shown; subducted floor: the model\u2019s isochrons' : 'the model\u2019s isochron bins (the age grid did not load)';
 }
 
 let secondData = null;

@@ -16,6 +16,8 @@
  *   - the outlines are TODAY's, carried back: continents are continental-crust
  *     outlines, coastlines are today's coastlines.
  */
+import * as GT from '../plate-history/geotime.js';
+import { AGE_RAMP, AGE_RAMP_MAX_MYR, ageColor, ageAt } from '../earth-interior/seafloor-age.js';
 import * as PR from '../paleo/rotations.js';
 import * as PL from '../paleo/plates.js';
 
@@ -23,20 +25,17 @@ export const AGE_MAX = 250;
 export const R_EARTH_KM = 6371;
 
 /**
- * Geological periods inside the model's range, from the International
- * Chronostratigraphic Chart (v2023/09), written FROM MEMORY at build time —
- * a display aid for the slider, never an input to a position.
- * The Triassic began at 251.9 Ma, just past the model's 250.
+ * Geological periods inside the model's range: the SITE's one time scale,
+ * js/plate-history/geotime.js (the ICS chart, written from memory, its
+ * VERIFIED flag carried through), clipped to this page's 250 Myr. Only the
+ * colours are this page's own. A display aid for the slider, never an input.
+ * The Triassic began at 251.902 Ma, just past the model's 250.
  */
-export const PERIODS = Object.freeze([
-    { name: 'Quaternary', from: 2.58, to: 0, color: '#c9c27a' },
-    { name: 'Neogene', from: 23.03, to: 2.58, color: '#d9b34f' },
-    { name: 'Paleogene', from: 66.0, to: 23.03, color: '#d98a4f' },
-    { name: 'Cretaceous', from: 145.0, to: 66.0, color: '#7fb069' },
-    { name: 'Jurassic', from: 201.4, to: 145.0, color: '#4fa3b5' },
-    { name: 'Triassic', from: 251.9, to: 201.4, color: '#8c6bb8' },
-]);
-export const PERIODS_VERIFIED = false;
+const PERIOD_COLORS = { Quaternary: '#c9c27a', Neogene: '#d9b34f', Paleogene: '#d98a4f', Cretaceous: '#7fb069', Jurassic: '#4fa3b5', Triassic: '#8c6bb8' };
+export const PERIODS = Object.freeze(GT.PERIODS.filter(([, base, top]) => top < AGE_MAX).map(([name, from, to, approx]) =>
+    Object.freeze({ name, from, to, approx: !!approx, color: PERIOD_COLORS[name] || '#888' })));
+export const PERIODS_VERIFIED = GT.VERIFIED;
+export const PERIODS_SOURCE = GT.SOURCE;
 
 /** Moments the slider offers as one-click stops. Ages in Ma. */
 export const STOPS = Object.freeze([
@@ -86,12 +85,12 @@ export function reachOf(model, hit) {
  * { ok: false, reason } when there is nothing to say (no plate, crust not
  * formed yet, model's end) — never a guess.
  */
-export function pointReport(model, plates, lat, lon, age) {
-    const hit = PL.plateAt(plates, lat, lon);
+export function pointReport(model, plates, lat, lon, age, grid = null) {
+    const hit = hitAt(plates, lat, lon, grid);
     if (!hit) return { ok: false, reason: 'no-plate', today: { lat, lon } };
     const reach = reachOf(model, hit);
     const continental = PL.isContinental(plates, lat, lon);
-    const base = { today: { lat, lon }, plate: hit.plate, plateName: hit.name, fromAge: hit.fromAge, continental, reach, overlaps: hit.overlaps };
+    const base = { today: { lat, lon }, plate: hit.plate, plateName: hit.name, fromAge: hit.fromAge, crustSource: hit.crustSource, gridAge: hit.gridAge, continental, reach, overlaps: hit.overlaps };
     if (age > reach.maxAge + 1e-9) return { ...base, ok: false, reason: reach.limit === 'crust' ? 'not-formed' : 'beyond-model' };
     const then = model.reconstruct(lat, lon, hit.plate, age);
     if (!then) return { ...base, ok: false, reason: 'beyond-model' };
@@ -103,8 +102,8 @@ export function pointReport(model, plates, lat, lon, age) {
  * The point's path from today back to its reach, every `stepMa`: the track
  * the globe draws and the latitude chart plots. Each sample { age, lat, lon }.
  */
-export function trackSamples(model, plates, lat, lon, stepMa = 1) {
-    const hit = PL.plateAt(plates, lat, lon);
+export function trackSamples(model, plates, lat, lon, stepMa = 1, grid = null) {
+    const hit = hitAt(plates, lat, lon, grid);
     if (!hit) return null;
     const { maxAge } = reachOf(model, hit);
     const ages = [];
@@ -129,29 +128,34 @@ export function presentPointOf(model, plate, unitAtAge, age) {
 }
 
 /**
- * Seafloor colour: the age of the crust AT THE DISPLAYED AGE (its
- * appearance age minus the displayed age), on a single-hue blue ramp,
- * lighter = younger. The appearance ages are the model's ISOCHRON polygon
- * bins — the age of a strip of seafloor to within its bin, not a grid.
- * Returns [r, g, b] in 0..1 (sRGB).
+ * Seafloor colour: the age of the crust AT THE DISPLAYED AGE (its age today
+ * minus the displayed age) on the SITE's one ocean-age ramp, the one the
+ * Inner Earth and Plates Through Time pages use (js/earth-interior/seafloor-age.js
+ * AGE_RAMP, pale yellow = young, deep purple = old, held past 180 Myr).
+ * Where the ocean floor still exists, its age today is Seton et al. 2020's
+ * grid (crustAgeToday). Where it has since been subducted, there is no grid
+ * value and the model's own ISOCHRON polygon bins stand in (the age of that
+ * strip to within its bin). Returns [r, g, b] in 0..1 (sRGB).
  */
-export const CRUST_RAMP = Object.freeze([
-    [0, [0.62, 0.86, 0.96]],
-    [20, [0.36, 0.66, 0.88]],
-    [60, [0.20, 0.45, 0.74]],
-    [120, [0.13, 0.30, 0.56]],
-    [200, [0.09, 0.19, 0.40]],
-]);
-export function crustColor(crustAgeMa) {
-    const a = Math.max(0, crustAgeMa);
-    for (let i = 1; i < CRUST_RAMP.length; i++) {
-        const [a1, c1] = CRUST_RAMP[i];
-        if (a <= a1) {
-            const [a0, c0] = CRUST_RAMP[i - 1], f = (a - a0) / (a1 - a0);
-            return c0.map((v, k) => v + (c1[k] - v) * f);
-        }
-    }
-    return CRUST_RAMP[CRUST_RAMP.length - 1][1].slice();
+export const SEAFLOOR_RAMP = AGE_RAMP;
+export const SEAFLOOR_RAMP_MAX_MYR = AGE_RAMP_MAX_MYR;
+export const crustColor = (crustAgeMa) => ageColor(Math.max(0, crustAgeMa));
+/** The seafloor's age today at (lat, lon) from the Seton 2020 grid, or null (continent / no grid). */
+export const crustAgeToday = (grid, lat, lon) => (grid ? ageAt(grid, lat, lon) : null);
+/**
+ * When a piece of ocean floor first exists: the OLDER of the model's polygon age and the grid's
+ * age today. Only ever earlier, never later — a grid age younger than the polygon is a time-scale
+ * or gridding difference, not crust the model has wrongly placed. Continental crust (grid null)
+ * keeps the model's age. The globe, the panel and the track all go through this.
+ */
+export const crustAppearAge = (polyFrom, gridAge) => (gridAge != null && gridAge > polyFrom ? gridAge : polyFrom);
+/** plateAt, with the appearance age the grid allows; `crustSource` says which set it. */
+export function hitAt(plates, lat, lon, grid = null) {
+    const hit = PL.plateAt(plates, lat, lon);
+    if (!hit) return null;
+    const g = PL.isContinental(plates, lat, lon) ? null : crustAgeToday(grid, lat, lon);
+    const from = crustAppearAge(hit.fromAge, g);
+    return { ...hit, fromAge: from, polygonFromAge: hit.fromAge, gridAge: g, crustSource: from > hit.fromAge ? 'grid' : 'model' };
 }
 /** Crust whose appearance age is a placeholder (≥ this) is not seafloor of known age. */
 export const CRUST_AGE_UNKNOWN = 400;

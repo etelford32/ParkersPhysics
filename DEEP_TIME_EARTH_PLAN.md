@@ -142,3 +142,28 @@ INDEPENDENT of the EarthByte lineage (rule 3, below).
 - **Still open for rule 3**: an independent palaeomagnetic frame — Vaes et al.
   2023's global APWP is on GitHub (bramvaes/GlobalAPWP) but outside this
   session's GitHub access; Torsvik 2012's GAPWAP is the other candidate.
+
+## 7. Integrated with the rest of the site (2026-11-25, while merging Plates Through Time)
+
+Main gained `plate-tectonics.html` (Plates Through Time, Cao et al. 2023 to 1.8 Ga) and the
+Seton et al. 2020 ocean-floor age grid (Inner Earth). This page now reuses both instead of
+keeping its own copies:
+
+- **Seafloor colour and appearance come from the Seton 2020 grid** (`js/earth-interior/seafloor-age.js`,
+  the ONE ramp `AGE_RAMP`): a vertex's colour is its grid age today minus the age shown, and
+  surviving floor appears at the OLDER of the polygon's age and the grid's (`crustAppearAge`, only
+  ever earlier, never on continents). That matters in the Cretaceous quiet zone (~121–83 Ma, no
+  reversals): Müller's Atlantic polygons start floor of 100–120 Myr at 83 Ma, so at 100 Ma the
+  central Atlantic was drawn as fragments. Floor the grid does not have (subducted since) keeps
+  the model's isochron bins. A failed grid load puts the bins back and the legend says so
+  (browser gate negative control). Land is now sage (#8d9c7e), not tan: the ramp's young end
+  (#fff3b0) had the same hue as the tan, so ridges read as land (ΔE 24 → 39).
+- **Periods are `js/plate-history/geotime.js`** clipped to 250 Ma — one time scale on the site
+  (the two from-memory tables disagreed on the Cretaceous base: 145.0 vs 143.1).
+- **The two rotation kernels agree**: `tests/paleo-rotations.mjs` §8 runs both on Cao 2023 —
+  9 436 plate-age pairs to 1.5e-10°, the same chain at all 72 crossover pairs. Two rule
+  differences are pinned as measured: Plates Through Time holds a broken circuit at identity
+  where this kernel refuses (6 233 pairs), and it USES one-row sequences, which GPlates ignores
+  (plates 4011 and 4301 at 0 Ma — a question for that page's kernel, not changed here).
+- Cross-links both ways; Merdith 2021's title corrected to the archive ReadMe's ("A continuous,
+  kinematic full-plate motion model from 1 Ga to present").

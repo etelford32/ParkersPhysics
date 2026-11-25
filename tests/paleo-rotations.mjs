@@ -25,6 +25,7 @@ import * as PB from '../js/earth-interior/plates.js';
 import * as PL from '../js/paleo/plates.js';
 import { PALEO_SITES } from '../js/chicxulub/paleo-sites.js';
 import { measureAgainstOracle } from './helpers/paleo-oracle.mjs';
+import * as PH from '../js/plate-history/rotations.js';
 
 let checks = 0, failed = 0;
 const ok = (c, m) => { checks++; if (!c) failed++; console.log(`  ${c ? '✓' : '✗'} ${m}`); };
@@ -195,6 +196,32 @@ const ORACLE_MERDITH = oracleSection('7b. Merdith 2021 against pyGPlates (run on
     const ex = PL.expandPoles(ring);
     ok(ex.length === 6 && ex[1][0] === 180 && ex[1][1] === -90 && ex[2][0] === -180 && ex[2][1] === -90 && PL.inRing(173.5, -88.7, ex) && !PL.inRing(173.5, -88.7, ring),
         'a pole vertex becomes a run along the pole line (lon_prev → lon_next), which encloses the cap; the raw ring does not');
+}
+
+// ── 8. The site's OTHER rotation kernel ─────────────────────────────────────
+// Plates Through Time (js/plate-history/rotations.js) was written separately,
+// on Cao et al. 2023's 1.8 Ga file. Both kernels are run on THAT file here.
+// Two rules differ on purpose and each is pinned as measured: where a plate's
+// circuit is broken, theirs holds the plate at identity and this one refuses;
+// and a ONE-ROW sequence, which GPlates ignores (the Merdith oracle, §7b), is
+// used by theirs — plates 4011 and 4301 at 0 Ma are the two places that shows.
+{
+    const doc = JSON.parse(zlib.gunzipSync(fs.readFileSync(new URL('../data/plate-history/rotations.json.gz', import.meta.url))));
+    const theirs = PH.createRotationModel(doc);
+    const mine = PR.createModel({ sequences: doc.seqs.map((q) => [q.m, q.f, q.t.map((t, i) => [t, q.lat[i], q.lon[i], q.a[i]])]) });
+    const plates = [...new Set(doc.seqs.map((q) => q.m))];
+    const ang = (a, b) => { const d = PH.qMul(PH.qConj(a), b); return 2 * Math.atan2(Math.hypot(d[1], d[2], d[3]), Math.abs(d[0])) * 180 / Math.PI; };
+    let agree = 0, worst = 0, at = 0, atWorst = 0, identity = 0; const oneRow = [];
+    for (const age of [0, 1, 7.5, 33, 66.04, 100, 145, 180, 230, 400, 750, 1200, 1700]) for (const p of plates) {
+        const t = mine.total(p, age), q = theirs.total(p, age);
+        if (!t) { if (ang(q, PH.Q_IDENTITY) < 1e-12) identity++; else oneRow.push(`${p}@${age}`); continue; }
+        const a = ang(t.q, q);
+        if (t.chain.slice(0, -1).some((x) => mine.candidates(x, age).length > 1)) { at++; atWorst = Math.max(atWorst, a); } else { agree++; worst = Math.max(worst, a); }
+    }
+    ok(agree > 9000 && worst < 1e-9, `the two kernels agree on ${agree} plate-and-age pairs of Cao 2023 to ${worst.toExponential(1)}°`);
+    ok(at > 50 && atWorst < 1e-9, `and at the ${at} crossover pairs they pick the same chain (${atWorst.toExponential(1)}°)`);
+    ok(identity > 5000, `${identity} pairs this kernel refuses are held at identity by Plates Through Time (its broken-circuit rule)`);
+    ok(oneRow.join() === '4011@0,4301@0', `only ${oneRow.join(', ')} differ otherwise: one-row sequences, which GPlates ignores and Plates Through Time uses`);
 }
 export const ORACLES = { muller2019: ORACLE_MULLER, merdith2021: ORACLE_MERDITH };
 

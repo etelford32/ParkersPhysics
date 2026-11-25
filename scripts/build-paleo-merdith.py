@@ -5,8 +5,7 @@ for the browser, in the same shapes as the Müller et al. (2019) bake.
 
     python3 scripts/build-paleo-merdith.py [--zip PATH] [--check]
 
-Source: Merdith, A. S., et al. (2021), Extending full-plate tectonic models
-into deep time: linking the Neoproterozoic and the Phanerozoic, Earth-Science
+Source: Merdith, A. S., et al. (2021), A continuous, kinematic full-plate motion model from 1 Ga to present, Earth-Science
 Reviews 214, doi:10.1016/j.earscirev.2020.103477 — supplementary model SM2,
 v1.2.4 (Dec 2023 corrections), from EarthByte's own server (URL + sha256
 pinned below). Licence: Creative Commons Attribution 4.0 — the License.txt at
