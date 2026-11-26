@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chicxulub, Backwards · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/chicxulub.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/chicxulub.html">
+<meta property="og:title" content="Chicxulub, Backwards — from the crater to the asteroid that made it">
+<meta property="og:description" content="The evidence left by the impact that ended the Cretaceous, run backwards: how big the asteroid was, how fast, from which direction, on what orbit — and what it did to the planet.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chicxulub, Backwards">
+<meta name="twitter:description" content="A reconstruction of the Chicxulub impactor, its trajectory and its effects from the crater, the iridium layer and the ejecta.">
+<meta name="description" content="A reconstruction of the Chicxulub impact 66 million years ago: the measured crater, iridium layer and ejecta are run backwards through impact scaling laws and orbital mechanics to the asteroid's size, speed, trajectory and orbit, and forwards to its effects on the planet.">
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:clip; background:#03050c; color:#cfd6ea; font-family:'Segoe UI', system-ui, sans-serif; }
+#chx-app { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:14px; padding:14px; max-width:1500px; margin:0 auto; }
+@media (max-width: 1050px) { #chx-app { grid-template-columns:minmax(0, 1fr); } }
+@media (max-width: 768px) { #chx-app { padding:10px; gap:10px; } }
+.chx-panel { background:#0a0e1e; border:1px solid rgba(120,160,255,.14); border-radius:12px; padding:14px 16px; min-width:0; }
+.chx-span { grid-column:1 / -1; }
+.chx-panel h2 { font-size:.95rem; color:#f3f5ff; font-weight:700; margin-bottom:4px; }
+.chx-panel h2 small { display:block; font-size:.74rem; color:#8a93ad; font-weight:500; margin-top:2px; line-height:1.45; }
+.chx-step { font-size:.62rem; letter-spacing:.14em; text-transform:uppercase; color:#7fb0ff; font-weight:700; margin-bottom:5px; }
+.chx-fine { font-size:.72rem; color:#8a93ad; line-height:1.55; margin-top:8px; }
+.chx-fine b { color:#aab3cb; }
+.chx-body { font-size:.82rem; color:#b9c2da; line-height:1.6; margin-top:8px; }
+.chx-body b { color:#f3f5ff; }
+.num { text-align:right; font-variant-numeric:tabular-nums; }
+
+#chx-hero h1 { font-size:1.5rem; font-weight:800; color:#f3f5ff; }
+#chx-hero p { font-size:.86rem; color:#aab3cb; line-height:1.6; margin-top:6px; max-width:980px; }
+.chx-tiles { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.chx-tile { padding:8px 13px; border-radius:9px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07); min-width:132px; }
+.chx-tile b { display:block; font-size:1.12rem; color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.chx-tile span { font-size:.66rem; color:#8a93ad; display:block; line-height:1.35; }
+.chx-tile i { font-style:normal; font-size:.66rem; color:#aab3cb; }
+
+.chx-ctl { display:flex; gap:8px 16px; flex-wrap:wrap; align-items:center; margin:10px 0 8px; font-size:.74rem; color:#aab3cb; }
+.chx-ctl label { display:flex; align-items:center; gap:7px; }
+.chx-ctl input[type=range] { width:130px; accent-color:#3987e5; }
+.chx-ctl output { color:#f3f5ff; font-variant-numeric:tabular-nums; min-width:58px; }
+.chx-seg { display:inline-flex; border:1px solid rgba(255,255,255,.16); border-radius:8px; overflow:hidden; }
+.chx-seg button { background:none; border:0; color:#aab3cb; font:inherit; font-size:.74rem; padding:6px 11px; cursor:pointer; min-height:32px; }
+.chx-seg button + button { border-left:1px solid rgba(255,255,255,.16); }
+.chx-seg button[aria-pressed=true] { background:#1c3a6b; color:#fff; }
+.chx-seg button:focus-visible, .chx-ctl input:focus-visible { outline:2px solid #7fb0ff; outline-offset:1px; }
+
+.chx-chart { position:relative; margin-top:6px; }
+.chx-chart svg, .chx-chart canvas { display:block; width:100%; height:auto; }
+.chx-legend { display:flex; gap:6px 16px; flex-wrap:wrap; font-size:.72rem; color:#aab3cb; margin-top:8px; }
+.chx-legend span { display:inline-flex; align-items:center; gap:6px; }
+.chx-legend i { width:11px; height:11px; border-radius:3px; display:inline-block; }
+.chx-legend i.line { height:2px; border-radius:0; width:18px; }
+#chx-tip { position:fixed; z-index:95; pointer-events:none; background:#101831; border:1px solid rgba(160,190,255,.3); color:#e6ebfa; font-size:.72rem; line-height:1.45; padding:6px 9px; border-radius:7px; max-width:280px; white-space:pre-line; }
+#chx-tip[hidden] { display:none; }
+
+.chx-kv { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:.78rem; margin-top:10px; }
+.chx-kv dt { color:#8a93ad; }
+.chx-kv dd { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.chx-tablewrap { overflow-x:auto; margin-top:8px; }
+table.chx-t { width:100%; border-collapse:collapse; font-size:.76rem; }
+table.chx-t th { text-align:left; color:#8a93ad; font-weight:600; padding:5px 8px; border-bottom:1px solid rgba(255,255,255,.12); white-space:nowrap; }
+table.chx-t td { padding:5px 8px; border-bottom:1px solid rgba(255,255,255,.05); vertical-align:top; line-height:1.45; }
+table.chx-t td.num, table.chx-t th.num { text-align:right; }
+table.chx-t tr.grp td { color:#7fb0ff; font-size:.64rem; letter-spacing:.12em; text-transform:uppercase; font-weight:700; padding-top:12px; border-bottom:0; }
+.chx-badge { display:inline-block; font-size:.62rem; padding:1px 7px; border-radius:999px; border:1px solid; white-space:nowrap; }
+.chx-badge.ok { color:#7fd6ae; border-color:rgba(127,214,174,.45); }
+.chx-badge.no { color:#e3b765; border-color:rgba(227,183,101,.5); }
+.chx-badge.model { color:#a9b6e8; border-color:rgba(169,182,232,.4); }
+.chx-timeline { list-style:none; margin-top:8px; }
+.chx-timeline li { display:grid; grid-template-columns:92px 1fr; gap:12px; padding:7px 0; border-bottom:1px solid rgba(255,255,255,.06); font-size:.8rem; line-height:1.5; }
+.chx-timeline li b { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.chx-timeline li span { color:#b9c2da; }
+.chx-open li { font-size:.78rem; color:#b9c2da; line-height:1.6; margin-left:18px; }
+
+/* 3-D stage */
+#chx-stage-wrap { position:relative; margin-top:10px; border-radius:10px; overflow:hidden; background:#04070f; border:1px solid rgba(255,255,255,.07); }
+#chx-stage { display:block; width:100%; height:clamp(340px, 62vh, 640px); touch-action:none; cursor:grab; }
+#chx-stage:active { cursor:grabbing; }
+#chx-stage-clock { position:absolute; left:12px; top:10px; font-size:1.05rem; font-weight:700; color:#f3f5ff; font-variant-numeric:tabular-nums; pointer-events:none; text-shadow:0 1px 6px #000; }
+#chx-stage-phase { position:absolute; left:0; bottom:0; right:0; padding:26px 14px 11px; pointer-events:none; background:linear-gradient(to top, rgba(4,7,15,.88), rgba(4,7,15,0)); }
+#chx-stage-phase span { display:block; max-width:620px; }
+#chx-stage-phase b { display:block; font-size:.9rem; color:#f3f5ff; }
+#chx-stage-phase span { font-size:.8rem; color:#cfd6ea; line-height:1.5; }
+#chx-stage-note { position:absolute; right:12px; top:10px; font-size:.68rem; color:#aab3cb; pointer-events:none; text-align:right; text-shadow:0 1px 6px #000; }
+#chx-stage-fail { padding:28px 16px; font-size:.84rem; color:#e3b765; }
+#chx-stage-fail[hidden] { display:none; }
+.chx-play { background:#1c3a6b; color:#fff; border:1px solid rgba(160,190,255,.35); border-radius:8px; font:inherit; font-size:.78rem; padding:6px 14px; min-height:34px; min-width:74px; cursor:pointer; }
+.chx-play:focus-visible { outline:2px solid #7fb0ff; outline-offset:1px; }
+#chx-clock { margin-top:10px; --thumb:16px; }
+#chx-time { display:block; width:100%; margin:0; accent-color:#3987e5; height:24px; }
+#chx-clock-strip { padding:0 calc(var(--thumb) / 2); }
+#chx-clock-strip svg { display:block; width:100%; height:auto; overflow:visible; }
+#chx-clock-marks { position:relative; height:66px; margin:0 calc(var(--thumb) / 2); }
+#chx-clock-marks button { position:absolute; top:0; transform:translateX(-50%); background:none; border:0; color:#aab3cb; font:inherit; font-size:.66rem; line-height:1.2; padding:14px 3px 2px; cursor:pointer; white-space:nowrap; min-height:24px; }
+#chx-clock-marks button::before { content:''; position:absolute; left:50%; top:0; width:1px; height:11px; background:#8a93ad; }
+#chx-clock-marks button[data-row="1"] { padding-top:30px; } #chx-clock-marks button[data-row="1"]::before { height:27px; }
+#chx-clock-marks button[data-row="2"] { padding-top:46px; } #chx-clock-marks button[data-row="2"]::before { height:43px; }
+#chx-clock-marks button:hover, #chx-clock-marks button:focus-visible { color:#f3f5ff; outline:none; text-decoration:underline; }
+#chx-clock-marks button[data-past="1"] { color:#f3f5ff; }
+#chx-follow[aria-pressed=false] { background:none; color:#aab3cb; }
+@media (max-width: 700px) { #chx-clock-marks button[data-minor="1"] { display:none; } }
+
+/* constraint lab */
+.chx-lab { display:grid; grid-template-columns:minmax(0, 1.05fr) minmax(0, 1fr); gap:18px; margin-top:10px; }
+@media (max-width: 1050px) { .chx-lab { grid-template-columns:minmax(0, 1fr); } }
+.chx-lab h3 { font-size:.8rem; color:#f3f5ff; font-weight:700; margin:14px 0 2px; }
+.chx-lab h3:first-child { margin-top:0; }
+.chx-lab h3 small { display:block; font-weight:500; color:#8a93ad; font-size:.72rem; line-height:1.45; margin-top:2px; }
+.chx-vars { display:grid; grid-template-columns:auto minmax(90px, 1fr) auto; gap:6px 12px; align-items:center; font-size:.76rem; color:#aab3cb; margin-top:8px; }
+.chx-vars input[type=range] { width:100%; accent-color:#3987e5; }
+.chx-vars output { color:#f3f5ff; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+.chx-vars i { font-style:normal; color:#8a93ad; font-size:.68rem; grid-column:1 / -1; margin:-4px 0 2px; }
+.chx-chi { font-size:.82rem; color:#cfd6ea; margin-top:10px; }
+.chx-chi b { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+table.chx-t td.z { white-space:nowrap; font-variant-numeric:tabular-nums; }
+table.chx-t td.z svg { vertical-align:middle; margin-right:6px; }
+table.chx-t td.el { text-align:right; font-variant-numeric:tabular-nums; }
+.chx-modes { list-style:none; margin-top:6px; }
+.chx-modes li { display:grid; grid-template-columns:104px 1fr; gap:10px; font-size:.78rem; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.06); line-height:1.45; color:#b9c2da; }
+.chx-modes li b { color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.chx-ctl select { background:#0f1730; color:#e6ebfa; border:1px solid rgba(255,255,255,.18); border-radius:7px; font:inherit; font-size:.76rem; padding:5px 8px; min-height:32px; }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("chicxulub");</script>
+
+<div id="chx-app">
+
+  <section class="chx-panel chx-span" id="chx-hero">
+    <h1>Chicxulub, backwards</h1>
+    <p>Sixty-six million years ago something hit the Yucatán shelf and ended the Cretaceous. Nobody saw it. What exists is a buried
+      crater, a thin layer of iridium around the whole planet, and beds of debris that thin with distance. This page starts from those
+      measurements and works backwards — to the size and speed of the body, the direction it came from and the orbit it was on — and
+      then forwards again to what it did.</p>
+    <div class="chx-tiles" id="chx-tiles"></div>
+    <p class="chx-fine">Tiles show the reconstruction's median and 68 % range for a main-belt asteroid. It is a scaling-law
+      reconstruction, not a shock-physics simulation; the scaling coefficients and some evidence values were written from memory of the
+      literature and are marked as unchecked below.</p>
+  </section>
+
+  <section class="chx-panel chx-span" id="chx-watch">
+    <div class="chx-step">Watch it · true scale</div>
+    <h2>From twenty seconds before to thirty years after
+      <small>One clock for everything: the asteroid's last seconds, the crater forming, the waves crossing the planet, and the dark years. One scene unit is one kilometre. Drag to look around.</small></h2>
+    <div class="chx-ctl">
+      <button type="button" class="chx-play" id="chx-play" aria-pressed="false">Play</button>
+      <button type="button" class="chx-play" id="chx-follow" aria-pressed="true" title="Let the camera move to the right scale as time passes">Camera follows</button>
+      <span class="chx-seg" id="chx-view" role="group" aria-label="Camera view">
+        <button type="button" data-v="approach" aria-pressed="true">Approach</button>
+        <button type="button" data-v="size" aria-pressed="false">How big</button>
+        <button type="button" data-v="crater" aria-pressed="false">Crater</button>
+        <button type="button" data-v="region" aria-pressed="false">Region</button>
+        <button type="button" data-v="planet" aria-pressed="false">Planet</button>
+      </span>
+      <span class="chx-seg" id="chx-exag" role="group" aria-label="Vertical scale of the ground">
+        <button type="button" data-v="1" aria-pressed="true">Relief ×1</button>
+        <button type="button" data-v="5" aria-pressed="false">×5</button>
+      </span>
+    </div>
+    <div id="chx-stage-wrap">
+      <canvas id="chx-stage" aria-label="3-D view of the Chicxulub impact"></canvas>
+      <div id="chx-stage-clock"></div>
+      <div id="chx-stage-note"></div>
+      <div id="chx-stage-phase" aria-live="polite"><b></b><span></span></div>
+      <div id="chx-stage-fail" hidden>This browser could not start WebGL, so the 3-D view is not shown. Everything below works without it.</div>
+    </div>
+    <div id="chx-clock">
+      <div id="chx-clock-strip"></div>
+      <input type="range" id="chx-time" min="0" max="1" step="0.0005" value="0" aria-label="Time relative to impact">
+      <div id="chx-clock-marks"></div>
+    </div>
+    <dl class="chx-kv" id="chx-stage-kv"></dl>
+    <p class="chx-fine"><b>The clock</b> is linear for the approach and stretches after impact, so seconds, hours and decades each
+      get room; the strip above the slider shows sunlight (white) and global temperature (blue) on that same stretched axis. The four
+      rings on the planet are how far the shaking, the falling debris, the air blast and the tsunami have reached, at the speeds used in
+      Step 3 — they stop being drawn at the far side of the planet. The darkness lasts as long as the published climate model found, and
+      the temperature is the simple model from Step 4: it gets the depth of the cold right by construction and its recovery is too slow,
+      so the clock stops at 30 years. The planet darkens with the sky but is never drawn black.</p>
+    <p class="chx-fine"><b>What is real here:</b> the body's size, speed, angle and bearing, the two crater sizes and depths, the time it
+      takes to cross the air and to bury itself, where thrown-out rock is landing, and the peak ring's measured radius.
+      <b>What is a sketch:</b> how the hole gets from one shape to the next — the growth of the bowl, the rebound of its floor, the
+      height of the debris curtain, and the fireball's growth and fading are an interpolation timed to the published picture, not a
+      shock-physics simulation. The asteroid's lumpy shape is invented; nothing is known about it. The ground is drawn plain because
+      the coastline of 66 million years ago is not in this model, and the sea, the layered rock and the returning water are not drawn.</p>
+  </section>
+
+  <section class="chx-panel">
+    <div class="chx-step">Step 1 · the impactor</div>
+    <h2>How big and how fast?
+      <small>A crater fixes one combination of size and speed. The iridium layer and the kind of body cut across it — and disagree.</small></h2>
+    <div class="chx-ctl">
+      <span class="chx-seg" id="chx-scenario" role="group" aria-label="Which evidence to use">
+        <button type="button" data-v="asteroid" aria-pressed="true">Crater + asteroid speeds</button>
+        <button type="button" data-v="all-iridium" aria-pressed="false">Crater + all the iridium</button>
+        <button type="button" data-v="crater-only" aria-pressed="false">Crater only</button>
+      </span>
+      <span class="chx-seg" id="chx-rim" role="group" aria-label="Which ring is the rim">
+        <button type="button" data-v="155" aria-pressed="true">Rim 155 km</button>
+        <button type="button" data-v="190" aria-pressed="false">Rim 190 km</button>
+      </span>
+    </div>
+    <div class="chx-chart"><canvas id="chx-post" width="760" height="470" aria-label="Probability of impactor diameter and speed"></canvas></div>
+    <div class="chx-legend">
+      <span><i style="background:#3987e5"></i>more likely (darker = less)</span>
+      <span><i class="line" style="background:#f3f5ff"></i>speed each size needs to dig the crater</span>
+      <span><i class="line" style="background:#d95926"></i>size the iridium layer weighs</span>
+      <span><i style="background:#f3f5ff;border-radius:50%"></i>published simulations</span>
+    </div>
+    <dl class="chx-kv" id="chx-post-kv"></dl>
+    <p class="chx-fine" id="chx-post-note"></p>
+  </section>
+
+  <section class="chx-panel">
+    <div class="chx-step">Step 2 · the trajectory</div>
+    <h2>Where did it come from?
+      <small>The crater's lopsidedness gives the last seconds: 45–60° above the horizon, from the north-east. Followed back out of
+        Earth's gravity, the orbit depends on one thing nobody recorded — the time of day.</small></h2>
+    <div class="chx-ctl">
+      <label>Speed <input type="range" id="chx-v" min="12" max="45" step="0.5" value="18"><output id="chx-v-o"></output></label>
+      <label>Angle <input type="range" id="chx-th" min="30" max="85" step="1" value="55"><output id="chx-th-o"></output></label>
+      <label>Bearing <input type="range" id="chx-az" min="0" max="90" step="5" value="45"><output id="chx-az-o"></output></label>
+      <label>Season <input type="range" id="chx-sun" min="0" max="90" step="5" value="30"><output id="chx-sun-o"></output></label>
+      <label>Local time <input type="range" id="chx-hr" min="0" max="23.5" step="0.5" value="10"><output id="chx-hr-o"></output></label>
+    </div>
+    <div class="chx-chart" id="chx-orbit"></div>
+    <dl class="chx-kv" id="chx-orbit-kv"></dl>
+    <div class="chx-chart" id="chx-hours"></div>
+    <div class="chx-legend" id="chx-class-legend"></div>
+    <p class="chx-fine" id="chx-traj-note"></p>
+  </section>
+
+  <section class="chx-panel chx-span">
+    <div class="chx-step">Step 3 · the planet</div>
+    <h2>What happened, and when, at a given distance
+      <small>For the reconstructed impactor. Drag to move away from the crater.</small></h2>
+    <div class="chx-ctl">
+      <label>Distance <input type="range" id="chx-r" min="0" max="1" step="0.005" value="0.42" style="width:260px"><output id="chx-r-o"></output></label>
+      <span id="chx-r-place" style="color:#8a93ad"></span>
+    </div>
+    <ul class="chx-timeline" id="chx-timeline"></ul>
+    <div class="chx-chart" id="chx-ejecta"></div>
+    <p class="chx-fine" id="chx-ejecta-note"></p>
+  </section>
+
+  <section class="chx-panel chx-span">
+    <div class="chx-step">Step 4 · the sky</div>
+    <h2>The dark years
+      <small>Soot from the fires alone was enough to stop sunlight reaching the ground. How cold it got depends on how much ocean gave up its heat.</small></h2>
+    <div class="chx-chart" id="chx-climate"></div>
+    <div class="chx-legend" id="chx-climate-legend"></div>
+    <p class="chx-fine" id="chx-climate-note"></p>
+  </section>
+
+  <section class="chx-panel chx-span" id="chx-test">
+    <div class="chx-step">Step 5 · test it</div>
+    <h2>Does the evidence agree with itself?
+      <small>Five variables describe the impactor. Seven pieces of evidence are fitted; five more are held back and only predicted. Move a variable and watch which rows break.</small></h2>
+    <div class="chx-lab">
+      <div>
+        <h3>The five variables <small>Drag any of them, or return to the best fit.</small></h3>
+        <div class="chx-vars" id="chx-vars"></div>
+        <div class="chx-ctl" style="margin:8px 0 0">
+          <button type="button" class="chx-play" id="chx-fit">Best fit</button>
+          <span class="chx-chi" id="chx-chi"></span>
+        </div>
+        <h3>Scorecard <small>How far the model lands from each row, in units of that row's uncertainty (σ). Within ±1 is a match; beyond ±2 is a miss.</small></h3>
+        <div class="chx-tablewrap"><table class="chx-t" id="chx-score">
+          <thead><tr><th>Evidence</th><th class="num">Observed</th><th class="num">Model</th><th>Distance</th></tr></thead><tbody></tbody>
+        </table></div>
+        <h3>Take one away <small>Each fitted row is removed in turn and the model refitted without it. Can the rest predict it?</small></h3>
+        <div class="chx-tablewrap"><table class="chx-t" id="chx-loo">
+          <thead><tr><th>Removed</th><th>Predicted from the rest</th><th>What it alone holds</th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+      <div>
+        <h3>How two variables trade off <small>Darker blue fits better. The outline is where the fit is as good as the best (Δχ² ≤ 1). The other variables stay where the sliders are, except the iridium share, which re-adjusts at every point.</small></h3>
+        <div class="chx-ctl" style="margin:6px 0">
+          <label>Across <select id="chx-px"></select></label>
+          <label>Up <select id="chx-py"></select></label>
+        </div>
+        <div class="chx-chart"><canvas id="chx-pair" width="700" height="430" aria-label="Fit quality over two variables"></canvas></div>
+        <h3>What moves what <small>If a variable grows by 1 %, each quantity changes by this many per cent. Zero means the evidence cannot see that variable through that quantity.</small></h3>
+        <div class="chx-tablewrap"><table class="chx-t" id="chx-el"><thead></thead><tbody></tbody></table></div>
+        <h3>What the evidence pins down <small>Combinations of variables, tightest first. "Free by ×1.04" means that combination can change by 4 % before the fit gets noticeably worse.</small></h3>
+        <ul class="chx-modes" id="chx-modes"></ul>
+        <h3>How far each variable can go <small>One variable is walked across its range while the other four re-adjust.</small></h3>
+        <dl class="chx-kv" id="chx-profiles"></dl>
+      </div>
+    </div>
+    <p class="chx-fine">Every row goes through the same scaling laws, whose coefficients were written from memory and are not yet checked.
+      A good fit here means the evidence is consistent <b>under those laws</b>; it does not test the laws. The fit's single best point
+      (a slower, larger body) and the headline ranges at the top of the page (the middle of the same valley) are two summaries of one
+      surface — the long, loose direction below is why they differ.</p>
+  </section>
+
+  <section class="chx-panel chx-span">
+    <h2>The evidence <small>Every number the reconstruction reads, where it comes from, and whether it was checked.</small></h2>
+    <div class="chx-tablewrap"><table class="chx-t" id="chx-evidence">
+      <thead><tr><th>What</th><th class="num">Value</th><th>Kind</th><th>Source</th><th>Checked</th></tr></thead><tbody></tbody>
+    </table></div>
+    <p class="chx-fine"><b>Checked</b> means the number was confirmed against a search result quoting the source on 22 Nov 2026.
+      <b>From memory</b> means it was written from recollection of the paper and has not been checked — the journal sites could not be
+      reached from the build machine. <b>Model result</b> rows are other people's simulations: targets to compare with, not measurements.</p>
+  </section>
+
+  <section class="chx-panel chx-span">
+    <h2>What this is, and what it is not</h2>
+    <p class="chx-body"><b>Crater scaling.</b> Impactor → transient crater → final rim uses the Collins, Melosh &amp; Marcus (2005)
+      scaling laws, with no shock physics, no layered target and no sea. The laws predict the topographic rim, taken here as the
+      140–170 km inner rim; reading the 180–200 km outer ring as the rim instead makes the body about a fifth larger and nearly doubles
+      the energy. That choice is the largest uncertainty on this page.</p>
+    <p class="chx-body"><b>Iridium.</b> The layer's 55 ng/cm² over the whole Earth is about 280,000 tonnes of iridium. In a CM-type
+      body that is the iridium of a ~7 km asteroid. A 7 km body would need to arrive faster than anything bound to the Sun can to dig
+      this crater, and the ruthenium isotopes say it was an asteroid, not a comet. So the reconstruction lets the layer hold only a
+      fraction of the impactor's iridium and reports that fraction. Where the rest went — the crater, the nearby ejecta, or off the
+      planet — is not modelled.</p>
+    <p class="chx-body"><b>Trajectory.</b> Exact two-body mechanics from the ground out of Earth's gravity, then Earth's orbital
+      velocity added. The crater is placed where a published plate model puts it 66 million years ago (Müller et al. 2019:
+      21.9°N instead of today's 21.3°N, with its compass turned about 12° clockwise, so "from the north-east" in today's
+      geography is turned the same way). That model's frame is fixed to the mantle, not to the spin axis, so a few degrees of
+      polar wander are not in it. It also uses today's axial tilt and a circular orbit for Earth; neither is known for 66 million
+      years ago. "From the north-east" is read as a bearing of 45° ± 30°.
+      <a href="deep-time-earth.html?age=66.04&amp;at=21.3333,-89.5" style="color:#8fbaff">See the planet at 66 million years ago →</a></p>
+    <p class="chx-body"><b>Climate.</b> One box with one heat capacity. The length of the darkness is taken from the published
+      climate-model runs, not predicted; the box predicts only the temperature, and with a shallow ocean layer it over-cools about
+      fourfold. It is here to show what the published answer implies, not to replace it.</p>
+    <ul class="chx-open" id="chx-open"></ul>
+  </section>
+
+</div>
+<div id="chx-tip" hidden></div>
+
+<script type="module" src="js/chicxulub-page.js"></script>
+</body>
+</html>

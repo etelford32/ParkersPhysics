@@ -1,0 +1,95 @@
+# chicxulub-kernels — the Chicxulub reconstruction (chicxulub.html)
+#
+#   chicxulub.mjs   the evidence table (every row sourced + flagged), the
+#                   forward scaling identities, ballistic flight, the impactor
+#                   inversion and its controls, the escape hyperbola against a
+#                   numerical integration, the heliocentric sign conventions,
+#                   and the climate box.
+#   paleo-rotations.mjs  the plate-rotation kernel (js/paleo/) on the baked
+#                   Müller et al. 2019 model: identities, crossovers, and the
+#                   cross-checks against PB2002 and against pyGPlates (the
+#                   baked tests/fixtures/paleo/ oracles, for BOTH models —
+#                   Müller 2019 and Merdith 2021); the 66 Ma site table
+#                   is regenerated and compared inside chicxulub.mjs §12.
+#   deep-time-earth.mjs  the deep-time-earth.html page model, including its
+#                   reads of the SHARED modules it now uses: the Seton 2020
+#                   age grid (js/earth-interior/seafloor-age.js) and the site
+#                   time scale (js/plate-history/geotime.js). paleo-rotations
+#                   §8 also runs Plates Through Time's own rotation kernel
+#                   (js/plate-history/rotations.js) on its Cao 2023 file.
+#
+# The browser gates (tests/chicxulub-page.spec.js, tests/deep-time-earth.spec.js)
+# are not run here.
+name: chicxulub-kernels
+
+on:
+  pull_request:
+    paths:
+      - 'js/chicxulub/**'
+      - 'js/chicxulub-page.js'
+      - 'js/volcano-engine.js'
+      - 'js/neo-space.js'
+      - 'tests/chicxulub.mjs'
+      - 'js/paleo/**'
+      - 'data/paleo/**'
+      - 'tests/paleo-rotations.mjs'
+      - 'scripts/build-chicxulub-paleo.mjs'
+      - 'js/deep-time/**'
+      - 'tests/deep-time-earth.mjs'
+      - 'tests/fixtures/paleo/**'
+      - 'tests/helpers/paleo-oracle.mjs'
+      - 'scripts/build-paleo-merdith.py'
+      - 'js/plate-history/rotations.js'
+      - 'js/plate-history/geotime.js'
+      - 'data/plate-history/rotations.json.gz'
+      - 'js/earth-interior/seafloor-age.js'
+      - 'data/earth-interior/seafloor-age.*'
+      - '.github/workflows/chicxulub-kernels.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'js/chicxulub/**'
+      - 'js/chicxulub-page.js'
+      - 'js/volcano-engine.js'
+      - 'js/neo-space.js'
+      - 'tests/chicxulub.mjs'
+      - 'js/paleo/**'
+      - 'data/paleo/**'
+      - 'tests/paleo-rotations.mjs'
+      - 'scripts/build-chicxulub-paleo.mjs'
+      - 'js/deep-time/**'
+      - 'tests/deep-time-earth.mjs'
+      - 'tests/fixtures/paleo/**'
+      - 'tests/helpers/paleo-oracle.mjs'
+      - 'scripts/build-paleo-merdith.py'
+      - 'js/plate-history/rotations.js'
+      - 'js/plate-history/geotime.js'
+      - 'data/plate-history/rotations.json.gz'
+      - 'js/earth-interior/seafloor-age.js'
+      - 'data/earth-interior/seafloor-age.*'
+      - '.github/workflows/chicxulub-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicxulub-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Chicxulub kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: reconstruction kernels
+        run: node tests/chicxulub.mjs
+      - name: plate-rotation kernel
+        run: node tests/paleo-rotations.mjs
+      - name: deep-time page model
+        run: node tests/deep-time-earth.mjs
