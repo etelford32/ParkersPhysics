@@ -11,12 +11,62 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Fri, 20 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Wed, 25 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Sea Floor: the weight of the sediment taken off the plate</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-sediment</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-sediment</guid>
+      <pubDate>Wed, 25 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;Sediment lying on a plate weighs it down, and a thick pile near a margin can look like bending. The page now removes that weight before fitting the two-thickness plate, as the published trench studies do.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Sediment thickness comes from GlobSed (Straume and others, 2019). The copy used is unofficial, so the page checks it against the sea-floor age map: the sediment thins toward young sea floor, as it should.&lt;/li&gt;&lt;li&gt;The weight is taken off with the densities in Zhang and others&amp;#39; table, so each metre of sediment deepens the sea floor by 0.57 m.&lt;/li&gt;&lt;li&gt;Fewer sections now pin down both thicknesses (16 of 72 instead of 19). Only Philippine and Izu–Bonin are quoted; Japan and Middle America drop out.&lt;/li&gt;&lt;li&gt;Where a section is pinned down, Zhang and others&amp;#39; numbers fall inside ours more often for every quantity. All three agree at 7 of 15 sections, up from 5 of 19.&lt;/li&gt;&lt;li&gt;Each section shows how much sediment it carries. If the sediment map cannot be loaded, the page says the sediment was not removed.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=philippine&quot;&gt;Open Sea Floor: Philippine Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Sea Floor: the age of the sea floor, and the plate before it bends</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-age</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-age</guid>
+      <pubDate>Wed, 25 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;The page now knows how old the sea floor under each trench is. As the published studies do, it removes the deepening that comes with age before fitting the two-thickness plate, and that is what lets the stiffer plate further from the trench show up.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Sea-floor ages come from the map of Seton and others (2020). Where it overlaps Garcia and others&amp;#39; table, the ages agree to within about 2 million years.&lt;/li&gt;&lt;li&gt;On the old plates of the western Pacific, cooling explains almost none of the tilt the earlier fit had taken up. That tilt had been standing in for the stiffer plate further out.&lt;/li&gt;&lt;li&gt;With the cooling removed, both thicknesses are pinned down at 19 of 72 cross-sections instead of 8. Four trenches can now be quoted: Philippine, Izu–Bonin, Japan and Middle America.&lt;/li&gt;&lt;li&gt;At Izu–Bonin the plate is 30 km thick near the trench and at least 38–56 km before it bends. Zhang and others give 31 and 57.&lt;/li&gt;&lt;li&gt;Each section also shows how deep a cooling plate of its age stays below 600 °C. At 8 of the 19 sections the fit asks for more than that, and the page says to read those with care.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=izu-bonin&quot;&gt;Open Sea Floor: Izu–Bonin Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Sea Floor: a plate that weakens as it bends</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-two-plates</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-two-plates</guid>
+      <pubDate>Mon, 23 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;The trench model now includes the one both published studies use: a plate that is thinner near the trench than beyond it. The page fits it at every cross-section, says where it is needed, and checks each answer against Zhang and others (2018).&lt;/p&gt;&lt;ul&gt;&lt;li&gt;The new plate is solved exactly. With its two thicknesses equal it becomes the earlier single-thickness plate, so the two are compared on the same sea floor.&lt;/li&gt;&lt;li&gt;A second thickness counts only when it beats one by more than chance. It does at 28 of the 72 cross-sections, and at Tonga it halves the misfit (152 m to 60 m).&lt;/li&gt;&lt;li&gt;Both thicknesses are pinned down at 8 sections. Beyond the break the data often give only a lower limit, and the page says &amp;quot;at least&amp;quot;.&lt;/li&gt;&lt;li&gt;Middle America is the one trench with three sections that agree well enough to quote: about 16 km near the trench, with a break about 30 km out.&lt;/li&gt;&lt;li&gt;At 4 of the 8 sections, Zhang and others&amp;#39; published thicknesses and break distance fall within ours (Tonga twice, Izu–Bonin, Middle America). At the other 4 they do not, and the page says so.&lt;/li&gt;&lt;li&gt;The bending chart draws the two-thickness plate beside the single-thickness one and marks where the plate breaks.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=tonga&quot;&gt;Open Sea Floor: Tonga Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Sea Floor: the plates behind the trenches</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor-plates</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor-plates</guid>
+      <pubDate>Sun, 22 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;The Sea Floor page now shows why each trench is where it is: the plate boundaries on the globe, which plate sinks under which and how fast, where the sunken plate goes, and a first model of the plate bending as it goes down.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Plate boundaries are drawn on the globe and on each 3D block, coloured by whether the plates there are colliding, spreading or sliding. They are Peter Bird&amp;#39;s 2003 plate model.&lt;/li&gt;&lt;li&gt;Each trench names its plates and their speed. At Tonga the Pacific plate goes under at 109 mm a year, the width of a hand; at the Mariana Trench it is 25 mm a year, coming in at a 42° slant.&lt;/li&gt;&lt;li&gt;A true-scale section shows the sunken plate from the USGS Slab2 model. Under Japan it goes down at 26°, under the Marianas at 56°, and at true scale the deepest trench on Earth is a notch.&lt;/li&gt;&lt;li&gt;New model: seaward of a trench the plate bends like a stiff sheet and pushes up a low outer rise. The page fits that curve to 500 km of sea floor at five cross-sections 80 km apart along each trench, and reads a plate thickness from it.&lt;/li&gt;&lt;li&gt;Four trenches give an answer: about 6 km at the Middle America Trench, 16 km at Kuril, 21 km at Japan and 26 km at the Aleutian. The five sections disagree by up to a factor of two along one trench, and the page prints that range beside every number.&lt;/li&gt;&lt;li&gt;Every fit is shown with its tests, and seamounts left out of a fit are shaded on the chart. Most trenches fail, the Mariana among them, and the page then draws the rejected curve and quotes no thickness.&lt;/li&gt;&lt;li&gt;Each number is shown beside two published studies of the same trench (Garcia and others 2019; Zhang and others 2018). Ours fall inside the published range for the bent plate at all four trenches, and the page also shows the published thickness of the plate before it bends, which is two to three times greater.&lt;/li&gt;&lt;li&gt;The Romanche, Cayman and Puerto Rico deeps are shown as what Bird&amp;#39;s model says they are: places where plates slide past each other, with no sinking plate.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html?site=kuril&quot;&gt;Open Sea Floor: Kuril–Kamchatka Trench&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
+
+    <item>
+      <title>Sea Floor: a 3D globe of the ocean floor you can dive beneath</title>
+      <link>https://parkersphysics.com/recent-development.html#sea-floor</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#sea-floor</guid>
+      <pubDate>Sun, 22 Nov 2026 00:00:00 GMT</pubDate>
+      <category>New simulation</category>
+      <category>Earth &amp; Orbit</category>
+      <description>&lt;p&gt;A new page shows the whole ocean floor as a relief globe. Click anywhere on the sea and dive under the surface to the bottom; at 28 trenches and abyssal plains the water on the way down is the deepest real temperature profile ever archived there.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Turn the globe, drain the ocean with one tick, and click any point of sea to read its depth. Dive there and the page loads the sea floor around it at 1.8 km detail and flies you under.&lt;/li&gt;&lt;li&gt;On the way down a readout gives your depth, the pressure, how much sunlight is left and the height of the floor below you. About 1 % of surface light remains at 115 m and none below a few hundred metres.&lt;/li&gt;&lt;li&gt;Temperature is from 221 real casts in NOAA&amp;#39;s World Ocean Database, including a 1992 cast to 10,861 m in the Mariana Trench. Where no cast lies within 150 km the page shows no temperature at all.&lt;/li&gt;&lt;li&gt;The water at the bottom of Challenger Deep is 2.46 °C, a full degree warmer than the coldest water 6 km above it. Compression alone does that, and the page shows it on the measured profile.&lt;/li&gt;&lt;li&gt;Fire the echo sounder: an echo from 10.8 km takes 13.9 seconds, and at the 1500 m/s a sounder assumes it reads about 370 m too shallow. A wide beam reads shallower still, from an echo off the trench wall.&lt;/li&gt;&lt;li&gt;Under water the sea is drawn clear and the floor is lit artificially, because real sea water lets you see only tens of metres. The page says so on the view.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/sea-floor.html&quot;&gt;Open Sea Floor&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>Bz Column: the Sun&#39;s north–south field followed from L1 to the ground</title>
@@ -466,36 +516,6 @@
       <category>New layer / feature</category>
       <category>Space Weather</category>
       <description>&lt;p&gt;The homepage opens on today&amp;#39;s Sun — real NOAA active regions — and plays the next 24 hours of CMEs through the flux-rope engine.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage: today&#39;s Earth and NOAA&#39;s aurora</title>
-      <link>https://parkersphysics.com/recent-development.html#hero-real-earth</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#hero-real-earth</guid>
-      <pubDate>Wed, 23 Sep 2026 00:00:00 GMT</pubDate>
-      <category>Improvement</category>
-      <category>Space Weather</category>
-      <description>&lt;p&gt;The homepage globe is NASA imagery turned to today&amp;#39;s sunlight and season, with the live OVATION aurora oval on the real magnetic dipole.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>EarthView clouds follow the clock</title>
-      <link>https://parkersphysics.com/recent-development.html#cloud-time-aware</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#cloud-time-aware</guid>
-      <pubDate>Wed, 23 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Earth &amp; Orbit</category>
-      <description>&lt;p&gt;Scrubbing time now shows archived satellite cloud frames for that moment, a wind-advected nowcast just ahead, and model-only clouds further out.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/earth.html&quot;&gt;Open EarthView&lt;/a&gt;&lt;/p&gt;</description>
-    </item>
-
-    <item>
-      <title>Homepage 30-day temperature outlook</title>
-      <link>https://parkersphysics.com/recent-development.html#temp-outlook</link>
-      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#temp-outlook</guid>
-      <pubDate>Mon, 21 Sep 2026 00:00:00 GMT</pubDate>
-      <category>New layer / feature</category>
-      <category>Earth &amp; Orbit</category>
-      <description>&lt;p&gt;A daily-candle temperature chart and a 30-day calendar for your location, relaxing from the forecast toward the local normal.&lt;/p&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Homepage&lt;/a&gt;&lt;/p&gt;</description>
     </item>
 
   </channel>

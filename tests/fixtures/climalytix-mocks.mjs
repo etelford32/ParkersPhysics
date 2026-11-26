@@ -328,7 +328,7 @@ export function mockDem(lat) {
 }
 const demCache = new WeakMap();
 /** One Terrarium tile of `heightAt(lat, lon)` (default: the ridge), pixel centres in Web-Mercator. */
-function demTilePng(z, x, y, heightAt = mockDem) {
+export function demTilePng(z, x, y, heightAt = mockDem) {
     if (!demCache.has(heightAt)) demCache.set(heightAt, new Map());
     const cache = demCache.get(heightAt), key = `${z}/${x}/${y}`;
     if (!cache.has(key)) {
