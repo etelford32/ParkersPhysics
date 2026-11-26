@@ -334,7 +334,15 @@ if (MOON_MAP) {
 }
 const args = GPU ? ['--ignore-gpu-blocklist'] : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await chromium.launch({ headless: true, args });
-const todo = CAPTURED_SLIDES.filter(s => !ONLY.length || ONLY.includes(s.id));
+// OWNER CAPTURES (2026-11-26): a manifest entry with `capturedBy: 'owner'` is
+// a real-GPU screenshot the owner took of the live page (e.g. Inner Earth's
+// live seismic view, which needs the USGS feed this machine cannot reach),
+// cropped to its scene and never retouched. A software re-capture is worse
+// by construction, so it is SKIPPED unless `--replace-owner` is passed.
+const REPLACE_OWNER = flag('--replace-owner');
+const ownerIds = new Set((manifest.slides || []).filter(e => e.capturedBy === 'owner').map(e => e.id));
+const todo = CAPTURED_SLIDES.filter(s => (!ONLY.length || ONLY.includes(s.id))
+    && (REPLACE_OWNER || !ownerIds.has(s.id) || (console.log(`· ${s.id}: owner GPU capture kept (--replace-owner to re-shoot)`), false)));
 const results = [];
 try {
     for (const slide of todo) {

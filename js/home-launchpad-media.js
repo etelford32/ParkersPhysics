@@ -20,13 +20,13 @@ export const LAUNCHPAD_MEDIA = Object.freeze({
     "glacier-watch": { capturedAt: "2026-11-22T22:15:00.582Z", renderer: "swiftshader", focus: [56, 42] },
     "climalytix": { capturedAt: "2026-11-22T23:44:56.096Z", renderer: "swiftshader", focus: [46, 50] },
     "volcanoes": { capturedAt: "2026-11-09T17:33:56.988Z", renderer: "swiftshader", focus: [50, 42] },
-    "earth-interior": { capturedAt: "2026-11-26T00:24:40.579Z", renderer: "swiftshader", focus: [50, 48] },
+    "earth-interior": { capturedAt: "2026-11-26T19:53:00.000Z", renderer: "gpu", focus: [50, 50] },
     "pollution": { capturedAt: "2026-11-26T00:22:15.493Z", renderer: "swiftshader", focus: [44, 45] },
     "moon": { capturedAt: "2026-11-25T01:53:56.719Z", renderer: "swiftshader", focus: [50, 50] },
     "mars": { capturedAt: "2026-11-25T01:57:30.205Z", renderer: "swiftshader", focus: [50, 48] },
     "solar-system": { capturedAt: "2026-11-26T00:22:54.559Z", renderer: "swiftshader", focus: [48, 55] },
     "neo-watch": { capturedAt: "2026-11-22T23:45:29.511Z", renderer: "swiftshader", focus: [50, 50] },
-    "galactic-map": { capturedAt: "2026-11-22T22:17:29.291Z", renderer: "swiftshader", focus: [50, 46] },
+    "galactic-map": { capturedAt: "2026-11-26T20:09:00.000Z", renderer: "gpu", focus: [50, 45] },
     "star-collider": { capturedAt: "2026-11-09T17:39:14.984Z", renderer: "swiftshader", focus: [50, 50] },
     "bootes-void": { capturedAt: "2026-11-23T00:08:49.402Z", renderer: "swiftshader", focus: [50, 46] }
 });

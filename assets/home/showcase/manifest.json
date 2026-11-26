@@ -173,16 +173,17 @@
     {
       "id": "earth-interior",
       "poster": "assets/home/showcase/earth-interior.jpg",
-      "clip": "assets/home/showcase/earth-interior.webm",
-      "width": 1366,
-      "height": 938,
+      "clip": null,
+      "width": 860,
+      "height": 493,
       "source": "/earth-interior.html",
-      "capturedAt": "2026-11-26T00:24:40.579Z",
-      "renderer": "swiftshader",
+      "capturedAt": "2026-11-26T19:53:00.000Z",
+      "renderer": "gpu",
       "bytes": {
-        "poster": 64891,
-        "clip": 115861
-      }
+        "poster": 70805,
+        "clip": 0
+      },
+      "capturedBy": "owner"
     },
     {
       "id": "pollution",
@@ -257,16 +258,17 @@
     {
       "id": "galactic-map",
       "poster": "assets/home/showcase/galactic-map.jpg",
-      "clip": "assets/home/showcase/galactic-map.webm",
-      "width": 1920,
-      "height": 1150,
+      "clip": null,
+      "width": 1170,
+      "height": 710,
       "source": "/galactic-map.html",
-      "capturedAt": "2026-11-22T22:17:29.291Z",
-      "renderer": "swiftshader",
+      "capturedAt": "2026-11-26T20:09:00.000Z",
+      "renderer": "gpu",
       "bytes": {
-        "poster": 201273,
-        "clip": 408684
-      }
+        "poster": 67301,
+        "clip": 0
+      },
+      "capturedBy": "owner"
     },
     {
       "id": "star-collider",
