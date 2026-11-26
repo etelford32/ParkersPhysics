@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T01:57:30.252Z",
+  "generatedAt": "2026-11-26T00:24:40.614Z",
   "slides": [
     {
       "id": "earth",
@@ -177,25 +177,25 @@
       "width": 1366,
       "height": 938,
       "source": "/earth-interior.html",
-      "capturedAt": "2026-11-22T22:15:29.884Z",
+      "capturedAt": "2026-11-26T00:24:40.579Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 94542,
-        "clip": 223628
+        "poster": 64891,
+        "clip": 115861
       }
     },
     {
       "id": "pollution",
       "poster": "assets/home/showcase/pollution.jpg",
       "clip": "assets/home/showcase/pollution.webm",
-      "width": 950,
-      "height": 474,
+      "width": 1340,
+      "height": 618,
       "source": "/pollution.html",
-      "capturedAt": "2026-11-09T17:34:24.754Z",
+      "capturedAt": "2026-11-26T00:22:15.493Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 27360,
-        "clip": 72738
+        "poster": 102213,
+        "clip": 205520
       }
     },
     {
@@ -233,11 +233,11 @@
       "width": 1920,
       "height": 1200,
       "source": "/solar-system.html",
-      "capturedAt": "2026-11-25T01:55:14.790Z",
+      "capturedAt": "2026-11-26T00:22:54.559Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 72112,
-        "clip": 107061
+        "poster": 136945,
+        "clip": 209593
       }
     },
     {

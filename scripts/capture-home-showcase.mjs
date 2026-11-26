@@ -257,6 +257,14 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
     let box = null;
     try { box = await page.locator(c.crop).first().boundingBox(); } catch {}
     if (!box || box.width < 200 || box.height < 120) box = { x: 0, y: 0, width: VIEW.width, height: VIEW.height };
+    // `cropHeightOf`: end the frame at the bottom of another element (a two-
+    // column layout whose shorter column would otherwise leave dead space).
+    if (c.cropHeightOf) {
+        try {
+            const b2 = await page.locator(c.cropHeightOf).first().boundingBox();
+            if (b2 && b2.y + b2.height > box.y + 120) box = { ...box, height: Math.min(box.height, b2.y + b2.height + 8 - box.y) };
+        } catch {}
+    }
     const x = Math.max(0, Math.floor(box.x)), y = Math.max(0, Math.floor(box.y));
     const w = Math.min(VIEW.width  - x, Math.floor(box.width  / 2) * 2);
     const h = Math.min(VIEW.height - y, Math.floor(box.height / 2) * 2);

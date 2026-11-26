@@ -12,8 +12,8 @@
     48
   ],
   "solar-system": [
-    50,
-    52
+    48,
+    55
   ],
   "galactic-map": [
     50,
@@ -28,8 +28,8 @@
     45
   ],
   "earth-interior": [
-    47,
-    52
+    50,
+    48
   ],
   "volcanoes": [
     50,
@@ -58,5 +58,9 @@
   "cme-forecast": [
     50,
     40
+  ],
+  "pollution": [
+    44,
+    45
   ]
 }

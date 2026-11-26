@@ -398,10 +398,17 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             url: '/earth-interior.html',
             crop: '#ei-canvas',
             ready: '!!document.querySelector(\'#ei-views [data-view="cutaway"]\')',
-            // The structure view: the live-earthquake view draws nothing without the USGS feed.
-            prep: 'document.querySelector(\'#ei-views [data-view="cutaway"]\').click()',
+            // THE FIELD AT THE CORE (2026-11-26). Driven first: the live view
+            // (seismic rays crossing the planet) is the page's best moment but
+            // draws nothing without USGS, which is unreachable at capture; the
+            // Slab2 sections read as abstract shards at poster size. The
+            // magnetic-field view is real data end to end — CHAOS-8.1 on the
+            // surface and, through the cut wedge, the field at the core–mantle
+            // boundary — and reads at a glance.
             hide: ['nav'],
-            shots: [{ wheel: -240, n: 2 }, { drag: [0.5, 0.5, 0.44, 0.54], wait: 600 }],
+            shots: [{ wait: 6000 },
+                    { eval: 'document.querySelector(\'#ei-views [data-view="field"]\').click();', wait: 10000 },
+                    { wheel: -240, n: 1, wait: 3000 }],
             settleMs: 9000,
             clipMs: 6000,
         },
@@ -415,11 +422,20 @@ export const SHOWCASE_ENTRIES = Object.freeze([
         verb: 'Open the lab',
         accent: '#ffd23f',
         capture: {
+            // THE WHOLE INSTRUMENT, NOT JUST THE MAP (2026-11-26, owner: "more
+            // detail"). The map is a PM2.5 field with no basemap, so on its own
+            // it reads as coloured blobs; the detail is beside it — the six
+            // dirtiest metros' series, the diurnal composite, the six-day
+            // exposure timeline. The feeds are CAMS via Open-Meteo (blocked at
+            // capture): run with `--replay <dir>` of UNEDITED production
+            // /api/air-quality/{centers,grid,history}, /api/weather/grid and
+            // /api/wildfires/events bodies, or the page shows its DEMO badge.
             url: '/pollution.html',
-            crop: '#pl-map',
-            ready: '!!document.querySelector("#pl-map")',
+            crop: '.pl-main',
+            cropHeightOf: '.pl-map-wrap',
+            ready: '!!document.querySelector("#pl-map") && document.getElementById("pip-history")?.classList.contains("live")',
             hide: ['nav'],
-            settleMs: 9000,
+            settleMs: 6000,
             clipMs: 7000,
         },
     },
@@ -491,19 +507,24 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             crop: '#canvas-wrap',
             ready: '!!window.__solarRender',
             hide: ['nav'],
-            // JUPITER TONIGHT (2026-11-25). The default is the system seen
-            // pole-down — a small Sun in rings. Lock mode keeps the CURRENT
-            // view direction, and a headless drag never reaches this page's
-            // controls (measured: every drag-composed still was pole-down), so
-            // the camera is set to a low oblique angle FIRST, then Jupiter is
-            // selected: its banded disc with the Galilean moons where they
-            // really are tonight. The selection reticle is hidden for the still.
-            prep: 'const c = window.__solarRender.camera; const r = c.position.length(); c.position.set(r * 0.55, r * 0.22, r * 0.80); c.lookAt(0, 0, 0);',
-            shots: [{ wait: 2500 },
-                    { eval: '[...document.querySelectorAll("#planet-btns button")].find((b) => /Jupiter/.test(b.textContent)).click();', wait: 9000 },
-                    { wheel: -200, n: 2, wait: 1500 },
-                    { eval: 'let sc = window.__solarRender.sunMesh; while (sc.parent) sc = sc.parent; sc.traverse((o) => { if (/marker|reticle/i.test(o.name)) o.visible = false; });' }],
-            settleMs: 3000,
+            // EARTH'S ORBIT IN THE NEO SWARM (2026-11-26, owner request). The
+            // catalogue is JPL's (blocked at capture), so this still needs
+            // `--replay <dir>` holding an UNEDITED production
+            // /api/neo/catalog body (the PHA tier: 2,766 objects) — without it
+            // the page honestly says "feed down" and draws no swarm. Apophis
+            // (99942) is selected through the panel's OWN delegated click so
+            // its orbit is drawn crossing Earth's; then the camera is freed
+            // (F — the lock sits on the rock and frames nothing) and set to
+            // the iso preset, pulled in so the inner orbits fill the frame.
+            // Synthetic drags never reach this page's controls headless, so
+            // the camera is placed through the page's own hooks.
+            shots: [{ eval: 'const host = document.querySelector(".neo-toggles").parentElement; const b = document.createElement("button"); b.dataset.des = "99942"; host.appendChild(b); b.click(); b.remove();', wait: 5000 },
+                    { key: 'f' },
+                    // The near-Earth frame's 1/5/10/20 LD rings stack their labels on
+                    // Earth at this distance; the page's own toggle drops them.
+                    { eval: 'const t = document.querySelector("[data-vis=local]"); if (t && t.checked) t.click(); document.getElementById("cam-iso").click();', wait: 4000 },
+                    { eval: 'window.__solarRender.camera.position.multiplyScalar(0.42);', wait: 4000 }],
+            settleMs: 4000,
             clipMs: 7000,
         },
     },
