@@ -1,0 +1,643 @@
+{
+ "format": "seafloor-bathy-v1",
+ "baked": "2026-11-22",
+ "source": "AWS Terrain Tiles (Terrarium) - ocean: NOAA ETOPO1 1 arc-minute + GEBCO 2014",
+ "source_url": "https://registry.opendata.aws/terrain-tiles/",
+ "note": "Mostly satellite-altimetry-predicted depth on a ~1.8 km grid, not a multibeam survey. Elevation in metres, negative below sea level.",
+ "tile_zoom": 7,
+ "encoding": "int16le gzip, row 0 north, col 0 west",
+ "world": {
+  "file": "world.bin.gz",
+  "encoding": "q-delta-rows-shuffled",
+  "quant_m": 10,
+  "step_deg": 0.25,
+  "nx": 1440,
+  "ny": 720,
+  "north": 90,
+  "west": -180,
+  "cell": "centre",
+  "polar_cap_deg": 85,
+  "tile_zoom": 4,
+  "bytes": 872536
+ },
+ "sites": [
+  {
+   "id": "mariana",
+   "north": 13.35,
+   "west": 140.366667,
+   "step_deg": 0.01666667,
+   "nx": 245,
+   "ny": 241,
+   "deepest": {
+    "lat": 11.35,
+    "lon": 142.18333,
+    "depth_m": 10822
+   },
+   "median_depth_m": 4156,
+   "ocean_fraction": 0.9999,
+   "bytes": 95629,
+   "wide": {
+    "file": "mariana.wide.bin.gz",
+    "north": 16.35,
+    "west": 137.3,
+    "step_deg": 0.03333333,
+    "nx": 307,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 156177
+   }
+  },
+  {
+   "id": "tonga",
+   "north": -21.25,
+   "west": -176.933333,
+   "step_deg": 0.01666667,
+   "nx": 263,
+   "ny": 241,
+   "deepest": {
+    "lat": -23.23333,
+    "lon": -174.75,
+    "depth_m": 10736
+   },
+   "median_depth_m": 5437,
+   "ocean_fraction": 0.9993,
+   "bytes": 105903,
+   "wide": {
+    "file": "tonga.wide.bin.gz",
+    "north": -18.25,
+    "west": -180.183333,
+    "step_deg": 0.03333333,
+    "nx": 327,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 164415
+   }
+  },
+  {
+   "id": "philippine",
+   "north": 12.3,
+   "west": 124.616667,
+   "step_deg": 0.01666667,
+   "nx": 245,
+   "ny": 241,
+   "deepest": {
+    "lat": 9.55,
+    "lon": 126.88333,
+    "depth_m": 9813
+   },
+   "median_depth_m": 5671,
+   "ocean_fraction": 0.8133,
+   "bytes": 94101,
+   "wide": {
+    "file": "philippine.wide.bin.gz",
+    "north": 15.3,
+    "west": 121.583333,
+    "step_deg": 0.03333333,
+    "nx": 305,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 149648
+   }
+  },
+  {
+   "id": "kuril",
+   "north": 46.2,
+   "west": 147.616667,
+   "step_deg": 0.01666667,
+   "nx": 335,
+   "ny": 241,
+   "deepest": {
+    "lat": 45.25,
+    "lon": 152.68333,
+    "depth_m": 9496
+   },
+   "median_depth_m": 5065,
+   "ocean_fraction": 0.9803,
+   "bytes": 128674,
+   "wide": {
+    "file": "kuril.wide.bin.gz",
+    "north": 49.2,
+    "west": 143.433333,
+    "step_deg": 0.03333333,
+    "nx": 419,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 199173
+   }
+  },
+  {
+   "id": "kermadec",
+   "north": -29.9,
+   "west": -179.65,
+   "step_deg": 0.01666667,
+   "nx": 283,
+   "ny": 241,
+   "deepest": {
+    "lat": -31.86667,
+    "lon": -177.28333,
+    "depth_m": 10000
+   },
+   "median_depth_m": 5531,
+   "ocean_fraction": 1.0,
+   "bytes": 115027,
+   "wide": {
+    "file": "kermadec.wide.bin.gz",
+    "north": -26.9,
+    "west": -183.2,
+    "step_deg": 0.03333333,
+    "nx": 355,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 177474
+   }
+  },
+  {
+   "id": "izu-bonin",
+   "north": 31.8,
+   "west": 140.4,
+   "step_deg": 0.01666667,
+   "nx": 277,
+   "ny": 241,
+   "deepest": {
+    "lat": 29.45,
+    "lon": 142.71667,
+    "depth_m": 9782
+   },
+   "median_depth_m": 5728,
+   "ocean_fraction": 1.0,
+   "bytes": 109149,
+   "wide": {
+    "file": "izu-bonin.wide.bin.gz",
+    "north": 34.8,
+    "west": 136.933333,
+    "step_deg": 0.03333333,
+    "nx": 347,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 173295
+   }
+  },
+  {
+   "id": "japan",
+   "north": 40.6,
+   "west": 141.533333,
+   "step_deg": 0.01666667,
+   "nx": 309,
+   "ny": 241,
+   "deepest": {
+    "lat": 37.43333,
+    "lon": 143.75,
+    "depth_m": 7807
+   },
+   "median_depth_m": 5258,
+   "ocean_fraction": 0.9705,
+   "bytes": 117383,
+   "wide": {
+    "file": "japan.wide.bin.gz",
+    "north": 43.6,
+    "west": 137.7,
+    "step_deg": 0.03333333,
+    "nx": 385,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 187420
+   }
+  },
+  {
+   "id": "yap",
+   "north": 10.5,
+   "west": 135.883333,
+   "step_deg": 0.01666667,
+   "nx": 243,
+   "ny": 241,
+   "deepest": {
+    "lat": 8.41667,
+    "lon": 137.91667,
+    "depth_m": 8446
+   },
+   "median_depth_m": 3895,
+   "ocean_fraction": 0.9985,
+   "bytes": 95979,
+   "wide": {
+    "file": "yap.wide.bin.gz",
+    "north": 13.5,
+    "west": 132.833333,
+    "step_deg": 0.03333333,
+    "nx": 305,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 152779
+   }
+  },
+  {
+   "id": "new-britain",
+   "north": -4.5,
+   "west": 151.483333,
+   "step_deg": 0.01666667,
+   "nx": 243,
+   "ny": 241,
+   "deepest": {
+    "lat": -6.46667,
+    "lon": 153.91667,
+    "depth_m": 8853
+   },
+   "median_depth_m": 4227,
+   "ocean_fraction": 0.9178,
+   "bytes": 98116,
+   "wide": {
+    "file": "new-britain.wide.bin.gz",
+    "north": -1.5,
+    "west": 148.466667,
+    "step_deg": 0.03333333,
+    "nx": 303,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 151301
+   }
+  },
+  {
+   "id": "ryukyu",
+   "north": 27.0,
+   "west": 126.0,
+   "step_deg": 0.01666667,
+   "nx": 265,
+   "ny": 241,
+   "deepest": {
+    "lat": 24.91667,
+    "lon": 128.1,
+    "depth_m": 7419
+   },
+   "median_depth_m": 4585,
+   "ocean_fraction": 0.9917,
+   "bytes": 104738,
+   "wide": {
+    "file": "ryukyu.wide.bin.gz",
+    "north": 30.0,
+    "west": 122.666667,
+    "step_deg": 0.03333333,
+    "nx": 333,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 154654
+   }
+  },
+  {
+   "id": "aleutian",
+   "north": 53.0,
+   "west": -181.183333,
+   "step_deg": 0.01666667,
+   "nx": 383,
+   "ny": 241,
+   "deepest": {
+    "lat": 50.41667,
+    "lon": -179.51667,
+    "depth_m": 7504
+   },
+   "median_depth_m": 4258,
+   "ocean_fraction": 0.981,
+   "bytes": 139006,
+   "wide": {
+    "file": "aleutian.wide.bin.gz",
+    "north": 56.0,
+    "west": -185.933333,
+    "step_deg": 0.03333333,
+    "nx": 477,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 211826
+   }
+  },
+  {
+   "id": "atacama",
+   "north": -21.4,
+   "west": -73.583333,
+   "step_deg": 0.01666667,
+   "nx": 263,
+   "ny": 241,
+   "deepest": {
+    "lat": -23.31667,
+    "lon": -71.33333,
+    "depth_m": 8091
+   },
+   "median_depth_m": 4223,
+   "ocean_fraction": 0.7291,
+   "bytes": 107341,
+   "wide": {
+    "file": "atacama.wide.bin.gz",
+    "north": -18.4,
+    "west": -76.833333,
+    "step_deg": 0.03333333,
+    "nx": 327,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 167920
+   }
+  },
+  {
+   "id": "middle-america",
+   "north": 16.0,
+   "west": -95.666667,
+   "step_deg": 0.01666667,
+   "nx": 249,
+   "ny": 241,
+   "deepest": {
+    "lat": 13.91667,
+    "lon": -93.5,
+    "depth_m": 6639
+   },
+   "median_depth_m": 3952,
+   "ocean_fraction": 0.8551,
+   "bytes": 89185,
+   "wide": {
+    "file": "middle-america.wide.bin.gz",
+    "north": 19.0,
+    "west": -98.766667,
+    "step_deg": 0.03333333,
+    "nx": 311,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 141556
+   }
+  },
+  {
+   "id": "puerto-rico",
+   "north": 21.8,
+   "west": -68.733333,
+   "step_deg": 0.01666667,
+   "nx": 257,
+   "ny": 241,
+   "deepest": {
+    "lat": 19.76667,
+    "lon": -66.93333,
+    "depth_m": 8491
+   },
+   "median_depth_m": 5331,
+   "ocean_fraction": 0.9405,
+   "bytes": 92982,
+   "wide": {
+    "file": "puerto-rico.wide.bin.gz",
+    "north": 24.8,
+    "west": -71.9,
+    "step_deg": 0.03333333,
+    "nx": 319,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 148197
+   }
+  },
+  {
+   "id": "south-sandwich",
+   "north": -53.8,
+   "west": -29.15,
+   "step_deg": 0.01666667,
+   "nx": 427,
+   "ny": 241,
+   "deepest": {
+    "lat": -55.65,
+    "lon": -25.93333,
+    "depth_m": 8239
+   },
+   "median_depth_m": 4419,
+   "ocean_fraction": 0.9997,
+   "bytes": 164754,
+   "wide": {
+    "file": "south-sandwich.wide.bin.gz",
+    "north": -50.8,
+    "west": -34.5,
+    "step_deg": 0.03333333,
+    "nx": 535,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 259919
+   }
+  },
+  {
+   "id": "cayman",
+   "north": 21.0,
+   "west": -82.616667,
+   "step_deg": 0.01666667,
+   "nx": 255,
+   "ny": 241,
+   "deepest": {
+    "lat": 19.18333,
+    "lon": -79.85,
+    "depth_m": 8234
+   },
+   "median_depth_m": 3137,
+   "ocean_fraction": 0.9963,
+   "bytes": 97520
+  },
+  {
+   "id": "romanche",
+   "north": 1.8,
+   "west": -20.4,
+   "step_deg": 0.01666667,
+   "nx": 241,
+   "ny": 241,
+   "deepest": {
+    "lat": -0.23333,
+    "lon": -18.55,
+    "depth_m": 7821
+   },
+   "median_depth_m": 4401,
+   "ocean_fraction": 1.0,
+   "bytes": 89592
+  },
+  {
+   "id": "java",
+   "north": -9.1,
+   "west": 112.866667,
+   "step_deg": 0.01666667,
+   "nx": 245,
+   "ny": 241,
+   "deepest": {
+    "lat": -11.18333,
+    "lon": 115.08333,
+    "depth_m": 7025
+   },
+   "median_depth_m": 4437,
+   "ocean_fraction": 1.0,
+   "bytes": 90544,
+   "wide": {
+    "file": "java.wide.bin.gz",
+    "north": -6.1,
+    "west": 109.8,
+    "step_deg": 0.03333333,
+    "nx": 307,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 143943
+   }
+  },
+  {
+   "id": "diamantina",
+   "north": -31.5,
+   "west": 99.0,
+   "step_deg": 0.01666667,
+   "nx": 289,
+   "ny": 241,
+   "deepest": {
+    "lat": -34.83333,
+    "lon": 102.56667,
+    "depth_m": 7296
+   },
+   "median_depth_m": 4474,
+   "ocean_fraction": 1.0,
+   "bytes": 108005
+  },
+  {
+   "id": "banda",
+   "north": -3.8,
+   "west": 128.983333,
+   "step_deg": 0.01666667,
+   "nx": 243,
+   "ny": 241,
+   "deepest": {
+    "lat": -5.38333,
+    "lon": 130.9,
+    "depth_m": 7355
+   },
+   "median_depth_m": 2635,
+   "ocean_fraction": 0.9638,
+   "bytes": 98476
+  },
+  {
+   "id": "sulu",
+   "north": 10.3,
+   "west": 118.583333,
+   "step_deg": 0.01666667,
+   "nx": 243,
+   "ny": 241,
+   "deepest": {
+    "lat": 7.48333,
+    "lon": 121.5,
+    "depth_m": 5033
+   },
+   "median_depth_m": 2466,
+   "ocean_fraction": 0.9437,
+   "bytes": 93048
+  },
+  {
+   "id": "hellenic",
+   "north": 38.4,
+   "west": 18.916667,
+   "step_deg": 0.01666667,
+   "nx": 299,
+   "ny": 241,
+   "deepest": {
+    "lat": 36.56667,
+    "lon": 21.11667,
+    "depth_m": 5117
+   },
+   "median_depth_m": 3017,
+   "ocean_fraction": 0.8452,
+   "bytes": 113734,
+   "wide": {
+    "file": "hellenic.wide.bin.gz",
+    "north": 41.4,
+    "west": 15.2,
+    "step_deg": 0.03333333,
+    "nx": 373,
+    "ny": 301,
+    "tile_zoom": 6,
+    "bytes": 178286
+   }
+  },
+  {
+   "id": "molloy",
+   "north": 81.1,
+   "west": -3.2,
+   "step_deg": 0.01666667,
+   "nx": 721,
+   "ny": 241,
+   "deepest": {
+    "lat": 79.15,
+    "lon": 2.78333,
+    "depth_m": 5574
+   },
+   "median_depth_m": 2525,
+   "ocean_fraction": 1.0,
+   "bytes": 214119
+  },
+  {
+   "id": "sohm",
+   "north": 38.0,
+   "west": -57.466667,
+   "step_deg": 0.01666667,
+   "nx": 297,
+   "ny": 241,
+   "deepest": {
+    "lat": 34.65,
+    "lon": -55.96667,
+    "depth_m": 5947
+   },
+   "median_depth_m": 5401,
+   "ocean_fraction": 1.0,
+   "bytes": 90322
+  },
+  {
+   "id": "argentine",
+   "north": -44.0,
+   "west": -50.883333,
+   "step_deg": 0.01666667,
+   "nx": 347,
+   "ny": 241,
+   "deepest": {
+    "lat": -48.0,
+    "lon": -50.81667,
+    "depth_m": 6544
+   },
+   "median_depth_m": 5627,
+   "ocean_fraction": 1.0,
+   "bytes": 90659
+  },
+  {
+   "id": "weddell",
+   "north": -63.0,
+   "west": -29.733333,
+   "step_deg": 0.01666667,
+   "nx": 569,
+   "ny": 241,
+   "deepest": {
+    "lat": -63.15,
+    "lon": -25.0,
+    "depth_m": 5464
+   },
+   "median_depth_m": 4922,
+   "ocean_fraction": 1.0,
+   "bytes": 108585
+  },
+  {
+   "id": "ne-pacific",
+   "north": 32.0,
+   "west": -152.316667,
+   "step_deg": 0.01666667,
+   "nx": 279,
+   "ny": 241,
+   "deepest": {
+    "lat": 29.78333,
+    "lon": -151.6,
+    "depth_m": 6639
+   },
+   "median_depth_m": 5369,
+   "ocean_fraction": 1.0,
+   "bytes": 93027
+  },
+  {
+   "id": "wharton",
+   "north": -18.0,
+   "west": 97.866667,
+   "step_deg": 0.01666667,
+   "nx": 257,
+   "ny": 241,
+   "deepest": {
+    "lat": -20.31667,
+    "lon": 100.6,
+    "depth_m": 7699
+   },
+   "median_depth_m": 5885,
+   "ocean_fraction": 1.0,
+   "bytes": 89554
+  }
+ ]
+}
